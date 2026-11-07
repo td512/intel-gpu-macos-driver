@@ -1,24 +1,25 @@
-# collect-windows.ps1: hardware inventory for the Intel GPU macOS driver project (v1).
+# collect-windows.ps1: hardware inventory for the Intel GPU macOS driver project (v2).
 #
 # Run it on Windows on the same machine (most testers dual-boot). It records the hardware, firmware
 # settings that Windows can see (Resizable BAR / Above 4G, Secure Boot), GPU drivers, monitors (EDID)
 # and a dxdiag report. Read-only; no admin needed (an admin run adds the TPM and Secure Boot details).
 # PowerShell 5.1 (built into Windows 10/11); no modules to install.
 #
-#   powershell -ExecutionPolicy Bypass -File collect-windows.ps1 [-OutDir <folder>]
+#   powershell -ExecutionPolicy Bypass -File collect-windows.ps1 [-OutDir <folder>] [-Acpi]
 #
 # Writes xe-report-XR-xxxxxxxx.zip in the current folder (or -OutDir). Serial numbers, UUIDs, MAC
-# addresses, user and computer names and Wi-Fi network names are removed. It never reads ACPI tables
-# or anything about the Windows product key, and it stops without a file if the output contains
-# anything shaped like a product key.
+# addresses, user and computer names and Wi-Fi network names are removed. It reads nothing about the
+# Windows product key, and it stops without a file if the output contains anything shaped like one.
+# ACPI tables only with -Acpi, and then only the DSDT and the first SSDT (all Windows hands out without a
+# driver); never MSDM or SLIC (the Windows licence) or WPBT (an OEM program for Windows).
 
-param([string]$OutDir = (Get-Location).Path)
+param([string]$OutDir = (Get-Location).Path, [switch]$Acpi)
 
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
-$CollectorVersion = 1
+$CollectorVersion = 2
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$Budget = 60
+$Budget = 90
 
 function Left { [int]($Budget - $sw.Elapsed.TotalSeconds) }
 
@@ -137,6 +138,32 @@ Section 'gpu\video-controllers.txt' {
         AdapterRAM, CurrentHorizontalResolution, CurrentVerticalResolution, CurrentRefreshRate, Status | Format-List
 }
 $gpuSummary = New-Object System.Collections.ArrayList
+# The ranges Windows assigned (Enum\<device>\Control AllocConfig, a REG_RESOURCE_LIST): WMI's Win32_DeviceMemoryAddress
+# lists only ranges below 4 GB, so it never showed a resized VRAM BAR (a B580's 16 GB at 0x4000000000 was missing and
+# the summary said "no Resizable BAR"). Descriptors are 20 bytes on x64; type 7 is a large memory range, its length
+# shifted by 8, 16 or 32 bits (flags 0x200/0x400/0x800). Read with reg.exe (Get-ItemProperty does not return this type).
+function Get-AllocRanges([string]$instanceId) {
+    $q = & reg.exe query "HKLM\SYSTEM\CurrentControlSet\Enum\$instanceId\Control" /v AllocConfig 2>$null
+    $line = $q | Where-Object { $_ -match 'REG_RESOURCE_LIST\s+([0-9A-Fa-f]+)' } | Select-Object -First 1
+    if (-not $line -or $line -notmatch 'REG_RESOURCE_LIST\s+([0-9A-Fa-f]+)') { return $null }
+    $hex = $Matches[1]; $v = New-Object byte[] ($hex.Length / 2)
+    for ($i = 0; $i -lt $v.Length; $i++) { $v[$i] = [Convert]::ToByte($hex.Substring(2 * $i, 2), 16) }
+    $out = @(); $o = 4
+    $nfull = [BitConverter]::ToUInt32($v, 0)
+    for ($f = 0; $f -lt $nfull -and $o + 16 -le $v.Length; $f++) {
+        $o += 8; $cnt = [BitConverter]::ToUInt32($v, $o + 4); $o += 8
+        for ($i = 0; $i -lt $cnt -and $o + 20 -le $v.Length; $i++) {
+            $t = $v[$o]; $fl = [BitConverter]::ToUInt16($v, $o + 2)
+            if ($t -eq 3 -or $t -eq 7) {
+                $st = [BitConverter]::ToUInt64($v, $o + 4); $ln = [uint64][BitConverter]::ToUInt32($v, $o + 12)
+                if ($t -eq 7) { if ($fl -band 0x200) { $ln = $ln * 256 } elseif ($fl -band 0x400) { $ln = $ln * 65536 } elseif ($fl -band 0x800) { $ln = $ln * 4294967296 } }
+                $out += [pscustomobject]@{ Start = $st; Size = $ln }
+            }
+            $o += 20
+        }
+    }
+    return ,$out
+}
 Section 'gpu\pnp-display.txt' {
     $devs = @(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue)
     foreach ($dev in $devs) {
@@ -151,7 +178,13 @@ Section 'gpu\pnp-display.txt' {
         }
         # memory ranges = BARs; one larger than 256 MB, or one above 4 GB, means Resizable BAR / Above 4G decoding is on
         $bars = @(); $bars4g = @()
-        try {
+        $alloc = Get-AllocRanges $dev.InstanceId
+        if ($alloc) {
+            foreach ($m in $alloc) {
+                "memory range: 0x{0:X} - 0x{1:X} ({2} MB, assigned)" -f $m.Start, ($m.Start + $m.Size - 1), [math]::Round($m.Size / 1MB)
+                $bars += $m.Size; $bars4g += ($m.Start -ge 4GB)
+            }
+        } else { try {
             $ent = Get-CimInstance Win32_PnPEntity -Filter ("DeviceID='" + ($dev.InstanceId -replace '\\', '\\') + "'") -ErrorAction Stop
             $mem = @(Get-CimAssociatedInstance -InputObject $ent -ResultClassName Win32_DeviceMemoryAddress -ErrorAction Stop)
             foreach ($m in $mem) {
@@ -160,7 +193,7 @@ Section 'gpu\pnp-display.txt' {
                 $bars += $size
                 $bars4g += ([uint64]$m.StartingAddress -ge 4GB)
             }
-        } catch { "memory ranges: $($_.Exception.Message)" }
+        } catch { "memory ranges: $($_.Exception.Message)" } }
         $hw = ''
         if ($dev.InstanceId -match 'VEN_([0-9A-F]{4})&DEV_([0-9A-F]{4})&SUBSYS_([0-9A-F]{8})&REV_([0-9A-F]{2})') {
             $hw = "{0}:{1} sub {2}:{3} rev {4}" -f $Matches[1], $Matches[2], $Matches[3].Substring(4, 4), $Matches[3].Substring(0, 4), $Matches[4]
@@ -256,6 +289,37 @@ try {
     } elseif ($p.HasExited) { Skip 'dxdiag /t: wrote no file' }
 } catch { Skip "dxdiag /t: $($_.Exception.Message)" }
 
+# ------------------------------------------------------------ ACPI (-Acpi)
+# GetSystemFirmwareTable: no admin, no driver. It returns the first table of a signature, so of several SSDTs only
+# the first; the full list of signatures is recorded. Binary (.bin): redaction leaves it alone, the final check reads it.
+$acpiNote = 'not asked for (-Acpi)'
+if ($Acpi) {
+    Note 'acpi'
+    try {
+        Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class XeFw {
+  [DllImport("kernel32.dll")] public static extern uint EnumSystemFirmwareTables(uint p, byte[] b, uint n);
+  [DllImport("kernel32.dll")] public static extern uint GetSystemFirmwareTable(uint p, uint id, byte[] b, uint n);
+}
+"@
+        $prov = 0x41435049   # 'ACPI'
+        $n = [XeFw]::EnumSystemFirmwareTables($prov, $null, 0); $buf = New-Object byte[] $n; [void][XeFw]::EnumSystemFirmwareTables($prov, $buf, $n)
+        $sigs = for ($i = 0; $i + 4 -le $n; $i += 4) { [Text.Encoding]::ASCII.GetString($buf, $i, 4) }
+        $ad = Join-Path $W 'acpi'; New-Item -ItemType Directory -Force -Path $ad | Out-Null
+        Set-Content -Path (Join-Path $ad 'table-names.txt') -Value (($sigs | Where-Object { $_ -notin 'MSDM', 'SLIC', 'WPBT' }) -join "`r`n") -Encoding ASCII
+        $got = @()
+        foreach ($t in 'DSDT', 'SSDT') {   # the DSDT is not in the list (the FADT points to it), but Windows returns it
+            if ($t -eq 'SSDT' -and $sigs -notcontains $t) { continue }
+            $tid = [BitConverter]::ToUInt32([Text.Encoding]::ASCII.GetBytes($t), 0)
+            $sz = [XeFw]::GetSystemFirmwareTable($prov, $tid, $null, 0)
+            if ($sz -gt 0) { $tb = New-Object byte[] $sz; [void][XeFw]::GetSystemFirmwareTable($prov, $tid, $tb, $sz); [IO.File]::WriteAllBytes((Join-Path $ad "$t.bin"), $tb); $got += "$t $sz bytes" }
+        }
+        $nssdt = @($sigs | Where-Object { $_ -eq 'SSDT' }).Count
+        $acpiNote = "$($got -join ', ') (Windows hands out only the first of $nssdt SSDTs; Linux --acpi has all)"
+    } catch { Skip "ACPI tables: $($_.Exception.Message)"; $acpiNote = 'failed' }
+}
+
 # ------------------------------------------------------------ summary
 Note 'summary'
 $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
@@ -283,22 +347,25 @@ if ($gpuSummary.Count) { foreach ($g in $gpuSummary) { [void]$S.Add("  $g") } } 
 [void]$S.Add('Monitors connected now')
 if ($monSummary.Count) { foreach ($m in $monSummary) { [void]$S.Add("  $m") } } else { [void]$S.Add('  no EDID found in the registry') }
 [void]$S.Add('')
+[void]$S.Add("ACPI tables  $acpiNote")
+[void]$S.Add('')
 [void]$S.Add('Note: Windows cannot show the "Above 4G decoding" BIOS switch directly. A GPU memory range above')
 [void]$S.Add('4 GB or larger than 256 MB (see gpu\pnp-display.txt) means it is on and Resizable BAR is active.')
 if ($Skipped.Count) {
     [void]$S.Add('')
     [void]$S.Add('Not collected')
-    foreach ($s in $Skipped) { [void]$S.Add("  - $s") }
+    foreach ($sk in $Skipped) { [void]$S.Add("  - $sk") }
 }
 [void]$S.Add('')
 [void]$S.Add('Removed before packing: serial numbers, UUIDs, machine GUID, MAC addresses, user and computer names,')
-[void]$S.Add('Wi-Fi network names, monitor serial numbers (EDID). ACPI tables and product keys are never read.')
+[void]$S.Add('Wi-Fi network names, monitor serial numbers (EDID). Product keys are never read; ACPI tables only with -Acpi')
+[void]$S.Add('(DSDT and the first SSDT; never MSDM, SLIC or WPBT).')
 Set-Content -Path (Join-Path $W 'summary.txt') -Value $S -Encoding UTF8
 
 # ------------------------------------------------------------ redaction and checks
 Note 'redaction'
 $lits = $Literals | Sort-Object { $_.Value.Length } -Descending
-$files = Get-ChildItem -Path $W -Recurse -File
+$files = Get-ChildItem -Path $W -Recurse -File | Where-Object { $_.Extension -ne '.bin' }   # binary tables stay intact
 foreach ($f in $files) {
     $t = [System.IO.File]::ReadAllText($f.FullName)
     foreach ($l in $lits) { $t = $t -replace [regex]::Escape($l.Value), "<$($l.Kind)-redacted>" }
@@ -309,7 +376,8 @@ foreach ($f in $files) {
 }
 $fail = $false
 foreach ($f in (Get-ChildItem -Path $W -Recurse -File)) {
-    $t = [System.IO.File]::ReadAllText($f.FullName)
+    # binary files as Latin-1, byte for byte, so a value or key in them is still found
+    $t = if ($f.Extension -eq '.bin') { [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($f.FullName)) } else { [System.IO.File]::ReadAllText($f.FullName) }
     foreach ($l in $lits) {
         if ($t.IndexOf($l.Value, [StringComparison]::OrdinalIgnoreCase) -ge 0) { Write-Warning "privacy check: a $($l.Kind) value is still present in $($f.Name)"; $fail = $true }
     }

@@ -14,6 +14,8 @@
 #   --no-mount   do not try to mount an unmounted EFI partition (read-only) to read config.plist
 #   --sudo-mount mount the EFI partition the machine booted from with sudo (read-only), if sudo needs no password
 #   --probe      also collect the staged-probe results (XeProbe) and the previous boot's NVRAM breadcrumb
+#   --acpi       also the DSDT and SSDT tables as macOS sees them (after OpenCore's patches and added SSDTs), from the
+#                I/O Registry; never MSDM or SLIC (the Windows licence)
 #   --out DIR    where to write the archive (default: the current directory)
 
 COLLECTOR_VERSION=3
@@ -31,6 +33,7 @@ TESTS=0
 MOUNT=1
 SUDOMOUNT=0
 PROBE=0
+ACPI=0
 OUTDIR=$(pwd)
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -40,9 +43,10 @@ while [ $# -gt 0 ]; do
 	--no-mount) MOUNT=0 ;;
 	--sudo-mount) SUDOMOUNT=1 ;;
 	--probe) PROBE=1 ;;
+	--acpi) ACPI=1 ;;
 	--out) OUTDIR=$2; shift ;;
 	--out=*) OUTDIR=${1#--out=} ;;
-	-h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
 	esac
 	shift
@@ -142,7 +146,7 @@ say "Intel GPU macOS driver: collecting diagnostics ($ID), about a minute..."
 	echo "collector: collect-macos.sh v$COLLECTOR_VERSION"
 	echo "report id: $ID"
 	echo "started: $(date '+%Y-%m-%d %H:%M:%S %z')"
-	echo "options: days=$DAYS tests=$TESTS mount=$MOUNT sudo-mount=$SUDOMOUNT probe=$PROBE"
+	echo "options: days=$DAYS tests=$TESTS mount=$MOUNT sudo-mount=$SUDOMOUNT probe=$PROBE acpi=$ACPI"
 	echo "uid: $(id -u)"
 	echo
 } > "$LOG"
@@ -857,6 +861,33 @@ if [ "$PROBE" = 1 ]; then
 		skip "XeProbe is not attached this boot (boot-arg xeprobe=0xDEVICE and a probe build of IntelXe.kext)"
 fi
 
+# ---------------------------------------------------------------- ACPI tables (--acpi)
+# AppleACPIPlatformExpert keeps every table macOS loaded in its "ACPI Tables" property: the firmware's, as OpenCore
+# patched them, plus the SSDTs OpenCore added. No root needed. Only DSDT and SSDT*; .bin files, which the text redaction
+# leaves intact and the final privacy check still reads.
+if [ "$ACPI" = 1 ]; then
+	note "acpi"
+	mkdir -p "$W/acpi"
+	run_to 10 ioreg -lw0 -p IOService -r -n AppleACPIPlatformExpert -d1 2>/dev/null |
+		awk -v D="$W/acpi" '/"ACPI Tables" = \{/ {
+			s = $0; sub(/.*"ACPI Tables" = \{/, "", s)
+			while (match(s, /"[A-Za-z0-9_-]+"=<[0-9a-fA-F]*>/)) {
+				e = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+				k = e; sub(/^"/, "", k); sub(/".*/, "", k)
+				print k >> (D "/table-names.txt")
+				if (k !~ /^(DSDT|SSDT)/) continue
+				h = e; sub(/^[^<]*</, "", h); sub(/>$/, "", h)
+				print h > (D "/" k ".hex"); close(D "/" k ".hex")
+			}
+			exit }'
+	for h in "$W"/acpi/*.hex; do
+		[ -f "$h" ] || continue
+		xxd -r -p "$h" > "${h%.hex}.bin" 2>/dev/null && rm -f "$h"
+	done
+	grep -vE '^(MSDM|SLIC)$' "$W/acpi/table-names.txt" > "$W/acpi/.n" 2>/dev/null; mv "$W/acpi/.n" "$W/acpi/table-names.txt" 2>/dev/null
+	ls "$W"/acpi/*.bin >/dev/null 2>&1 || skip "--acpi: no ACPI tables in the I/O Registry (AppleACPIPlatformExpert)"
+fi
+
 # ---------------------------------------------------------------- optional self-tests
 if [ "$TESTS" = 1 ]; then
 	note "tests"
@@ -1004,6 +1035,7 @@ inst() { grep -A2 "^$1\$" "$W/driver/installed.txt" 2>/dev/null | grep -E '^  [0
 		printf '    %s: %s\n' "$(basename "$p" .txt)" "$(grep -m1 -E 'panic\(' "$p" | cut -c1-150)"
 	done
 	echo "  crash/hang reports involving the stack, last $DAYS days: $NCRASH (GPU restarts: $NGPURESET)"
+	[ "$ACPI" = 1 ] && echo "  ACPI tables collected (--acpi): $(ls "$W"/acpi/*.bin 2>/dev/null | sed 's#.*/##; s#\.bin$##' | tr '\n' ' ')"
 	[ -f "$W/logs/counts.txt" ] && sed 's/^/  /' "$W/logs/counts.txt"
 	if [ -s "$TMPBASE/.skipped" ]; then
 		echo

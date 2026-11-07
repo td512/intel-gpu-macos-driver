@@ -32,6 +32,8 @@ with nothing moving, and recent kernel panics. The options are:
 - `--tests`: also run our quick GPU self-tests (`vk_smoke`, `mtl_tests`) if they are installed (off by default);
 - `--no-mount`: do not try to mount an EFI partition to read the OpenCore config;
 - `--sudo-mount`: if `sudo` works without a password, mount EFI partitions read-only as root and unmount them again. With a known boot partition, only that one is mounted; otherwise every EFI partition a user could not mount;
+- `--acpi`: also the DSDT and SSDT tables as macOS sees them, after OpenCore's patches and with the SSDTs it adds
+  (from the I/O Registry, no root needed). Never the MSDM or SLIC table;
 - `--probe`: also collect the results of the staged probe (`XeProbe`, see `docs/PROBE-MODE.md`) and the NVRAM breadcrumb the previous boot left;
 - `--out DIR`: write the file somewhere else.
 
@@ -98,11 +100,16 @@ Open PowerShell in the folder that holds the script and run:
 powershell -ExecutionPolicy Bypass -File collect-windows.ps1
 ```
 
+Add `-Acpi` to include the DSDT and the first SSDT (Windows hands out no more without a driver; the Linux report has
+them all).
+
 `-ExecutionPolicy Bypass` applies to this one run only; it does not change your system's policy. The script needs no administrator rights. Run it as administrator only if you want the TPM details too. It writes `xe-report-XR-….zip` in the current folder.
 
 It records:
 - Windows, the machine and its board, the BIOS version and date, and the CPU;
-- the GPUs with their hardware IDs, driver versions and memory ranges. From the memory ranges it tells whether Resizable BAR and Above 4G decoding are active;
+- the GPUs with their hardware IDs, driver versions and the memory ranges Windows assigned them (from the device's
+  resource list: WMI lists only ranges below 4 GB and so hides a resized VRAM BAR). From them it tells whether
+  Resizable BAR and Above 4G decoding are active;
 - the monitors (EDID);
 - Secure Boot and the TPM;
 - the disk and network adapter models;
@@ -159,9 +166,9 @@ Before the archive is written, every script removes:
 The scripts first read these values from your own machine, then remove each one from every file. Before packing, they search the output once more. If any value is still there, or anything shaped like a Windows product key, they stop without writing a file and tell you.
 
 **Never collected:**
-- ACPI tables, unless you ask for them on Linux with `--acpi`, and then only the DSDT and SSDTs: never the MSDM or SLIC
-  table, which carry your Windows product key, and never a file in an EFI `ACPI` folder (on macOS only their names are
-  listed). The final privacy check reads the collected tables too.
+- ACPI tables, unless you ask for them (`--acpi` on Linux and macOS, `-Acpi` on Windows), and then only the DSDT and
+  SSDTs: never the MSDM or SLIC table, which carry your Windows product key, nor Windows' WPBT, and never a file in an
+  EFI `ACPI` folder (on macOS only their names are listed). The final privacy check reads the collected tables too.
 - The Windows product key and licensing data.
 - Screen contents.
 - Wi-Fi passwords.
