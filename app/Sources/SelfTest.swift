@@ -149,6 +149,7 @@ func selfTest() {
     expect(EFIPlan(text: "EFI: x\nnothing to change\nnote     y\n").changes == false && EFIPlan(text: "EFI: x\ncopy     z\n").changes, "a plan with and without changes")
     expect(Bundle.main.url(forResource: "efi", withExtension: "sh") != nil, "the app carries efi.sh for packages made before it")
     expect(Bundle.main.url(forResource: "hidpi", withExtension: "sh") != nil, "the app carries hidpi.sh for packages made before it")
+    expect(Bundle.main.url(forResource: "collect-macos", withExtension: "sh") != nil, "the app carries the diagnostics report script")
     let hOn = HiDPIStatus(text: "hidpi_supported=1\nhidpi_nvram=1\nhidpi_override=ours\nhidpi_active=1\ndisplay=4c2d:750c\n")
     let hPending = HiDPIStatus(text: "hidpi_supported=1\nhidpi_nvram=1\nhidpi_override=ours\nhidpi_active=0\n")
     let hOther = HiDPIStatus(text: "hidpi_supported=1\nhidpi_nvram=0\nhidpi_override=other\nhidpi_active=0\n")

@@ -15,6 +15,7 @@ final class Manager: ObservableObject {
     @Published var busy: String?
     @Published var log = ""
     @Published var lastResult: String?
+    @Published var reportID: String?
     @Published var rebootNeeded = false
     @Published var efiNotice: EFINotice?
     @Published var efi = EFIStatus()
@@ -253,6 +254,28 @@ final class Manager: ObservableObject {
         })
     }
 
+    /// tools/report/collect-macos.sh, carried in the app: a diagnostics archive on the Desktop, revealed in the Finder.
+    /// It only reads (no password); the report ID it prints goes into the bug form.
+    func createReport() {
+        guard let script = Bundle.main.url(forResource: "collect-macos", withExtension: "sh") else { return }
+        let desktop = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+        let start = log.count
+        perform(title: String(localized: "Create a diagnostics report"),
+                command: "/bin/sh \(shellQuoted(script.path)) --out \(shellQuoted(desktop.path))", needsRoot: false, then: { result in
+            let text = String(self.log.dropFirst(start))
+            let field = { (name: String) in
+                text.split(separator: "\n").first { $0.hasPrefix(name) }.map { $0.dropFirst(name.count).trimmingCharacters(in: .whitespaces) }
+            }
+            if result.succeeded, let id = field("Report ID:"), let file = field("File:") {
+                self.reportID = id
+                self.lastResult = String(localized: "Report \(id) is on the Desktop. Attach it to a new issue and put the ID in the form.")
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
+            } else {
+                self.lastResult = String(localized: "No report was written. See the log.")
+            }
+        })
+    }
+
     func clearBootGuard() {
         perform(title: String(localized: "Clear the boot guard"), command: "/usr/sbin/nvram intelxe-accel-off=ok", needsRoot: true, then: { result in
             self.lastResult = result.succeeded ? String(localized: "Cleared. It takes effect at the next boot.") : String(localized: "It did not finish. See the log.")
@@ -425,6 +448,17 @@ struct SystemView: View {
             }
             if manager.facts.bootGuardOff {
                 Button("Clear the boot guard") { manager.clearBootGuard() }
+            }
+            Section2(title: "Report a problem") {
+                Text("Something broken? A diagnostics report collects what we need: hardware, driver state, logs and panics. It changes nothing, uploads nothing and removes serial numbers and names. It takes about a minute.")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Button("Create a diagnostics report") { manager.createReport() }
+                    Link("Open the bug form", destination: URL(string: "https://github.com/\(repository)/issues/new?template=1-bug.yml")!)
+                }
+                if let id = manager.reportID {
+                    LabeledContent("Last report") { Text(id).textSelection(.enabled) }
+                }
             }
             Section2(title: "Driver") {
                 LabeledContent("Installed") { Text(installedText) }

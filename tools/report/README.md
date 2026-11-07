@@ -14,13 +14,20 @@ For a bug, the macOS report is required. The Linux and Windows reports are optio
 
 ## macOS
 
-Open Terminal in the folder that holds the script and run:
+The easiest way: **IntelXe Manager > System > Create a diagnostics report**. It runs the same script, puts the file on
+your Desktop and shows it in the Finder; **Open the bug form** opens the issue form.
+
+Or open Terminal in the folder that holds the script and run:
 
 ```sh
 sh collect-macos.sh
 ```
 
-At the end it prints the report ID and the file's path. The options are:
+At the end it prints the report ID and the file's path. The first section of `summary.txt`, **Warnings**, lists the
+known problems the script recognised on your machine, each with what to do: acceleration held off by the boot guard,
+a system-volume copy of the Metal plugin older than the rest of the install, a half-done HiDPI switch, a kext whose
+loaded version differs from the installed file, a hybrid Intel CPU without HybridPM, the display redrawing at full rate
+with nothing moving, and recent kernel panics. The options are:
 - `--days N`: include panic and crash reports from the last N days (default 7);
 - `--tests`: also run our quick GPU self-tests (`vk_smoke`, `mtl_tests`) if they are installed (off by default);
 - `--no-mount`: do not try to mount an EFI partition to read the OpenCore config;
@@ -61,7 +68,14 @@ Our kernel driver follows Linux's `xe` and `i915` drivers. When something differ
    It also runs without `sudo`, but then it misses the debugfs state, the full PCI capability list (which holds Resizable BAR) and, on some systems, the kernel log.
 3. Copy the resulting `xe-report-XR-….tar.gz` to a USB stick or to your macOS/Windows disk before you reboot. A live system forgets everything.
 
-Optional extras, used if they are installed: `vulkaninfo` (package `vulkan-tools`), `glxinfo` (`mesa-utils`), and `intel_reg` (`intel-gpu-tools`, for a register dump).
+Optional extras, used if they are installed: `vulkaninfo` (package `vulkan-tools`), `glxinfo` (`mesa-utils`), `clinfo`
+(the OpenCL platforms: Mesa's rusticl and Intel's compute runtime), and `intel_reg` (`intel-gpu-tools`, for a register
+dump).
+
+`--bench` also runs `clbench` (`tools/clbench/`: the same OpenCL kernels we time on macOS and Windows) on every OpenCL
+platform that has the card, about a minute each. Put `clbench-linux`, or `clbench.c` and a C compiler, next to the
+script. With both rusticl (Mesa's compiler, the one the macOS driver uses) and Intel's runtime (Intel's compiler, as on
+Windows) installed, this compares the two compilers on the same card and kernel driver.
 
 ## Windows
 
@@ -88,6 +102,12 @@ It records:
 - every PCI device's IDs. For GPUs, also the BAR sizes and the PCIe path to the root port. A discrete Arc card sits behind its own PCIe switch, whose downstream port and GPU function always report Gen1 x1, so the summary gives the link into the root port (in `gpu/pcie-links.txt`, each hop in the path);
 - framebuffer and display properties from the I/O Registry, the EDIDs, and `system_profiler SPDisplaysDataType` (Metal devices);
 - loaded kexts: ours, Lilu, WhateverGreen and WhateverXe, plus the other graphics kexts;
+- the stack's state (`driver/stack.txt`): which Metal plugin the accelerator names and the copies installed (the
+  system-volume copy, the `/Library` copy, `NVMTLDriver.use-library`, the system-volume record), the boot guard and the
+  driver's NVRAM keys, the HiDPI switch (NVRAM flag, display override, `DisplayResolutionEnabled`), the installed
+  package and IntelXe Manager versions, Zink GL, the CPU power-management kexts (HybridPM, CpuTopologyRebuild), and
+  how many frames the display presented while the report ran; with root, the CPU clock from `powermetrics`;
+- the Metal plugin's own log, where a test build writes one (`/tmp/nvmtl.log`, the last 3000 lines);
 - our driver state: `debug.intelxe.*`, `debug.intelxefb_*` and `debug.nmxaccel*`. Only read-only values are read: never a screen capture (`intelxefb_thumb`/`crop`), register peeks or batch dumps. If the kernel has `debug.intelxe.dump`, that one call replaces the list;
 - the version and SHA-256 of each installed piece: kexts, NVMTLDriver.bundle, Mesa, the Vulkan loader and the VideoToolbox codecs;
 - `vulkaninfo --summary`, if installed;
@@ -105,7 +125,9 @@ It records:
 - kernel log lines about xe/i915/drm/GuC/HuC/DMC;
 - with root, selected debugfs files: device info, GuC/HuC info and log, frequency, engines, topology, workarounds, display info, DMC, the VBT, and per-connector DPCD/PSR/DSC state;
 - connectors with their status, modes and EDIDs;
-- `vulkaninfo --summary` / `glxinfo -B`, and `intel_reg dump` if installed.
+- `vulkaninfo --summary` / `glxinfo -B`, `clinfo`, and `intel_reg dump` if installed;
+- the GT clock limits and the current clock from sysfs;
+- with `--bench`, the `clbench` results on each OpenCL platform.
 
 Each archive also holds `summary.txt`, a one-page overview to read first, and `manifest.txt` with the SHA-256 of every file.
 

@@ -172,3 +172,12 @@
 "Not found" = "Bulunamadı";
 "On after a restart" = "Yeniden başlatınca açık";
 "Off after a restart" = "Yeniden başlatınca kapalı";
+
+/* diagnostics report (System page) */
+"Report a problem" = "Sorun bildir";
+"Something broken? A diagnostics report collects what we need: hardware, driver state, logs and panics. It changes nothing, uploads nothing and removes serial numbers and names. It takes about a minute." = "Bir şey bozuk mu? Tanılama raporu ihtiyacımız olanı toplar: donanım, sürücü durumu, günlükler ve çökme (panik) kayıtları. Hiçbir şeyi değiştirmez, hiçbir şey yüklemez; seri numaralarını ve adları siler. Yaklaşık bir dakika sürer.";
+"Create a diagnostics report" = "Tanılama raporu oluştur";
+"Open the bug form" = "Hata formunu aç";
+"Last report" = "Son rapor";
+"Report %@ is on the Desktop. Attach it to a new issue and put the ID in the form." = "%@ raporu Masaüstünde. Yeni bir hata kaydına ekleyin ve rapor numarasını forma yazın.";
+"No report was written. See the log." = "Rapor yazılmadı. Günlüğe bakın.";

@@ -12,7 +12,7 @@
 #
 #   sh collect-linux.sh [--out DIR]          (recommended: sudo sh collect-linux.sh)
 
-COLLECTOR_VERSION=1
+COLLECTOR_VERSION=2
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 LC_ALL=C
@@ -20,10 +20,12 @@ export LC_ALL
 umask 077
 
 OUTDIR=$(pwd)
+BENCH=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--out) OUTDIR=$2; shift ;;
 	--out=*) OUTDIR=${1#--out=} ;;
+	--bench) BENCH=1 ;;
 	-h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
 	esac
@@ -34,6 +36,7 @@ OUTDIR=$(cd "$OUTDIR" && pwd)
 
 START=$(date +%s)
 DEADLINE=$((START + 60))
+[ "$BENCH" = 1 ] && DEADLINE=$((START + 300))
 ID="XR-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n' | tr 'a-f' 'A-F')"
 NAME="xe-report-$ID"
 TMPBASE=$(mktemp -d "${TMPDIR:-/tmp}/xe-report.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
@@ -314,6 +317,40 @@ note "userspace"
 if have vulkaninfo; then cmd "$W/driver/vulkaninfo-summary.txt" 20 vulkaninfo --summary
 else skip "vulkaninfo --summary: vulkan-tools is not installed (optional)"; fi
 have glxinfo && cmd "$W/driver/glxinfo-B.txt" 10 glxinfo -B
+# OpenCL: Linux can run two on the same card, Mesa's rusticl (Mesa's compiler, the one the macOS driver uses) and
+# Intel's compute runtime (Intel's IGC, as on Windows). Which are installed, and their versions.
+if have clinfo; then
+	cmd "$W/driver/clinfo.txt" 15 clinfo -l
+	RUSTICL_ENABLE=iris cmd "$W/driver/clinfo.txt" 20 sh -c "clinfo 2>/dev/null | grep -E '^  (Platform Name|Platform Version)|^  Device (Name|Version)|^  Driver Version|^  Max compute units|^  Max clock frequency'"
+else
+	skip "clinfo: not installed (optional; package clinfo)"
+fi
+# GT frequencies as xe reports them (read-only sysfs, no root): the limits and the current/actual clock at rest.
+for g in /sys/class/drm/card*/device/tile*/gt*/freq*; do
+	[ -d "$g" ] || continue
+	for k in act_freq cur_freq min_freq max_freq rp0_freq rpe_freq rpa_freq rpn_freq throttle/status; do
+		[ -r "$g/$k" ] && printf '%s/%s = %s\n' "${g#/sys/class/drm/}" "$k" "$(cat "$g/$k" 2>/dev/null)"
+	done >> "$W/driver/gt-freq.txt"
+done
+# --bench: tools/clbench (the same OpenCL kernels as on macOS and Windows) on every OpenCL platform that has the card.
+if [ "$BENCH" = 1 ]; then
+	SD="$(cd "$(dirname "$0")" && pwd)"; CB="$SD/clbench-linux"
+	if [ ! -x "$CB" ] && [ -f "$SD/clbench.c" ] && have cc; then   # build it here: one C file, OpenCL loaded at run time
+		cc -O2 -o "$TMPBASE/clbench-linux" "$SD/clbench.c" -ldl -lm >/dev/null 2>&1 && CB="$TMPBASE/clbench-linux"
+	fi
+	if [ -x "$CB" ]; then
+		mkdir -p "$W/bench"
+		n=$(clinfo -l 2>/dev/null | grep -c '^Platform')
+		i=0
+		while [ "$i" -lt "${n:-1}" ]; do
+			( cd "$W/bench" && RUSTICL_ENABLE=iris CLBENCH_PLATFORM=$i run_to 90 "$CB" ) > "$W/bench/clbench-platform$i.txt" 2>&1
+			i=$((i + 1))
+		done
+		rm -f "$W/bench"/clbench-*.bin
+	else
+		skip "--bench: no clbench-linux next to this script, and no clbench.c and C compiler to build it"
+	fi
+fi
 
 # ---------------------------------------------------------------- summary
 note "summary"
@@ -351,6 +388,22 @@ fwline() { # GuC/HuC/DMC versions as the kernel reported them
 		echo "Vulkan"
 		grep -E 'deviceName|driverName|driverInfo|apiVersion|conformanceVersion' "$W/driver/vulkaninfo-summary.txt" | sed 's/^[[:space:]]*/  /' | head -n 12
 	fi
+	if [ -s "$W/driver/clinfo.txt" ]; then
+		echo
+		echo "OpenCL"
+		grep -E '^Platform|Device #' "$W/driver/clinfo.txt" | sed 's/^/  /' | head -n 8
+	fi
+	if [ -s "$W/driver/gt-freq.txt" ]; then
+		echo
+		echo "GT clock (MHz)"
+		grep -E '/(act_freq|min_freq|max_freq|rp0_freq) ' "$W/driver/gt-freq.txt" | sed 's/^/  /' | head -n 8
+	fi
+	for b in "$W"/bench/clbench-platform*.txt; do
+		[ -f "$b" ] || continue
+		echo
+		echo "clbench ($(basename "$b" .txt))"
+		grep -E '^== clbench|GFLOP|GB/s|^conv|^dw|^blur|^hist|^tiny|^scale' "$b" | sed 's/^/  /'
+	done
 	echo
 	echo "Collected: $(find "$W/debugfs" -type f ! -name list.txt 2>/dev/null | wc -l | tr -d ' ') debugfs files, $(ls "$W"/display/edid-*.hex 2>/dev/null | wc -l | tr -d ' ') EDID(s), $(grep -c . "$W/logs/dmesg-gpu.txt" 2>/dev/null || echo 0) kernel log lines"
 	[ -n "$(ls "$W"/debugfs/*i915_vbt.bin 2>/dev/null)" ] && echo "VBT: included (debugfs i915_vbt)"

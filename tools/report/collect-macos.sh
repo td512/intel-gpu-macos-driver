@@ -16,7 +16,7 @@
 #   --probe      also collect the staged-probe results (XeProbe) and the previous boot's NVRAM breadcrumb
 #   --out DIR    where to write the archive (default: the current directory)
 
-COLLECTOR_VERSION=2
+COLLECTOR_VERSION=3
 PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin
 export PATH
 LC_ALL=C
@@ -366,7 +366,7 @@ F="$W/driver/kexts-loaded.txt"
 run_to 10 kmutil showloaded --list-only > "$TMPBASE/.kexts" 2>/dev/null
 {
 	echo "# ours, Lilu and its plugins"
-	grep -iE 'intelxe|nullmoth|nmx|lilu|whatevergreen|whateverxe|hybridpm' "$TMPBASE/.kexts"
+	grep -iE 'intelxe|nullmoth|nmx|lilu|whatevergreen|whateverxe|hybridpm|cputopology|cpufriend|virtualsmc|smcprocessor' "$TMPBASE/.kexts"
 	echo
 	echo "# graphics kexts"
 	grep -iE 'graphics|framebuffer|accelerat|gpu|iondrv|amdradeon|nvda|geforce|paravirt' "$TMPBASE/.kexts" | grep -viE 'intelxe|nmx'
@@ -443,7 +443,13 @@ file_info() {
 for k in IntelXe IntelXeFB NMXAccel NMXAGDC Lilu WhateverGreen WhateverXe; do
 	bundle_info "/Library/Extensions/$k.kext"
 done
-bundle_info /Library/GPUBundles/NVMTLDriver.bundle
+# the Metal plugin: the system-volume copy (system-volume/ssv-install.sh), the /Library copy (install.sh) and the name
+# installs before 0.1.2 used
+for b in /System/Library/Extensions/NVMTLDriver.bundle /Library/GPUBundles/NVMTLDriverLib.bundle /Library/GPUBundles/NVMTLDriver.bundle; do
+	bundle_info "$b"
+	for f in "$b/Contents/MacOS/libnvmtl_translate.dylib" "$b/Contents/Frameworks/nvmtl/libvulkan_intel.dylib"; do file_info "$f"; done
+done
+for a in "/Applications/IntelXe Manager.app" "$HOME/Applications/IntelXe Manager.app"; do bundle_info "$a"; done
 for f in /Library/GPUBundles/nvmtl/*.dylib /Library/GPUBundles/nvmtl/*.json /usr/local/lib/libvulkan*.dylib; do
 	[ -L "$f" ] && { printf '%s -> %s\n' "$f" "$(readlink "$f")" >> "$F"; continue; }
 	file_info "$f"
@@ -457,6 +463,91 @@ fi
 [ -f /Library/GPUBundles/nvmtl-allow.txt ] && cp /Library/GPUBundles/nvmtl-allow.txt "$W/driver/nvmtl-allow.txt"
 ls -la /Library/GPUBundles /Library/GPUBundles/nvmtl /Library/Extensions 2>/dev/null > "$W/driver/ls-gpubundles-extensions.txt"
 [ -r /var/log/intelxefb-load.log ] && tail -n 200 /var/log/intelxefb-load.log > "$W/logs/intelxefb-load.log"
+# ---------------------------------------------------------------- stack state (collector v3)
+# What decides how the stack behaves on this boot: which Metal plugin copy the accelerator names, the boot guard (an
+# unhealthy boot keeps acceleration off on later boots until intelxe-accel-off is cleared), the HiDPI switch, the
+# package and app versions, and the CPU power-management kexts (a CPU held at a low clock looks like a slow GPU).
+note "stack"
+IOREGL="$TMPBASE/.ioregl"
+run_to 15 ioreg -lw0 > "$IOREGL" 2>/dev/null
+F="$W/driver/stack.txt"
+nvk() { if _v=$(nvram "$1" 2>/dev/null); then printf '%s = %s\n' "$1" "$(printf '%s' "$_v" | cut -f2-)"; else printf '%s: not set\n' "$1"; fi; }
+{
+	echo "== Metal plugin named by the accelerator (MetalPluginName; absent = withheld, WindowServer unaccelerated)"
+	grep -E '"(MetalPluginName|MetalPluginClassName|MetalStatisticsName)" =' "$IOREGL" | sed 's/^[ |+-]*//' | sort | uniq -c
+	echo
+	echo "== plugin copies"
+	for b in /System/Library/Extensions/NVMTLDriver.bundle /Library/GPUBundles/NVMTLDriverLib.bundle /Library/GPUBundles/NVMTLDriver.bundle; do
+		if [ -f "$b/Contents/MacOS/NVMTLDriver" ]; then
+			printf '%s: NVMTLDriver %s\n' "$b" "$(shasum -a 256 "$b/Contents/MacOS/NVMTLDriver" | cut -c1-16)"
+		else
+			printf '%s: absent\n' "$b"
+		fi
+	done
+	printf 'NVMTLDriver.use-library (NMXAccel uses the /Library copy even with a system-volume copy): %s\n' \
+		"$([ -e /Library/GPUBundles/NVMTLDriver.use-library ] && echo present || echo absent)"
+	if [ -f /Library/GPUBundles/nvmtl/ssv-component.plist ]; then
+		echo "system-volume copy record (nvmtl/ssv-component.plist):"
+		plutil -p /Library/GPUBundles/nvmtl/ssv-component.plist 2>/dev/null | sed 's/^/  /'
+	else
+		echo "system-volume copy record: none (no system-volume copy installed by ssv-install.sh)"
+	fi
+	echo
+	echo "== boot guard and driver NVRAM keys"
+	for k in intelxe-accel-off intelxe-guard intelxe-guard-cleared intelxe-shutdown intelxefb-shutdown intelxe-fb-armed \
+		intelxefb-hidpi intelxefb-vrr-modes intelxe-rename; do nvk "$k"; done
+	grep -E '"IntelXeFBGuard(Prev)?" =' "$IOREGL" | sed 's/^[ |+-]*//'
+	echo
+	echo "== HiDPI switch"
+	printf 'IntelXeFB knows intelxefb-hidpi: %s\n' "$(grep -qa intelxefb-hidpi /Library/Extensions/IntelXeFB.kext/Contents/MacOS/IntelXeFB 2>/dev/null && echo yes || echo no)"
+	printf 'framebuffers offering scaled modes (IOFBScalerInfo): %s\n' "$(grep -c '"IOFBScalerInfo" =' "$IOREGL")"
+	printf 'WindowServer DisplayResolutionEnabled: %s\n' "$(defaults read /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled 2>/dev/null || echo 'not set')"
+	echo "display overrides (/Library/Displays/Contents/Resources/Overrides):"
+	find /Library/Displays/Contents/Resources/Overrides -type f 2>/dev/null | head -n 20 | while read -r o; do
+		printf '  %s%s\n' "${o#/Library/Displays/Contents/Resources/Overrides/}" \
+			"$(/usr/libexec/PlistBuddy -c 'Print :IntelXeHiDPI' "$o" >/dev/null 2>&1 && echo ' (written by hidpi.sh)')"
+	done
+	echo
+	echo "== package and app"
+	printf 'installed package version: %s\n' "$(cat '/Library/Application Support/intel-gpu-macos-driver/installed-version' 2>/dev/null || echo 'none recorded')"
+	ls -1 '/Library/Application Support/intel-gpu-macos-driver' 2>/dev/null | grep '^backup-' | tail -n 5 | sed 's/^/  install backup: /'
+	for a in "/Applications/IntelXe Manager.app" "$HOME/Applications/IntelXe Manager.app"; do
+		[ -f "$a/Contents/Info.plist" ] && printf 'IntelXe Manager %s: %s\n' "$(pget "$a/Contents/Info.plist" CFBundleShortVersionString)" "$a"
+	done
+	printf 'Zink GL (/Library/IntelXe/GL): %s\n' "$([ -d /Library/IntelXe/GL ] && echo installed || echo 'not installed')"
+	[ -f /Library/LaunchAgents/io.github.yusufklncc.intelxe.zink-gl.plist ] && echo "Zink GL for every LWJGL 3 application: on (LaunchAgent)"
+	echo
+	echo "== CPU power management"
+	sysctl hw.physicalcpu hw.logicalcpu hw.cpufrequency hw.cpufrequency_max machdep.cpu.core_count machdep.cpu.thread_count 2>/dev/null
+	grep -iE 'hybridpm|cputopology|cpufriend' "$TMPBASE/.kexts" 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /\./ && $i !~ /^0x/) { print "loaded: " $i; break } }'
+	case " $(nvram boot-args 2>/dev/null | cut -f2-) " in *ctrsmt*) echo "boot-args set ctrsmt (CpuTopologyRebuild)" ;; esac
+} > "$F" 2>&1
+# The CPU's clock right now, when root can ask powermetrics (it reads the package's counters for one second).
+if [ "$(id -u)" = 0 ] || sudo -n true >/dev/null 2>&1; then
+	_su=""; [ "$(id -u)" = 0 ] || _su="sudo -n"
+	cmd "$W/driver/cpu-clock.txt" 8 $_su powermetrics -n 1 -i 1000 --samplers cpu_power
+else
+	skip "the CPU clock (powermetrics): sudo needs a password"
+fi
+# Frames the display took in two seconds while this report ran (WindowServer redrawing at full rate with nothing
+# moving, as the login window did in 0.1.3, takes GPU time from everything else).
+f0=$(sysctl -n debug.nmxaccel_async_frames 2>/dev/null)
+if [ -n "$f0" ]; then
+	sleep 2; f1=$(sysctl -n debug.nmxaccel_async_frames 2>/dev/null)
+	FPS_IDLE=$(( (f1 - f0) / 2 ))
+	echo "frames presented per second during the report: $FPS_IDLE (the report's own Terminal output counts)" >> "$F"
+fi
+# The Metal plugin's own log (non-release builds write one; release builds write failures to the system log, which
+# the WindowServer query above takes). WindowServer's is /tmp/nvmtl.log, an application's is in its TMPDIR.
+mkdir -p "$W/logs/plugin"
+for lf in /tmp/nvmtl.log /private/tmp/nvmtl.log "${TMPDIR:-/nonexistent}/nvmtl.log"; do
+	[ -f "$lf" ] && [ -r "$lf" ] || continue
+	n=$(printf '%s' "$lf" | sed 's#^/private##; s#[/ ]#_#g; s#^_##')
+	[ -f "$W/logs/plugin/$n" ] && continue
+	{ echo "# $lf, $(wc -l < "$lf" | tr -d ' ') lines, the last 3000"; tail -n 3000 "$lf"; } > "$W/logs/plugin/$n"
+done
+rmdir "$W/logs/plugin" 2>/dev/null
+
 if have vulkaninfo; then
 	cmd "$W/driver/vulkaninfo-summary.txt" 20 vulkaninfo --summary
 else
@@ -784,6 +875,56 @@ if [ "$TESTS" = 1 ]; then
 	fi
 fi
 
+# ---------------------------------------------------------------- warnings (collector v3)
+# Known ways the stack goes wrong, each checked from what was collected; the summary lists the ones that apply first.
+WARN="$TMPBASE/.warn"; : > "$WARN"
+warn() { printf '%s\n' "$*" >> "$WARN"; }
+_aoff=$(nvram intelxe-accel-off 2>/dev/null | cut -f2-)
+[ -n "$_aoff" ] && [ "$_aoff" != ok ] &&
+	warn "Acceleration is held off by the boot guard (NVRAM intelxe-accel-off = $_aoff): earlier boots did not reach a healthy accelerated desktop. Once the cause is fixed: sudo nvram intelxe-accel-off=ok, then restart."
+_guard=$(nvram intelxe-guard 2>/dev/null | cut -f2-)
+case "$_guard" in ''|ok) ;; *) warn "The boot guard is armed (intelxe-guard = $_guard): this boot has not yet run its desktop for a minute, or an earlier boot ended early. Normal right after login; after several minutes it means the desktop did not come up healthy." ;; esac
+if grep -qi nmxaccel "$TMPBASE/.kexts" 2>/dev/null && ! grep -q '"MetalPluginName" =' "$IOREGL" 2>/dev/null; then
+	warn "NMXAccel is loaded but names no Metal plugin (MetalPluginName withheld): WindowServer runs unaccelerated. The NMXAccel lines in logs/kernel-ours-*.txt say why (no-Metal fallback)."
+fi
+_ssv=/System/Library/Extensions/NVMTLDriver.bundle
+if [ -d "$_ssv" ] && [ ! -e /Library/GPUBundles/NVMTLDriver.use-library ]; then
+	_a=$(shasum -a 256 "$_ssv/Contents/Frameworks/nvmtl/libvulkan_intel.dylib" 2>/dev/null | cut -c1-16)
+	_b=$(shasum -a 256 /Library/GPUBundles/nvmtl/libvulkan_intel.dylib 2>/dev/null | cut -c1-16)
+	[ -n "$_a" ] && [ -n "$_b" ] && [ "$_a" != "$_b" ] &&
+		warn "The system-volume copy of the Metal plugin carries another Mesa ($_a) than /Library ($_b), and WindowServer uses the system-volume copy: install the package's system-volume copy too (sudo ./system-volume/ssv-install.sh --apply) and restart."
+	_rb=$(defaults read /Library/GPUBundles/nvmtl/ssv-component build 2>/dev/null)
+	[ -n "$_rb" ] && [ "$_rb" != "$(sw_vers -buildVersion)" ] &&
+		warn "The system-volume copy was installed on macOS build $_rb; this is $(sw_vers -buildVersion). A macOS update can replace the system volume: check it with ./system-volume/ssv-install.sh --check."
+fi
+if [ -f /Library/GPUBundles/nvmtl/ssv-component.plist ] && [ ! -d "$_ssv" ]; then
+	warn "ssv-component.plist records a system-volume copy, but $_ssv is gone (a macOS update replaces the system volume): reinstall it with ./system-volume/ssv-install.sh --apply, or use the /Library copy (sudo touch /Library/GPUBundles/NVMTLDriver.use-library) and restart."
+fi
+_hn=$(nvram intelxefb-hidpi 2>/dev/null | cut -f2-); [ "$_hn" = 1 ] || _hn=0
+_ho=$(find /Library/Displays/Contents/Resources/Overrides -type f 2>/dev/null | while read -r o; do /usr/libexec/PlistBuddy -c 'Print :IntelXeHiDPI' "$o" >/dev/null 2>&1 && echo x; done | grep -c x)
+_hw=$(defaults read /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled 2>/dev/null || echo 0)
+if [ "$_hn" = 1 ] && { [ "$_ho" = 0 ] || [ "$_hw" != 1 ]; }; then
+	warn "The HiDPI switch is half on (NVRAM intelxefb-hidpi=1, display override from hidpi.sh: $_ho, DisplayResolutionEnabled: $_hw): run sudo ./hidpi.sh --on again (or the app's Display page) and restart."
+elif [ "$_hn" = 0 ] && [ "$_ho" -gt 0 ]; then
+	warn "A HiDPI display override from hidpi.sh is present but NVRAM intelxefb-hidpi is not 1: the scaled sizes are listed without the framebuffer's scaler. Run sudo ./hidpi.sh --off or --on, then restart."
+fi
+_iv=$(cat '/Library/Application Support/intel-gpu-macos-driver/installed-version' 2>/dev/null)
+for k in IntelXeFB NMXAccel NMXAGDC; do
+	_lv=$(grep -iE "$k" "$TMPBASE/.kexts" 2>/dev/null | head -1 | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\(/) { v = $i; gsub(/[()]/, "", v); print v; exit } }')
+	_fv=$(pget "/Library/Extensions/$k.kext/Contents/Info.plist" CFBundleShortVersionString)
+	[ -n "$_lv" ] && [ -n "$_fv" ] && [ "$_lv" != "$_fv" ] &&
+		warn "$k.kext $_lv is loaded but the installed file is $_fv: restart (if it stays, the Auxiliary Kernel Collection was not rebuilt: sudo ./install.sh --apply again)."
+	[ -z "$_lv" ] && [ -n "$_fv" ] && warn "$k.kext is installed ($_fv) but not loaded: see logs/kernel-ours-*.txt and kmutil, or approve it in System Settings > Privacy & Security."
+done
+case "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)" in
+*1[2-4][0-9][0-9][0-9]*|*Core\ Ultra*)
+	grep -qi hybridpm "$TMPBASE/.kexts" 2>/dev/null ||
+		warn "This Intel CPU has performance and efficiency cores, and HybridPM.kext is not loaded: XCPM can hold every core at a low clock, which shows as a slow GPU (Geekbench GPU scores about a third lower on the test machine). See the guide's CPU section." ;;
+esac
+[ -n "$FPS_IDLE" ] && [ "$FPS_IDLE" -gt 100 ] &&
+	warn "The display presented $FPS_IDLE frames a second while this report ran. If nothing on screen was moving, something redraws at full rate and takes GPU time from applications."
+[ "$NPANIC" -gt 0 ] && warn "$NPANIC kernel panic(s) in the last $DAYS days: their text is in logs/panics/."
+
 # ---------------------------------------------------------------- summary
 note "summary"
 S="$W/summary.txt"
@@ -793,6 +934,11 @@ inst() { grep -A2 "^$1\$" "$W/driver/installed.txt" 2>/dev/null | grep -E '^  [0
 	echo "Intel GPU macOS driver: diagnostics report $ID"
 	echo "Created $(date '+%Y-%m-%d %H:%M %z') by collect-macos.sh v$COLLECTOR_VERSION"
 	echo
+	if [ -s "$WARN" ]; then
+		echo "Warnings (read first)"
+		awk '{ print "  ! " $0 }' "$WARN" | fold -s -w 118 | sed 's/^\([^ ]\)/      \1/'
+		echo
+	fi
 	echo "macOS        $(sw_vers -productVersion 2>/dev/null) ($(sw_vers -buildVersion 2>/dev/null)) $ARCH"
 	echo "Booted       $(date -r "${BOOTTIME:-0}" '+%Y-%m-%d %H:%M' 2>/dev/null)"
 	echo "Model        $(sysctl -n hw.model 2>/dev/null)   $(sed -n 's/.*"board-id" = <"\(.*\)">.*/board-id \1/p' "$W/system/platform.txt" | head -1)"
@@ -823,13 +969,20 @@ inst() { grep -A2 "^$1\$" "$W/driver/installed.txt" 2>/dev/null | grep -E '^  [0
 	for k in IntelXeFB NMXAccel NMXAGDC; do
 		printf '  %-24s %s | %s\n' "$k.kext" "$(kx "$k")" "$(inst "/Library/Extensions/$k.kext")"
 	done
-	printf '  %-24s %s | %s %s\n' "NVMTLDriver.bundle" "-" "$(grep -A1 '^/Library/GPUBundles/NVMTLDriver.bundle$' "$W/driver/installed.txt" 2>/dev/null | sed -n 2p | sed 's/^ *id [^ ]* *//')" "$(inst /Library/GPUBundles/NVMTLDriver.bundle)"
+	for b in /System/Library/Extensions/NVMTLDriver.bundle /Library/GPUBundles/NVMTLDriverLib.bundle /Library/GPUBundles/NVMTLDriver.bundle; do
+		[ -d "$b" ] || continue
+		printf '  %-24s %s | %s\n' "$(basename "$b")" "$(case "$b" in /System/*) echo "system volume" ;; *) echo "/Library" ;; esac)" "$(inst "$b")"
+	done
+	printf '  %-24s %s\n' "Metal plugin named" "$(grep -m1 '"MetalPluginName" =' "$IOREGL" 2>/dev/null | sed 's/.*= //' | grep . || echo "none (withheld or no accelerator)")"
 	printf '  %-24s %s | %s\n' "Mesa ANV" "$(sed -n 's/^Mesa: //p' "$W/driver/installed.txt" 2>/dev/null | grep . || echo -)" "$(inst "$ANV")"
 	printf '  %-24s %s | %s\n' "Vulkan loader" "-" "$(grep -E '^/usr/local/lib/libvulkan\.1\.dylib' "$W/driver/installed.txt" 2>/dev/null | sed 's/.* -> //' | grep . || echo "not installed")"
 	for c in libintelxeav1dec libintelxevenc; do
 		printf '  %-24s %s | %s\n' "$c (VideoToolbox)" "-" "$(inst "/Library/GPUBundles/nvmtl/$c.dylib")"
 	done
-	for k in as.vit9696.Lilu WhateverGreen WhateverXe; do
+	printf '  %-24s %s\n' "package" "$(cat '/Library/Application Support/intel-gpu-macos-driver/installed-version' 2>/dev/null || echo 'no version recorded')$(grep -m1 '^IntelXe Manager' "$W/driver/stack.txt" 2>/dev/null | sed 's/:.*//; s/^/, /')$([ -d /Library/IntelXe/GL ] && echo ', Zink GL installed')"
+	printf '  %-24s %s\n' "HiDPI switch" "NVRAM $_hn, override $_ho, DisplayResolutionEnabled $_hw"
+	printf '  %-24s %s\n' "boot guard" "intelxe-guard ${_guard:-not set}, intelxe-accel-off ${_aoff:-not set}"
+	for k in as.vit9696.Lilu WhateverGreen WhateverXe HybridPM CpuTopologyRebuild; do
 		printf '  %-24s %s\n' "${k#as.vit9696.}" "$(kx "$k")"
 	done
 	if [ $INTELXE_PRESENT = 1 ]; then

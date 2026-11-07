@@ -1,0 +1,28 @@
+platform 0 "Intel(R) OpenCL Graphics" device 0 "Intel(R) Arc(TM) B580 Graphics"
+== clbench (windows) on "Intel(R) Arc(TM) B580 Graphics": OpenCL 3.0 NEO , driver 32.0.101.9033, 160 compute units, 2850 MHz
+build ok in 8 ms
+-- kernels
+  kernel fma_ind        max wg 1024, preferred multiple 32, local 0 B, private 0 B
+fma_ind         1919.2 us    13987 GFLOP/s
+  kernel copy4          max wg 1024, preferred multiple 32, local 0 B, private 0 B
+copy4 256MB     1283.3 us      418 GB/s (read+write)
+  kernel scale_args     max wg 1024, preferred multiple 32, local 0 B, private 0 B
+scale_args1M      11.7 us
+  kernel sgemm_tile     max wg 1024, preferred multiple 32, local 2048 B, private 0 B
+sgemm_tile      7527.7 us     2282 GFLOP/s (2048^3, 16x16 tiles)
+  kernel sgemm_reg      max wg 1024, preferred multiple 32, local 8704 B, private 0 B
+sgemm_reg       3148.9 us     5456 GFLOP/s (2048^3, 64x64 blocks, 4x4 per thread)
+  kernel conv3x3_nhwc   max wg 1024, preferred multiple 32, local 0 B, private 0 B
+conv3x3 48x48x64->64     144.7 us     1174 GFLOP/s
+  kernel dwconv3x3      max wg 1024, preferred multiple 32, local 0 B, private 0 B
+dwconv3x3 128x72x144      48.3 us
+  kernel reduce_sum     max wg 1024, preferred multiple 32, local 1024 B, private 0 B
+reduce 256MB     646.4 us      415 GB/s
+  kernel blur_h         max wg 1024, preferred multiple 32, local 0 B, private 0 B
+  kernel blur_v         max wg 1024, preferred multiple 32, local 0 B, private 0 B
+blur 4K h/v      200.2 / 181.0 us
+  kernel hist256        max wg 1024, preferred multiple 32, local 1024 B, private 0 B
+hist256 64MB     893.2 us
+  kernel tiny           max wg 1024, preferred multiple 32, local 0 B, private 0 B
+tiny kernel        0.5 us GPU; 2000 queued: 1.9 us each (wall); enqueue+finish round trip median 5.4 us
+== done
