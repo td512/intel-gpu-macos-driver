@@ -68,7 +68,20 @@ Our kernel driver follows Linux's `xe` and `i915` drivers. When something differ
    It also runs without `sudo`, but then it misses the debugfs state, the full PCI capability list (which holds Resizable BAR) and, on some systems, the kernel log.
 3. Copy the resulting `xe-report-XR-….tar.gz` to a USB stick or to your macOS/Windows disk before you reboot. A live system forgets everything.
 
-Optional extras, used if they are installed: `vulkaninfo` (package `vulkan-tools`), `glxinfo` (`mesa-utils`), `clinfo`
+Install the optional tools first; most live systems lack them, and the register dump in particular saves a second
+report later:
+
+```sh
+sudo apt install intel-gpu-tools vainfo clinfo vulkan-tools mesa-utils         # Ubuntu, Debian
+sudo dnf install igt-gpu-tools libva-utils clinfo vulkan-tools glx-utils       # Fedora
+```
+
+For **a GPU we do not support yet**, run it as `sudo sh collect-linux.sh --acpi --bench`: `--acpi` adds the DSDT and
+SSDT tables (the GPU's ACPI device, its backlight and `_DSM` methods; never the MSDM or SLIC table, which hold the
+Windows licence), and on a laptop the backlight's range is recorded either way.
+
+Optional extras, used if they are installed: `vulkaninfo` (package `vulkan-tools`), `glxinfo` (`mesa-utils`), `vainfo`
+(the video codecs the media driver offers), `clinfo`
 (the OpenCL platforms: Mesa's rusticl and Intel's compute runtime), and `intel_reg` (`intel-gpu-tools`, for a register
 dump).
 
@@ -126,7 +139,8 @@ It records:
 - with root, selected debugfs files: device info, GuC/HuC info and log, frequency, engines, topology, workarounds, display info, DMC, the VBT, and per-connector DPCD/PSR/DSC state;
 - connectors with their status, modes and EDIDs;
 - `vulkaninfo --summary` / `glxinfo -B`, `clinfo`, and `intel_reg dump` if installed;
-- the GT clock limits and the current clock from sysfs;
+- the GT clock limits and the current clock from sysfs; `vainfo`; the backlight interfaces (type and range);
+- with `--acpi`, the DSDT and SSDT tables (binary, as the firmware has them) and the names of all tables;
 - with `--bench`, the `clbench` results on each OpenCL platform.
 
 Each archive also holds `summary.txt`, a one-page overview to read first, and `manifest.txt` with the SHA-256 of every file.
@@ -145,7 +159,9 @@ Before the archive is written, every script removes:
 The scripts first read these values from your own machine, then remove each one from every file. Before packing, they search the output once more. If any value is still there, or anything shaped like a Windows product key, they stop without writing a file and tell you.
 
 **Never collected:**
-- ACPI tables, or any file in an EFI `ACPI` folder. On macOS only the file names in `EFI/OC/ACPI` are listed. ACPI tables can carry your Windows product key (the MSDM table).
+- ACPI tables, unless you ask for them on Linux with `--acpi`, and then only the DSDT and SSDTs: never the MSDM or SLIC
+  table, which carry your Windows product key, and never a file in an EFI `ACPI` folder (on macOS only their names are
+  listed). The final privacy check reads the collected tables too.
 - The Windows product key and licensing data.
 - Screen contents.
 - Wi-Fi passwords.

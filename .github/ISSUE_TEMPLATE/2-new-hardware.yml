@@ -1,0 +1,50 @@
+name: Support for my Intel GPU
+description: Your Intel GPU is not supported yet (another Arc card, or a laptop or desktop with Intel graphics).
+title: "[Hardware] <GPU name, e.g. Arc A770 or Core Ultra 7 155H>"
+labels: [hardware]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Bringing up a new GPU needs a lot of detail about it, and we would rather ask once. Please make **both** reports below on the same machine, with the monitor you use connected (on a laptop, its own panel). The scripts are in [`tools/report`](../tree/main/tools/report); each takes a minute or two, changes nothing and removes serial numbers, names, MAC addresses and Wi-Fi names. Drag both files into the box at the end.
+
+        1. **Linux** (a live USB is enough, Ubuntu 25.04+ or Fedora 41+): install the optional tools, then run it with root, `--acpi` and `--bench`:
+           ```sh
+           sudo apt install intel-gpu-tools vainfo clinfo vulkan-tools mesa-utils
+           sudo sh collect-linux.sh --acpi --bench
+           ```
+           This is the important one: it records what Linux's own driver finds and programs on your GPU. `--acpi` adds only the DSDT and SSDT tables, never the ones with your Windows licence. Copy the file off the live USB before you reboot.
+        2. **macOS** (if it boots on this machine, with any graphics): `sh collect-macos.sh --probe`.
+
+        A Windows report (`collect-windows.ps1`) is welcome too if you dual-boot.
+  - type: input
+    id: reports
+    attributes:
+      label: Report IDs
+      description: The IDs the scripts printed (XR-…), separated by commas.
+      placeholder: XR-…, XR-…
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and machine
+      description: The GPU, and for a laptop or mini PC its make and model.
+      placeholder: Arc A750 in a desktop / Lenovo Yoga with Core Ultra 7 155H
+    validations:
+      required: true
+  - type: dropdown
+    id: macos
+    attributes:
+      label: macOS on this machine today
+      options:
+        - It does not boot, or I have not tried
+        - It boots without graphics acceleration
+        - It boots with another GPU, this one unused
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else, and the report files
+      description: Your OpenCore setup if macOS runs, other GPUs in the machine, what you would use it for. Drag the report files here.

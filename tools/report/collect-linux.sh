@@ -10,7 +10,10 @@
 # most live USBs) it adds debugfs, the full PCI capability dump, dmesg and intel_reg.
 # Writes xe-report-XR-xxxxxxxx.tar.gz to the current directory (or --out DIR).
 #
-#   sh collect-linux.sh [--out DIR]          (recommended: sudo sh collect-linux.sh)
+#   sh collect-linux.sh [--out DIR] [--bench] [--acpi]      (recommended: sudo sh collect-linux.sh)
+#   --bench   also time tools/clbench on each OpenCL platform that has the card (about a minute each)
+#   --acpi    also the DSDT and SSDT tables (root): the GPU's ACPI device, backlight and _DSM methods. Never the MSDM
+#             or SLIC table (they hold the Windows licence); the privacy check still runs over the tables
 
 COLLECTOR_VERSION=2
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -21,12 +24,14 @@ umask 077
 
 OUTDIR=$(pwd)
 BENCH=0
+ACPI=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--out) OUTDIR=$2; shift ;;
 	--out=*) OUTDIR=${1#--out=} ;;
 	--bench) BENCH=1 ;;
-	-h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--acpi) ACPI=1 ;;
+	-h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
 	esac
 	shift
@@ -312,11 +317,37 @@ for c in /sys/class/drm/card*-*; do
 	printf '%s: %s\n' "$n" "$(printf '%s\n' "$e" | awk "$EDID_AWK"'{ print edid_desc($0) }')" >> "$TMPBASE/.displays"
 done
 
+# Laptop panels: the backlight interfaces (which one the GPU drives, its range). macOS needs the same maximum.
+for b in /sys/class/backlight/*; do
+	[ -d "$b" ] || continue
+	{ printf '== %s (device %s)\n' "${b##*/}" "$(basename "$(readlink -f "$b/device" 2>/dev/null)")"
+	  for k in type max_brightness brightness actual_brightness scale; do [ -r "$b/$k" ] && printf '%s = %s\n' "$k" "$(cat "$b/$k" 2>/dev/null)"; done
+	  echo; } >> "$W/display/backlight.txt"
+done
+# --acpi: DSDT and SSDTs only, never MSDM/SLIC (the Windows licence) or anything else; .bin, so the text redaction
+# leaves the tables intact, while the final privacy check (serials, MACs, product-key shapes) still reads them.
+if [ "$ACPI" = 1 ]; then
+	if [ $ROOT = 1 ]; then
+		mkdir -p "$W/acpi"
+		for t in /sys/firmware/acpi/tables/DSDT /sys/firmware/acpi/tables/SSDT*; do
+			[ -e "$t" ] || continue
+			case "${t##*/}" in DSDT|SSDT|SSDT[0-9]*) run_to 5 $SUDO cat "$t" > "$W/acpi/${t##*/}.bin" 2>/dev/null ;; esac
+			[ -s "$W/acpi/${t##*/}.bin" ] || rm -f "$W/acpi/${t##*/}.bin"
+		done
+		ls -l /sys/firmware/acpi/tables 2>/dev/null | awk '{ print $NF }' | grep -vE '^(total|MSDM|SLIC)$' > "$W/acpi/table-names.txt"
+	else
+		skip "--acpi: the ACPI tables need root"
+	fi
+fi
+
 # ---------------------------------------------------------------- user-space graphics
 note "userspace"
 if have vulkaninfo; then cmd "$W/driver/vulkaninfo-summary.txt" 20 vulkaninfo --summary
 else skip "vulkaninfo --summary: vulkan-tools is not installed (optional)"; fi
 have glxinfo && cmd "$W/driver/glxinfo-B.txt" 10 glxinfo -B
+# Video: what the media driver offers on this generation (VA-API profiles and entrypoints)
+if have vainfo; then cmd "$W/driver/vainfo.txt" 15 vainfo --display drm
+else skip "vainfo: not installed (optional; package vainfo)"; fi
 # OpenCL: Linux can run two on the same card, Mesa's rusticl (Mesa's compiler, the one the macOS driver uses) and
 # Intel's compute runtime (Intel's IGC, as on Windows). Which are installed, and their versions.
 if have clinfo; then
