@@ -1,0 +1,28 @@
+platform 0 "Apple" device 0 "Intel Arc B580 Graphics"
+== clbench (macos) on "Intel Arc B580 Graphics": OpenCL 1.2 , driver 1.2 1.0, 8 compute units, 1000 MHz
+build ok in 14 ms
+-- kernels
+  kernel fma_ind        max wg 256, preferred multiple 32, local 0 B, private 0 B
+fma_ind         2113.3 us    12702 GFLOP/s
+  kernel copy4          max wg 256, preferred multiple 32, local 0 B, private 0 B
+copy4 256MB     1363.4 us      394 GB/s (read+write)
+  kernel scale_args     max wg 256, preferred multiple 32, local 0 B, private 0 B
+scale_args1M      20.0 us
+  kernel sgemm_tile     max wg 256, preferred multiple 32, local 0 B, private 0 B
+sgemm_tile      7013.4 us     2450 GFLOP/s (2048^3, 16x16 tiles)
+  kernel sgemm_reg      max wg 256, preferred multiple 32, local 0 B, private 0 B
+sgemm_reg       4547.8 us     3778 GFLOP/s (2048^3, 64x64 blocks, 4x4 per thread)
+  kernel conv3x3_nhwc   max wg 256, preferred multiple 32, local 0 B, private 0 B
+conv3x3 48x48x64->64     135.9 us     1250 GFLOP/s
+  kernel dwconv3x3      max wg 256, preferred multiple 32, local 0 B, private 0 B
+dwconv3x3 128x72x144      42.4 us
+  kernel reduce_sum     max wg 256, preferred multiple 32, local 0 B, private 0 B
+reduce 256MB     642.7 us      418 GB/s
+  kernel blur_h         max wg 256, preferred multiple 32, local 0 B, private 0 B
+  kernel blur_v         max wg 256, preferred multiple 32, local 0 B, private 0 B
+blur 4K h/v      314.4 / 181.4 us
+  kernel hist256        max wg 256, preferred multiple 32, local 0 B, private 0 B
+hist256 64MB     989.7 us
+  kernel tiny           max wg 256, preferred multiple 32, local 0 B, private 0 B
+tiny kernel        5.1 us GPU; 2000 queued: 6.0 us each (wall); enqueue+finish round trip median 111.0 us
+== done

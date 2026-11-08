@@ -5,6 +5,8 @@
 // Run on the hackintosh: NVMTL_ENABLE=1 ./mtl_lat [igpu] test [args]
 //   lat [n]            empty dispatch per command buffer, commit + waitUntilCompleted, n iterations (default 1000)
 //   latk [n]           K tiny dispatches in one command buffer (K = 1, 4, 16, 64, 256)
+//   split [n]          one tiny dispatch per command buffer: commit -> GPU start, GPU time, GPU end -> waiter awake
+//                      (GPUStartTime/GPUEndTime are host uptime; where the round trip goes: submission, GPU, completion)
 //   inflight [n]       M command buffers committed back-to-back, then one wait (M = 1, 2, 4, 8, 16, 32)
 //   handler [n]        completion via addCompletedHandler + semaphore instead of waitUntilCompleted
 //   small              Geekbench-like: 64 KB-1 MB kernels, sync / pipelined / batched
@@ -157,6 +159,27 @@ static void testLatK(int n) {
 		qsort(tot, it, 8, dcmp);
 		printf("    -> %.2f us per dispatch (p50)\n", tot[it / 2] / K);
 	}
+}
+
+// 2026-11-09 on the B580 (0.1.3, plug21): commit -> GPU start ~40-50 us, GPU 8 us, GPU end -> awake ~37-45 us, against
+// a 5.4 us round trip under Windows (clbench); polling the fence instead of sleeping took off only ~5 us
+static void testSplit(int n) {
+	id<MTLComputePipelineState> p = pipe_(@"nop");
+	id<MTLBuffer> o = [dev newBufferWithLength:4096 options:MTLResourceStorageModePrivate];
+	printf("[split] one empty dispatch per command buffer: where the round trip goes\n");
+	double *head = calloc(n, 8), *gpu = calloc(n, 8), *tail = calloc(n, 8), *tot = calloc(n, 8); int m = 0;
+	for (int i = 0; i < n + 50; i++) @autoreleasepool {
+		id<MTLCommandBuffer> cb = [q commandBuffer];
+		id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+		[e setBuffer:o offset:0 atIndex:0]; [e setComputePipelineState:p];
+		[e dispatchThreads:MTLSizeMake(32, 1, 1) threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+		[e endEncoding];
+		double t0 = now_us(); [cb commit]; [cb waitUntilCompleted]; double t1 = now_us();
+		if (i < 50 || cb.GPUEndTime <= cb.GPUStartTime) continue;   // warm-up, and no GPU times
+		head[m] = cb.GPUStartTime * 1e6 - t0; gpu[m] = (cb.GPUEndTime - cb.GPUStartTime) * 1e6; tail[m] = t1 - cb.GPUEndTime * 1e6; tot[m] = t1 - t0; m++;
+	}
+	if (!m) { printf("  no GPU times\n"); return; }
+	stats("commit -> GPU start", head, m); stats("GPU", gpu, m); stats("GPU end -> waiter awake", tail, m); stats("commit -> awake", tot, m);
 }
 
 static void testInflight(int n) {
@@ -370,6 +393,7 @@ int main(int argc, char **argv) {
 		if (!strcmp(t, "lat")) testLat(n);
 		else if (!strcmp(t, "handler")) testHandler(n);
 		else if (!strcmp(t, "latk")) testLatK(n);
+		else if (!strcmp(t, "split")) testSplit(n);
 		else if (!strcmp(t, "inflight")) testInflight(n);
 		else if (!strcmp(t, "small")) testSmall();
 		else if (!strcmp(t, "buf")) testBuf();
