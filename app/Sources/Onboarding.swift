@@ -81,11 +81,7 @@ struct SetupView: View {
         case .efiSettings:
             Text("1. Prepare OpenCore").font(.headline)
             Text("The driver needs System Integrity Protection relaxed and AMFI's boot-arg in your OpenCore config, plus a few quirks. The assistant writes them into the EFI you booted from, after a backup, and shows every change before it makes it.")
-            efiLocation
-            Button("Open the EFI page to review and apply the settings") { manager.requestedSection = .efi; close() }
-                .buttonStyle(.borderedProminent)
-            Text("After applying: restart, then open this assistant again.").font(.callout).foregroundStyle(.secondary)
-            Button("Restart now") { manager.restartNow() }
+            efiStep(.settings)
         case .driver:
             Text("2. Install the driver").font(.headline)
             Text("The package puts the framebuffer, the accelerator and the Metal driver into /Library and rebuilds the kernel collection (a few minutes). It backs up what it replaces.")
@@ -107,11 +103,9 @@ struct SetupView: View {
         case .efiKext:
             Text("3. Add IntelXe.kext to OpenCore").font(.headline)
             Text("The last piece loads before macOS: IntelXe.kext and SSDT-ARCOFF go into the EFI and its config. The EFI page shows the plan and applies it.")
-            efiLocation
-            Button("Open the EFI page to add the kext") { manager.requestedSection = .efi; close() }.buttonStyle(.borderedProminent)
-            Text("Then restart. If the next boot stops at the Apple logo, choose the previous entry or your USB stick in the OpenCore picker: the backup is kept.")
+            efiStep(.apply)
+            Text("If the next boot stops at the Apple logo, choose the previous entry or your USB stick in the OpenCore picker: the backup is kept, and the EFI page can put it back.")
                 .font(.callout).foregroundStyle(.secondary)
-            Button("Restart now") { manager.restartNow() }
         case .verify:
             Text("4. Check that it works").font(.headline)
             Text("The driver is loaded. A quick test checks that the GPU computes, draws and decodes video correctly and measures it.")
@@ -133,6 +127,51 @@ struct SetupView: View {
                 Label("Your EFI is on a USB stick. Once everything works you can copy it to the EFI partition of the macOS disk (install guide, the last stage), and keep the stick as a fallback.",
                       systemImage: "externaldrive").font(.callout)
             }
+        }
+    }
+
+    /// The package is needed first (the EFI files and efi.sh come from it): download it here when it is missing.
+    @ViewBuilder var packageGate: some View {
+        if let rel = manager.release {
+            Text("First the driver package is downloaded: the EFI files come from it.").font(.callout)
+            Button(String(localized: "Download \(rel.tag_name)")) {
+                st.downloading = true
+                Task { await manager.downloadLatest(zink: false); st.downloading = false; await manager.refresh() }
+            }.buttonStyle(.borderedProminent).disabled(st.downloading)
+            if st.downloading { ProgressView().controlSize(.small) }
+        } else {
+            Text(manager.releaseError ?? String(localized: "Looking for the latest release…")).foregroundStyle(.secondary)
+            Button("Look again") { Task { await manager.checkForUpdate() } }
+        }
+    }
+
+    /// An EFI change in place: where, the plan efi.sh made (exactly what will change), Apply, then restart.
+    @ViewBuilder func efiStep(_ action: EFIAction) -> some View {
+        if manager.package == nil {
+            packageGate
+        } else {
+            efiLocation
+            let e = manager.efi
+            if e.found && !e.mounted {
+                Button("Mount the EFI partition (asks for your password)") { manager.performEFI(.mount) }.buttonStyle(.borderedProminent)
+            } else if e.found, let plan = manager.efiPlans[action] {
+                Text("What will change (a backup of the whole EFI folder is made first):").font(.callout)
+                ScrollView { PlanText(plan: plan).padding(8) }
+                    .frame(maxHeight: 170)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                if plan.changes {
+                    Button(String(localized: "Apply (asks for your password)")) { manager.performEFI(action) }.buttonStyle(.borderedProminent)
+                } else {
+                    Label("Nothing left to change in the EFI.", systemImage: "checkmark.circle").foregroundStyle(.green)
+                }
+            } else if e.found {
+                Text("Reading the EFI…").foregroundStyle(.secondary)
+            } else {
+                Button("Open the EFI page to choose it") { manager.requestedSection = .efi; close() }
+            }
+            Text("Then restart and open this assistant again: it continues from there.").font(.callout).foregroundStyle(.secondary)
+            if manager.rebootNeeded { Button("Restart now") { manager.restartNow() }.buttonStyle(.borderedProminent) }
+            else { Button("Restart now") { manager.restartNow() } }
         }
     }
 

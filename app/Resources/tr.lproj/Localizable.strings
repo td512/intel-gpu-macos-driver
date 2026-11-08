@@ -393,3 +393,14 @@
 "OpenCore EFI: %@" = "OpenCore EFI: %@";
 " (USB stick: that is fine)" = " (USB bellek: sorun değil)";
 "The EFI you booted from was not found yet: choose it on the EFI page." = "Açtığınız EFI henüz bulunamadı: EFI sayfasında seçin.";
+
+/* setup assistant: EFI steps in place */
+"First the driver package is downloaded: the EFI files come from it." = "Önce sürücü paketi indirilir: EFI dosyaları ondan gelir.";
+"Mount the EFI partition (asks for your password)" = "EFI bölümünü bağla (parolanızı sorar)";
+"What will change (a backup of the whole EFI folder is made first):" = "Değişecekler (önce EFI klasörünün tamamı yedeklenir):";
+"Apply (asks for your password)" = "Uygula (parolanızı sorar)";
+"Nothing left to change in the EFI." = "EFI'de değiştirilecek bir şey kalmadı.";
+"Reading the EFI…" = "EFI okunuyor…";
+"Open the EFI page to choose it" = "Seçmek için EFI sayfasını aç";
+"Then restart and open this assistant again: it continues from there." = "Sonra yeniden başlatın ve bu yardımcıyı yeniden açın: kaldığı yerden devam eder.";
+"If the next boot stops at the Apple logo, choose the previous entry or your USB stick in the OpenCore picker: the backup is kept, and the EFI page can put it back." = "Sonraki açılış Apple logosunda kalırsa OpenCore seçicide önceki girişi ya da USB belleğinizi seçin: yedek saklanır ve EFI sayfası onu geri koyabilir.";
