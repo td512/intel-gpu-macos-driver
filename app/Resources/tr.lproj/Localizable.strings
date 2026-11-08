@@ -314,3 +314,24 @@
 "Check for a new release at start" = "Açılışta yeni sürümü denetle";
 "Save the driver settings" = "Sürücü ayarlarını kaydet";
 "Saved. The display settings apply now; the power settings at the next start." = "Kaydedildi. Ekran ayarları hemen, güç ayarları bir sonraki açılışta uygulanır.";
+
+/* long test (LongTest.swift) */
+"Long test (about 2 minutes)" = "Uzun test (yaklaşık 2 dakika)";
+"Checks most of the video memory twice and keeps the GPU at full load for a minute, watching for errors, the clock and the temperature." = "Video belleğinin çoğunu iki kez denetler ve GPU'yu bir dakika tam yükte tutarak hataları, saat hızını ve sıcaklığı izler.";
+"Video memory, pass %lld of 2…" = "Video belleği, %lld/2. geçiş…";
+"Video memory" = "Video belleği";
+"The GPU stopped during the test" = "GPU test sırasında durdu";
+"%.1f GB tested twice, no errors" = "%.1f GB iki kez denendi, hata yok";
+"%.1f GB tested, %u words wrong" = "%.1f GB denendi, %u sözcük yanlış";
+"Wrong words in video memory point at the card (memory, overclock, heat) or at how the driver maps it; a report helps tell them apart." = "Video belleğindeki yanlış sözcükler kartı (bellek, hız aşırtma, ısı) ya da sürücünün belleği eşleme biçimini işaret eder; ayırt etmek için rapor yardımcı olur.";
+"Load, %lld of %lld s…" = "Yük, %lld/%lld s…";
+"A minute of full load" = "Bir dakika tam yük";
+"No GPU errors" = "GPU hatası yok";
+"%lld failed GPU jobs" = "%lld GPU işi başarısız";
+"Jobs failing under load mean GPU resets or hangs: make a diagnostics report right after this." = "Yük altında başarısız işler GPU sıfırlanması ya da takılması demektir: hemen ardından bir tanılama raporu oluşturun.";
+"GPU clock under load" = "Yük altında GPU saat hızı";
+"The clock fell during the minute: the card gets too hot or reaches its power limit (airflow, fan curve, power cable)." = "Saat hızı bir dakika içinde düştü: kart fazla ısınıyor ya da güç sınırına ulaşıyor (hava akışı, fan eğrisi, güç kablosu).";
+"Highest GPU temperature" = "En yüksek GPU sıcaklığı";
+"Above about 85 °C the card lowers its clock; check the airflow in the case." = "Yaklaşık 85 °C üstünde kart saat hızını düşürür; kasadaki hava akışını kontrol edin.";
+"Clock and temperature" = "Saat hızı ve sıcaklık";
+"Not read (needs IntelXe.kext 0.1.4 or later)" = "Okunamadı (IntelXe.kext 0.1.4 veya sonrası gerekir)";

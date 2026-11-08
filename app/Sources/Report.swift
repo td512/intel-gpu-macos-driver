@@ -67,6 +67,8 @@ struct ReportView: View {
                     .font(.callout).foregroundStyle(.secondary)
                 HStack {
                     Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil)
+                    Button("Long test (about 2 minutes)") { manager.runTest(long: true) }.disabled(manager.testing != nil)
+                        .help(String(localized: "Checks most of the video memory twice and keeps the GPU at full load for a minute, watching for errors, the clock and the temperature."))
                     if let step = manager.testing { ProgressView().controlSize(.small); Text(step).foregroundStyle(.secondary) }
                 }
                 ForEach(manager.testResults) { r in

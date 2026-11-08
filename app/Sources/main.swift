@@ -22,8 +22,9 @@ struct ManagerApp: App {
 
 if CommandLine.arguments.contains("--selftest") {
     selfTest()
-} else if CommandLine.arguments.contains("--gputest") {   // the Report page's quick GPU test, in Terminal
-    for r in runGPUTest(progress: { _ in }) {
+} else if CommandLine.arguments.contains("--gputest") || CommandLine.arguments.contains("--longtest") {   // the Report page's tests, in Terminal
+    let long = CommandLine.arguments.contains("--longtest")
+    for r in (long ? runLongTest(progress: { _ in }) : runGPUTest(progress: { _ in })) {
         let mark = r.state == .good ? "ok  " : r.state == .warning ? "warn" : r.state == .bad ? "BAD " : "    "
         print("\(mark) \(r.title.padding(toLength: 26, withPad: " ", startingAt: 0)) \(r.value)\(r.help.isEmpty ? "" : "\n       " + r.help)")
     }

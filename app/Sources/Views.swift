@@ -21,10 +21,11 @@ final class Manager: ObservableObject {
     @Published var health: [HealthIssue] = []
     @Published var testResults: [TestResult] = []
     @Published var testing: String?
-    func runTest() {
+    func runTest(long: Bool = false) {
         testing = String(localized: "Starting…"); testResults = []
         Task.detached {
-            let r = runGPUTest { step in Task { @MainActor in self.testing = step } }
+            let report: (String) -> Void = { step in Task { @MainActor in self.testing = step } }
+            let r = long ? runLongTest(progress: report) : runGPUTest(progress: report)
             await MainActor.run { self.testResults = r; self.testing = nil }
         }
     }
