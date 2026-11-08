@@ -19,6 +19,7 @@ final class Manager: ObservableObject {
     @Published var reportFile: String?
     @Published var reportWarnings: [ReportWarning] = []
     @Published var health: [HealthIssue] = []
+    @Published var showSetup = false
     @Published var testResults: [TestResult] = []
     @Published var testing: String?
     func runTest(long: Bool = false) {
@@ -396,7 +397,12 @@ struct RootView: View {
         .task {
             await manager.refresh()
             if UserDefaults.standard.object(forKey: "autoUpdateCheck") as? Bool ?? true { await manager.checkForUpdate() }
+            // first runs, until the setup assistant has been finished once: open it where the machine stands
+            // (not for a machine where the driver already runs: an update needs no assistant)
+            let step = manager.setupStep
+            if !UserDefaults.standard.bool(forKey: "setupDone") && step != .done && step != .verify { manager.showSetup = true }
         }
+        .sheet(isPresented: $manager.showSetup) { SetupView { manager.showSetup = false }.environmentObject(manager) }
     }
 }
 
@@ -474,6 +480,13 @@ struct SystemView: View {
             }
             if manager.facts.bootGuardOff {
                 Button("Clear the boot guard") { manager.clearBootGuard() }
+            }
+            Section2(title: "Setup") {
+                HStack {
+                    Text("Step by step from a fresh macOS install to a working driver.").font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Open the setup assistant") { manager.showSetup = true }
+                }
             }
             Section2(title: "Report a problem") {
                 HStack {
