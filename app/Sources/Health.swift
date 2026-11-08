@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: MIT
+// Problems the app can see by itself at start, the same ones the diagnostics report warns about (collect-macos.sh's
+// codes): a kernel panic since the last look, the boot guard holding acceleration off, a system-volume copy of the Metal
+// plugin out of step with /Library, a half-done HiDPI switch, a kext loaded at another version than its file, a hybrid
+// Intel CPU without HybridPM. Each shows as a banner with what to do; a dismissed one stays quiet until it changes.
+import Foundation
+
+struct HealthIssue: Identifiable, Hashable {
+    let code: String
+    let text: String
+    /// what changes when the issue is a new one (a panic file's name, a version): a dismissal holds for this key only
+    let key: String
+    var id: String { code }
+}
+
+private func sha256Prefix(_ path: String) -> String? {
+    guard let out = commandOutput("/usr/bin/shasum", ["-a", "256", path]) else { return nil }
+    let s = out.split(separator: " ").first.map(String.init) ?? ""
+    return s.count >= 16 ? String(s.prefix(16)) : nil
+}
+
+private func plistValue(_ path: String, _ key: String) -> String? {
+    guard let d = NSDictionary(contentsOfFile: path) else { return nil }
+    return d[key] as? String
+}
+
+func healthIssues(_ facts: SystemFacts) -> [HealthIssue] {
+    var list: [HealthIssue] = []
+    let fm = FileManager.default
+    // a kernel panic report newer than the boot before this one (macOS writes it at the boot after the panic)
+    let dr = "/Library/Logs/DiagnosticReports"
+    var newest: (String, Date)? = nil
+    for dir in [dr, dr + "/Retired"] {
+        for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] where name.hasSuffix(".panic") && !name.hasPrefix(".") {
+            let p = dir + "/" + name
+            if let m = (try? fm.attributesOfItem(atPath: p))?[.modificationDate] as? Date, m > (newest?.1 ?? .distantPast) { newest = (name, m) }
+        }
+    }
+    if let (name, date) = newest, Date().timeIntervalSince(date) < 7 * 86400 {
+        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
+        list.append(HealthIssue(code: "panics", text: String(localized: "macOS restarted after a kernel panic (\(f.string(from: date))). A diagnostics report holds its text."), key: name))
+    }
+    if facts.bootGuardOff {
+        list.append(HealthIssue(code: "accel-off", text: String(localized: "The boot guard holds acceleration off: earlier boots did not reach a healthy desktop. Clear it once you know why."), key: "on"))
+    }
+    let ssv = "/System/Library/Extensions/NVMTLDriver.bundle", mark = "/Library/GPUBundles/nvmtl/ssv-component.plist"
+    if fm.fileExists(atPath: ssv) && !fm.fileExists(atPath: "/Library/GPUBundles/NVMTLDriver.use-library") {
+        if let a = sha256Prefix(ssv + "/Contents/Frameworks/nvmtl/libvulkan_intel.dylib"),
+           let b = sha256Prefix("/Library/GPUBundles/nvmtl/libvulkan_intel.dylib"), a != b {
+            list.append(HealthIssue(code: "ssv-mesa", text: String(localized: "The system-volume copy of the Metal driver is older than the rest of the install, and WindowServer uses it. Install the package's system-volume copy too (system-volume/ssv-install.sh --apply) and restart."), key: a + b))
+        }
+    } else if !fm.fileExists(atPath: ssv) && fm.fileExists(atPath: mark) {
+        list.append(HealthIssue(code: "ssv-gone", text: String(localized: "The system-volume copy of the Metal driver is gone (a macOS update replaces the system volume). Install it again, or use the /Library copy."), key: plistValue(mark, "build") ?? "gone"))
+    }
+    let nv = commandOutput("/usr/sbin/nvram", ["intelxefb-hidpi"]) ?? ""
+    let hidpiOn = nv.contains("\t1")
+    let ws = (CFPreferencesCopyValue("DisplayResolutionEnabled" as CFString, "/Library/Preferences/com.apple.windowserver" as CFString,
+                                     kCFPreferencesAnyUser, kCFPreferencesCurrentHost) as? Bool) ?? ((NSDictionary(contentsOfFile: "/Library/Preferences/com.apple.windowserver.plist")?["DisplayResolutionEnabled"] as? Bool) ?? false)
+    var ours = 0
+    if let e = fm.enumerator(atPath: "/Library/Displays/Contents/Resources/Overrides") {
+        for case let rel as String in e {
+            let p = "/Library/Displays/Contents/Resources/Overrides/" + rel
+            if NSDictionary(contentsOfFile: p)?["IntelXeHiDPI"] != nil { ours += 1 }
+        }
+    }
+    if hidpiOn && (ours == 0 || !ws) {
+        list.append(HealthIssue(code: "hidpi-half", text: String(localized: "The HiDPI switch is only half on. Turn it on again on the Display page, then restart."), key: "\(ours)\(ws)"))
+    } else if !hidpiOn && ours > 0 {
+        list.append(HealthIssue(code: "hidpi-stale", text: String(localized: "A HiDPI display override is left without the framebuffer's HiDPI modes. Turn HiDPI off or on again on the Display page."), key: "\(ours)"))
+    }
+    let loaded = commandOutput("/usr/bin/kmutil", ["showloaded", "--list-only"], seconds: 30) ?? ""
+    for (kext, id) in [("IntelXeFB", "io.github.yusufklncc.IntelXeFB"), ("NMXAccel", "com.nullmoth.NMXAccel"), ("NMXAGDC", "com.nullmoth.NMXAGDC")] {
+        guard let line = loaded.split(separator: "\n").first(where: { $0.contains(id + " ") }),
+              let open = line.firstIndex(of: "("), let close = line[open...].firstIndex(of: ")") else { continue }
+        let lv = String(line[line.index(after: open)..<close])
+        if let fv = plistValue("/Library/Extensions/\(kext).kext/Contents/Info.plist", "CFBundleShortVersionString"), fv != lv {
+            list.append(HealthIssue(code: "kext-version", text: String(localized: "\(kext).kext \(lv) is loaded, but \(fv) is installed. Restart; if it stays, run Install this package again."), key: lv + fv))
+            break
+        }
+    }
+    let brand = commandOutput("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]) ?? ""
+    if brand.range(of: #"1[2-4][0-9]{3}|Core\(TM\) Ultra|Core Ultra"#, options: .regularExpression) != nil && !loaded.lowercased().contains("hybridpm") {
+        list.append(HealthIssue(code: "cpu-hybridpm", text: String(localized: "This CPU has performance and efficiency cores and HybridPM.kext is not loaded: macOS can hold every core at a low clock, which makes the GPU look slow too. Add HybridPM to your EFI (see the install guide)."), key: "on"))
+    }
+    return list
+}

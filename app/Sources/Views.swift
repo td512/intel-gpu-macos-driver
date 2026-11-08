@@ -18,6 +18,13 @@ final class Manager: ObservableObject {
     @Published var reportID: String?
     @Published var reportFile: String?
     @Published var reportWarnings: [ReportWarning] = []
+    @Published var health: [HealthIssue] = []
+    /// dismissed health issues: code -> the key it had (a new key shows it again)
+    var healthDismissed: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: "healthDismissed") as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: "healthDismissed") }
+    }
+    func dismiss(_ issue: HealthIssue) { var d = healthDismissed; d[issue.code] = issue.key; healthDismissed = d; health.removeAll { $0.code == issue.code } }
     @Published var rebootNeeded = false
     @Published var efiNotice: EFINotice?
     @Published var efi = EFIStatus()
@@ -44,6 +51,8 @@ final class Manager: ObservableObject {
     func refresh() async {
         probing = true
         facts = await Task.detached { SystemFacts.probe() }.value
+        let f = facts, dismissed = healthDismissed
+        health = await Task.detached { healthIssues(f).filter { dismissed[$0.code] != $0.key } }.value
         await refreshPackageStatus()
         await refreshEFI()
         await refreshHiDPI()
@@ -392,6 +401,18 @@ struct Banners: View {
                 Banner(symbol: "externaldrive.badge.exclamationmark", tint: .orange, text: notice.text) {
                     Button("Open the EFI page") { manager.requestedSection = .efi }
                     Button("Done") { manager.efiNotice = nil }
+                }
+            }
+            ForEach(manager.health) { issue in
+                Banner(symbol: "exclamationmark.triangle", tint: .orange, text: LocalizedStringKey(issue.text)) {
+                    switch issue.code {
+                    case "accel-off": Button("Clear the boot guard") { manager.clearBootGuard() }
+                    case "hidpi-half", "hidpi-stale": Button("Open the Display page") { manager.requestedSection = .display }
+                    case "ssv-mesa", "ssv-gone", "kext-version": Button("Open the Driver page") { manager.requestedSection = .driver }
+                    default: EmptyView()
+                    }
+                    Button("Create a report") { manager.requestedSection = .report }
+                    Button("Dismiss") { manager.dismiss(issue) }
                 }
             }
             if manager.rebootNeeded {

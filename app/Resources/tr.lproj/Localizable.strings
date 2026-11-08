@@ -203,3 +203,15 @@
 "Open the Driver page" = "Sürücü sayfasını aç";
 "Forms" = "Formlar";
 "Cancelled. No report was written." = "İptal edildi. Rapor yazılmadı.";
+
+/* start-up health banners (Health.swift) */
+"macOS restarted after a kernel panic (%@). A diagnostics report holds its text." = "macOS bir çekirdek paniğinden sonra yeniden başladı (%@). Ayrıntısı tanılama raporunda.";
+"The boot guard holds acceleration off: earlier boots did not reach a healthy desktop. Clear it once you know why." = "Açılış koruması hızlandırmayı kapalı tutuyor: önceki açılışlar sağlıklı bir masaüstüne ulaşamadı. Nedenini öğrenince temizleyin.";
+"The system-volume copy of the Metal driver is older than the rest of the install, and WindowServer uses it. Install the package's system-volume copy too (system-volume/ssv-install.sh --apply) and restart." = "Metal sürücüsünün sistem diski kopyası kurulumun geri kalanından eski ve WindowServer onu kullanıyor. Paketin sistem diski kopyasını da kurun (system-volume/ssv-install.sh --apply) ve yeniden başlatın.";
+"The system-volume copy of the Metal driver is gone (a macOS update replaces the system volume). Install it again, or use the /Library copy." = "Metal sürücüsünün sistem diski kopyası yok (macOS güncellemesi sistem diskini değiştirir). Yeniden kurun ya da /Library kopyasını kullanın.";
+"The HiDPI switch is only half on. Turn it on again on the Display page, then restart." = "HiDPI anahtarı yarım açık. Ekran sayfasında yeniden açın, sonra yeniden başlatın.";
+"A HiDPI display override is left without the framebuffer's HiDPI modes. Turn HiDPI off or on again on the Display page." = "Bir HiDPI ekran ayarı, framebuffer'ın HiDPI modları olmadan kalmış. Ekran sayfasında HiDPI'ı kapatıp ya da yeniden açın.";
+"%@.kext %@ is loaded, but %@ is installed. Restart; if it stays, run Install this package again." = "%1$@.kext %2$@ yüklü, ama kurulu dosya %3$@. Yeniden başlatın; düzelmezse 'Bu paketi kur'u yeniden çalıştırın.";
+"This CPU has performance and efficiency cores and HybridPM.kext is not loaded: macOS can hold every core at a low clock, which makes the GPU look slow too. Add HybridPM to your EFI (see the install guide)." = "Bu işlemcide performans ve verimlilik çekirdekleri var ve HybridPM.kext yüklü değil: macOS tüm çekirdekleri düşük saat hızında tutabilir, bu da GPU'yu yavaş gösterir. HybridPM'i EFI'nize ekleyin (kurulum kılavuzuna bakın).";
+"Create a report" = "Rapor oluştur";
+"Dismiss" = "Kapat";
