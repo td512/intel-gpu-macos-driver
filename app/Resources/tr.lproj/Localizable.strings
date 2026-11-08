@@ -181,3 +181,25 @@
 "Last report" = "Son rapor";
 "Report %@ is on the Desktop. Attach it to a new issue and put the ID in the form." = "%@ raporu Masaüstünde. Yeni bir hata kaydına ekleyin ve rapor numarasını forma yazın.";
 "No report was written. See the log." = "Rapor yazılmadı. Günlüğe bakın.";
+
+/* Report page */
+"Report" = "Rapor";
+"Something broken? The Report page makes a diagnostics report and tells you what it found." = "Bir şey bozuk mu? Rapor sayfası bir tanılama raporu oluşturur ve ne bulduğunu söyler.";
+"Open the Report page" = "Rapor sayfasını aç";
+"Diagnostics report" = "Tanılama raporu";
+"Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop." = "Bir sorunu bulmak için gerekenleri toplar: donanım, sürücünün durumu, günlükler, çekirdek panikleri ve OpenCore yapılandırması. Hiçbir şeyi değiştirmez ve hiçbir şey yüklemez. Seri numaraları, adlar, ağ adresleri ve Wi-Fi adları dosya yazılmadan önce silinir. Yaklaşık bir dakika sürer; dosya Masaüstüne konur.";
+"Administrator mode (asks for your password): adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock" = "Yönetici modu (parolanızı sorar): EFI bölümlerindeki OpenCore yapılandırmasını, sürücünün yalnız yöneticinin okuyabildiği sayaçlarını ve işlemci saat hızını ekler";
+"ACPI tables (DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence)" = "ACPI tabloları (macOS'un yüklediği haliyle DSDT ve SSDT'ler; Windows lisansını taşıyan tablolar asla)";
+"Staged-probe results (only for a GPU that is not supported yet)" = "Aşamalı sonda sonuçları (yalnız henüz desteklenmeyen bir GPU için)";
+"Last report" = "Son rapor";
+"Report ID" = "Rapor numarası";
+"Show in Finder" = "Finder'da göster";
+"Copy the ID" = "Numarayı kopyala";
+"Report a bug" = "Hata bildir";
+"Ask for a new GPU" = "Yeni GPU desteği iste";
+"What the report found" = "Raporun buldukları";
+"No known problem was recognised." = "Bilinen bir sorun tanınmadı.";
+"Open the Display page" = "Ekran sayfasını aç";
+"Open the Driver page" = "Sürücü sayfasını aç";
+"Forms" = "Formlar";
+"Cancelled. No report was written." = "İptal edildi. Rapor yazılmadı.";

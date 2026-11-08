@@ -177,11 +177,13 @@ for m in $(ifconfig -a 2>/dev/null | awk '/[[:space:]]ether /{print $2}' | sort 
 	case "$h" in *[a-f]*) lit mac "$h"; lit mac "$(upper "$h")" ;; esac   # all-digit forms would hit plain numbers
 done
 USERNAME=$(id -un 2>/dev/null)
-for u in "$USERNAME" "$SUDO_USER" "$(basename "$HOME")"; do
+# XE_REPORT_USER: the user whose report this is when it runs as root without sudo (IntelXe Manager's administrator mode)
+for u in "$USERNAME" "$SUDO_USER" "$(basename "$HOME")" "$XE_REPORT_USER"; do
 	case "$u" in ''|root|admin|user|guest|test|Shared|staff) ;; *) lit user "$u" ;; esac
 done
 FULLNAME=$(id -F 2>/dev/null)
 lit user "$FULLNAME"
+[ -n "$XE_REPORT_USER" ] && lit user "$(id -F "$XE_REPORT_USER" 2>/dev/null)"
 for h in "$(scutil --get ComputerName 2>/dev/null)" "$(scutil --get LocalHostName 2>/dev/null)" \
 	"$(scutil --get HostName 2>/dev/null)" "$(hostname 2>/dev/null)" "$(hostname -s 2>/dev/null)"; do
 	case "$(sysctl -n hw.model 2>/dev/null)" in *"$h"*) ;; *) lit host "$h" ;; esac   # "MacBookPro" as a host name is the model
@@ -574,6 +576,7 @@ done
 # panic reports: names of all, the panic string of those from the last $DAYS days
 DR=/Library/Logs/DiagnosticReports
 UDR="$HOME/Library/Logs/DiagnosticReports"
+[ -n "$XE_REPORT_USER" ] && [ -d "/Users/$XE_REPORT_USER" ] && UDR="/Users/$XE_REPORT_USER/Library/Logs/DiagnosticReports"   # root, for that user
 mkdir -p "$W/logs/panics"
 PANIC_AWK='
 { buf = buf $0 "\n" }
@@ -909,52 +912,52 @@ fi
 # ---------------------------------------------------------------- warnings (collector v3)
 # Known ways the stack goes wrong, each checked from what was collected; the summary lists the ones that apply first.
 WARN="$TMPBASE/.warn"; : > "$WARN"
-warn() { printf '%s\n' "$*" >> "$WARN"; }
+warn() { _c=$1; shift; printf '%s\t%s\n' "$_c" "$*" >> "$WARN"; }   # code (for IntelXe Manager), text
 _aoff=$(nvram intelxe-accel-off 2>/dev/null | cut -f2-)
 [ -n "$_aoff" ] && [ "$_aoff" != ok ] &&
-	warn "Acceleration is held off by the boot guard (NVRAM intelxe-accel-off = $_aoff): earlier boots did not reach a healthy accelerated desktop. Once the cause is fixed: sudo nvram intelxe-accel-off=ok, then restart."
+	warn accel-off "Acceleration is held off by the boot guard (NVRAM intelxe-accel-off = $_aoff): earlier boots did not reach a healthy accelerated desktop. Once the cause is fixed: sudo nvram intelxe-accel-off=ok, then restart."
 _guard=$(nvram intelxe-guard 2>/dev/null | cut -f2-)
-case "$_guard" in ''|ok) ;; *) warn "The boot guard is armed (intelxe-guard = $_guard): this boot has not yet run its desktop for a minute, or an earlier boot ended early. Normal right after login; after several minutes it means the desktop did not come up healthy." ;; esac
+case "$_guard" in ''|ok) ;; *) warn guard-armed "The boot guard is armed (intelxe-guard = $_guard): this boot has not yet run its desktop for a minute, or an earlier boot ended early. Normal right after login; after several minutes it means the desktop did not come up healthy." ;; esac
 if grep -qi nmxaccel "$TMPBASE/.kexts" 2>/dev/null && ! grep -q '"MetalPluginName" =' "$IOREGL" 2>/dev/null; then
-	warn "NMXAccel is loaded but names no Metal plugin (MetalPluginName withheld): WindowServer runs unaccelerated. The NMXAccel lines in logs/kernel-ours-*.txt say why (no-Metal fallback)."
+	warn no-metal "NMXAccel is loaded but names no Metal plugin (MetalPluginName withheld): WindowServer runs unaccelerated. The NMXAccel lines in logs/kernel-ours-*.txt say why (no-Metal fallback)."
 fi
 _ssv=/System/Library/Extensions/NVMTLDriver.bundle
 if [ -d "$_ssv" ] && [ ! -e /Library/GPUBundles/NVMTLDriver.use-library ]; then
 	_a=$(shasum -a 256 "$_ssv/Contents/Frameworks/nvmtl/libvulkan_intel.dylib" 2>/dev/null | cut -c1-16)
 	_b=$(shasum -a 256 /Library/GPUBundles/nvmtl/libvulkan_intel.dylib 2>/dev/null | cut -c1-16)
 	[ -n "$_a" ] && [ -n "$_b" ] && [ "$_a" != "$_b" ] &&
-		warn "The system-volume copy of the Metal plugin carries another Mesa ($_a) than /Library ($_b), and WindowServer uses the system-volume copy: install the package's system-volume copy too (sudo ./system-volume/ssv-install.sh --apply) and restart."
+		warn ssv-mesa "The system-volume copy of the Metal plugin carries another Mesa ($_a) than /Library ($_b), and WindowServer uses the system-volume copy: install the package's system-volume copy too (sudo ./system-volume/ssv-install.sh --apply) and restart."
 	_rb=$(defaults read /Library/GPUBundles/nvmtl/ssv-component build 2>/dev/null)
 	[ -n "$_rb" ] && [ "$_rb" != "$(sw_vers -buildVersion)" ] &&
-		warn "The system-volume copy was installed on macOS build $_rb; this is $(sw_vers -buildVersion). A macOS update can replace the system volume: check it with ./system-volume/ssv-install.sh --check."
+		warn ssv-build "The system-volume copy was installed on macOS build $_rb; this is $(sw_vers -buildVersion). A macOS update can replace the system volume: check it with ./system-volume/ssv-install.sh --check."
 fi
 if [ -f /Library/GPUBundles/nvmtl/ssv-component.plist ] && [ ! -d "$_ssv" ]; then
-	warn "ssv-component.plist records a system-volume copy, but $_ssv is gone (a macOS update replaces the system volume): reinstall it with ./system-volume/ssv-install.sh --apply, or use the /Library copy (sudo touch /Library/GPUBundles/NVMTLDriver.use-library) and restart."
+	warn ssv-gone "ssv-component.plist records a system-volume copy, but $_ssv is gone (a macOS update replaces the system volume): reinstall it with ./system-volume/ssv-install.sh --apply, or use the /Library copy (sudo touch /Library/GPUBundles/NVMTLDriver.use-library) and restart."
 fi
 _hn=$(nvram intelxefb-hidpi 2>/dev/null | cut -f2-); [ "$_hn" = 1 ] || _hn=0
 _ho=$(find /Library/Displays/Contents/Resources/Overrides -type f 2>/dev/null | while read -r o; do /usr/libexec/PlistBuddy -c 'Print :IntelXeHiDPI' "$o" >/dev/null 2>&1 && echo x; done | grep -c x)
 _hw=$(defaults read /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled 2>/dev/null || echo 0)
 if [ "$_hn" = 1 ] && { [ "$_ho" = 0 ] || [ "$_hw" != 1 ]; }; then
-	warn "The HiDPI switch is half on (NVRAM intelxefb-hidpi=1, display override from hidpi.sh: $_ho, DisplayResolutionEnabled: $_hw): run sudo ./hidpi.sh --on again (or the app's Display page) and restart."
+	warn hidpi-half "The HiDPI switch is half on (NVRAM intelxefb-hidpi=1, display override from hidpi.sh: $_ho, DisplayResolutionEnabled: $_hw): run sudo ./hidpi.sh --on again (or the app's Display page) and restart."
 elif [ "$_hn" = 0 ] && [ "$_ho" -gt 0 ]; then
-	warn "A HiDPI display override from hidpi.sh is present but NVRAM intelxefb-hidpi is not 1: the scaled sizes are listed without the framebuffer's scaler. Run sudo ./hidpi.sh --off or --on, then restart."
+	warn hidpi-stale "A HiDPI display override from hidpi.sh is present but NVRAM intelxefb-hidpi is not 1: the scaled sizes are listed without the framebuffer's scaler. Run sudo ./hidpi.sh --off or --on, then restart."
 fi
 _iv=$(cat '/Library/Application Support/intel-gpu-macos-driver/installed-version' 2>/dev/null)
 for k in IntelXeFB NMXAccel NMXAGDC; do
 	_lv=$(grep -iE "$k" "$TMPBASE/.kexts" 2>/dev/null | head -1 | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\(/) { v = $i; gsub(/[()]/, "", v); print v; exit } }')
 	_fv=$(pget "/Library/Extensions/$k.kext/Contents/Info.plist" CFBundleShortVersionString)
 	[ -n "$_lv" ] && [ -n "$_fv" ] && [ "$_lv" != "$_fv" ] &&
-		warn "$k.kext $_lv is loaded but the installed file is $_fv: restart (if it stays, the Auxiliary Kernel Collection was not rebuilt: sudo ./install.sh --apply again)."
-	[ -z "$_lv" ] && [ -n "$_fv" ] && warn "$k.kext is installed ($_fv) but not loaded: see logs/kernel-ours-*.txt and kmutil, or approve it in System Settings > Privacy & Security."
+		warn kext-version "$k.kext $_lv is loaded but the installed file is $_fv: restart (if it stays, the Auxiliary Kernel Collection was not rebuilt: sudo ./install.sh --apply again)."
+	[ -z "$_lv" ] && [ -n "$_fv" ] && warn kext-not-loaded "$k.kext is installed ($_fv) but not loaded: see logs/kernel-ours-*.txt and kmutil, or approve it in System Settings > Privacy & Security."
 done
 case "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)" in
 *1[2-4][0-9][0-9][0-9]*|*Core\ Ultra*)
 	grep -qi hybridpm "$TMPBASE/.kexts" 2>/dev/null ||
-		warn "This Intel CPU has performance and efficiency cores, and HybridPM.kext is not loaded: XCPM can hold every core at a low clock, which shows as a slow GPU (Geekbench GPU scores about a third lower on the test machine). See the guide's CPU section." ;;
+		warn cpu-hybridpm "This Intel CPU has performance and efficiency cores, and HybridPM.kext is not loaded: XCPM can hold every core at a low clock, which shows as a slow GPU (Geekbench GPU scores about a third lower on the test machine). See the guide's CPU section." ;;
 esac
 [ -n "$FPS_IDLE" ] && [ "$FPS_IDLE" -gt 100 ] &&
-	warn "The display presented $FPS_IDLE frames a second while this report ran. If nothing on screen was moving, something redraws at full rate and takes GPU time from applications."
-[ "$NPANIC" -gt 0 ] && warn "$NPANIC kernel panic(s) in the last $DAYS days: their text is in logs/panics/."
+	warn redraw "The display presented $FPS_IDLE frames a second while this report ran. If nothing on screen was moving, something redraws at full rate and takes GPU time from applications."
+[ "$NPANIC" -gt 0 ] && warn panics "$NPANIC kernel panic(s) in the last $DAYS days: their text is in logs/panics/."
 
 # ---------------------------------------------------------------- summary
 note "summary"
@@ -967,7 +970,7 @@ inst() { grep -A2 "^$1\$" "$W/driver/installed.txt" 2>/dev/null | grep -E '^  [0
 	echo
 	if [ -s "$WARN" ]; then
 		echo "Warnings (read first)"
-		awk '{ print "  ! " $0 }' "$WARN" | fold -s -w 118 | sed 's/^\([^ ]\)/      \1/'
+		cut -f2- "$WARN" | awk '{ print "  ! " $0 }' | fold -s -w 118 | sed 's/^\([^ ]\)/      \1/'
 		echo
 	fi
 	echo "macOS        $(sw_vers -productVersion 2>/dev/null) ($(sw_vers -buildVersion 2>/dev/null)) $ARCH"
@@ -1109,6 +1112,8 @@ tar -czf "$OUT" -C "$TMPBASE" "$NAME" || { say "could not write $OUT"; exit 1; }
 chmod 644 "$OUT"
 echo
 echo "Report ID: $ID"
+# one line per warning for IntelXe Manager: "Warning <code>: <text>" (the codes are in the warnings section above)
+[ -s "$WARN" ] && awk -F'\t' '{ print "Warning " $1 ": " $2 }' "$WARN"
 echo "File:      $OUT"
 echo "Took $((END - START)) s. Nothing was uploaded. Attach the file to your GitHub issue and put the"
 echo "report ID in the issue form. You can look inside first: tar -xzf $NAME.tar.gz"
