@@ -4,12 +4,19 @@ import SwiftUI
 
 struct ManagerApp: App {
     @StateObject var manager = Manager()
+    @StateObject var menuModel = MonitorModel()
+    @AppStorage("menuBarItem") var menuBarItem = false
     var body: some Scene {
-        WindowGroup("IntelXe Manager") {
+        WindowGroup("IntelXe Manager", id: "main") {
             RootView().environmentObject(manager)
         }
         .windowToolbarStyle(.unified)
         .commands { CommandGroup(replacing: .newItem) {} }
+        MenuBarExtra(isInserted: $menuBarItem) {
+            MenuBarContent(model: menuModel).onAppear { menuModel.start() }
+        } label: {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+        }
     }
 }
 

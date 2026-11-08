@@ -377,7 +377,7 @@ run_to 10 kmutil showloaded --list-only > "$TMPBASE/.kexts" 2>/dev/null
 	echo "# graphics kexts"
 	grep -iE 'graphics|framebuffer|accelerat|gpu|iondrv|amdradeon|nvda|geforce|paravirt' "$TMPBASE/.kexts" | grep -viE 'intelxe|nmx'
 } > "$F"
-INTELXE_SYSCTLS="state stats vram surfvram_stats display_irqs step irq video hugepages range_inval unbind_async rc6 gucrc
+INTELXE_SYSCTLS="state stats sensors vram surfvram_stats display_irqs step irq video hugepages range_inval unbind_async rc6 gucrc
 fw_hold slpc_min slpc_max slpc_strategy slpc_profile slpc_ignore_eff media_slpc ctx_policies rc_yield job_timeout_ms
 surfvram surfvram_mb freq freq_manual gt_reset dumpexec"
 INTELXEFB_SYSCTLS="intelxefb_dpms intelxefb_hwcursor intelxefb_vbl_precise intelxefb_vrr_lfc intelxefb_vrr_vbl intelxefb_vrr_tick_us

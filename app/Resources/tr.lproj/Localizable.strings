@@ -276,3 +276,13 @@
 "memory %lld °C" = "bellek %lld °C";
 "Video memory in use" = "Kullanılan video belleği";
 "pixels" = "piksel";
+
+/* menu bar item */
+"Menu bar" = "Menü çubuğu";
+"Show IntelXe in the menu bar: frames, GPU clock and temperature, and the display sizes (HiDPI ones too) to switch with one click" = "IntelXe'yi menü çubuğunda göster: kare hızı, GPU saat hızı ve sıcaklık, ve tek tıkla geçilebilen ekran boyutları (HiDPI olanlar dahil)";
+"frames/s" = "kare/s";
+"GPU idle" = "GPU boşta";
+"GPU %lld MHz" = "GPU %lld MHz";
+"Display size" = "Ekran boyutu";
+"Open IntelXe Manager" = "IntelXe Manager'ı aç";
+"Quit" = "Çık";

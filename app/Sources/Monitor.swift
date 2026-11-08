@@ -97,9 +97,13 @@ struct Sparkline: View {
 struct MonitorView: View {
     @EnvironmentObject var manager: Manager
     @StateObject var model = MonitorModel()
+    @AppStorage("menuBarItem") var menuBarItem = false
     var body: some View {
         let s = model.now
         Form {
+            Section2(title: "Menu bar") {
+                Toggle("Show IntelXe in the menu bar: frames, GPU clock and temperature, and the display sizes (HiDPI ones too) to switch with one click", isOn: $menuBarItem)
+            }
             Section2(title: "Display") {
                 LabeledContent("Mode") { Text(s.mode.isEmpty ? "–" : s.mode) }
                 LabeledContent("Variable refresh") { Text(manager.vrrActive ? String(localized: "Offered") : String(localized: "Off")) }
