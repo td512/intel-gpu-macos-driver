@@ -40,6 +40,9 @@ final class Manager: ObservableObject {
     @Published var efiTarget = EFITarget.recorded
     @Published var efiPlans: [EFIAction: EFIPlan] = [:]
     @Published var hidpi = HiDPIStatus()
+    /// Adaptive-Sync (Variable refresh) modes: wanted (NVRAM intelxefb-vrr-modes, unset = on) and offered this boot
+    @Published var vrrWanted = true
+    @Published var vrrActive = false
     @Published var efiChoice: String? = UserDefaults.standard.string(forKey: "efiPartition")
     /// A folder holding EFI/OC that the user chose instead of the partition (for this session only).
     @Published var efiFolder: String?

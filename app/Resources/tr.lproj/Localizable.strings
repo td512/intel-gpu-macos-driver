@@ -251,3 +251,10 @@
 "The driver decodes H.264, HEVC, AV1 and VP9 on the card. Missing ones: the VideoToolbox components are not installed or did not load." = "Sürücü H.264, HEVC, AV1 ve VP9'u kartta çözer. Eksik olanlar: VideoToolbox bileşenleri kurulu değil ya da yüklenmedi.";
 "Hardware video encoders" = "Donanım video kodlayıcılar";
 "HEVC encode, 1080p" = "HEVC kodlama, 1080p";
+
+/* Variable refresh (Display page) */
+"Variable refresh (Adaptive-Sync)" = "Değişken yenileme (Adaptive-Sync)";
+"System Settings > Displays lists a Variable refresh rate for monitors that support Adaptive-Sync: the monitor then waits for each new frame, so games and video run without tearing or stutter below the maximum rate. On by default; turn it off if the monitor flickers in Variable mode." = "Sistem Ayarları > Ekranlar, Adaptive-Sync destekleyen monitörlerde Değişken yenileme hızını listeler: monitör her yeni kareyi bekler, böylece oyunlar ve videolar en yüksek hızın altında yırtılmadan ve takılmadan oynar. Varsayılan olarak açık; Değişken modda monitör titrerse kapatın.";
+"Variable modes" = "Değişken modlar";
+"Turn Variable refresh off" = "Değişken yenilemeyi kapat";
+"Turn Variable refresh on" = "Değişken yenilemeyi aç";

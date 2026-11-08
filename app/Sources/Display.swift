@@ -53,8 +53,25 @@ enum HiDPIAction: String, Identifiable {
 
 extension Manager {
     func refreshHiDPI() async {
+        let (wanted, active) = await Task.detached { () -> (Bool, Bool) in
+            // IntelXeFB: unset = on; a value whose first character is not '1' = off (read once, at start)
+            let nv = commandOutput("/usr/sbin/nvram", ["intelxefb-vrr-modes"]) ?? ""
+            let value = nv.split(separator: "\t").dropFirst().first.map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            let reg = commandOutput("/usr/sbin/ioreg", ["-r", "-c", "IntelXeFramebuffer", "-l", "-w0"]) ?? ""
+            return (value.map { $0.hasPrefix("1") } ?? true, reg.contains("IOFBTimingRange"))
+        }.value
+        vrrWanted = wanted; vrrActive = active
         guard let script = hidpiScript(for: package) else { hidpi = HiDPIStatus(); return }
         hidpi = await Task.detached { hidpiStatus(script: script) }.value
+    }
+
+    func setVRR(_ on: Bool) {
+        perform(title: on ? String(localized: "Turn Variable refresh on") : String(localized: "Turn Variable refresh off"),
+                command: "/usr/sbin/nvram intelxefb-vrr-modes=\(on ? 1 : 0)", needsRoot: true, then: { result in
+            if result.cancelled { self.lastResult = String(localized: "Cancelled. Nothing changed.") }
+            else if result.succeeded { self.lastResult = String(localized: "Finished. Restart to use the change."); self.rebootNeeded = true }
+            else { self.lastResult = String(localized: "It did not finish. See the log.") }
+        })
     }
 
     func performHiDPI(_ action: HiDPIAction) {
@@ -101,6 +118,19 @@ struct DisplayView: View {
                     }
                     Text("It takes effect after a restart. Then choose a size in System Settings > Displays. Turning them off takes back only what was written here, and a chosen HiDPI size goes back to the monitor's own.")
                         .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Section2(title: "Variable refresh (Adaptive-Sync)") {
+                Text("System Settings > Displays lists a Variable refresh rate for monitors that support Adaptive-Sync: the monitor then waits for each new frame, so games and video run without tearing or stutter below the maximum rate. On by default; turn it off if the monitor flickers in Variable mode.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                LabeledContent("Variable modes") {
+                    Text(manager.vrrWanted == manager.vrrActive ? (manager.vrrActive ? String(localized: "On") : String(localized: "Off"))
+                         : (manager.vrrWanted ? String(localized: "On after a restart") : String(localized: "Off after a restart")))
+                }
+                if manager.vrrWanted {
+                    Button("Turn Variable refresh off", role: .destructive) { manager.setVRR(false) }
+                } else {
+                    Button("Turn Variable refresh on") { manager.setVRR(true) }
                 }
             }
         }
