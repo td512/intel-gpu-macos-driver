@@ -103,6 +103,8 @@ func runGPUTest(progress: @escaping (String) -> Void) -> [TestResult] {
                                   state: bad == 0 ? .good : .bad))
         }
     }
+    // the Metal features apps and games use, OpenGL, OpenCL, Vulkan (APITests.swift)
+    out.append(contentsOf: runAPITests(progress: progress))
     // 3. compute rate (16 independent FMA chains per thread)
     progress(String(localized: "Compute rate…"))
     if let p = pso("fma16") {
