@@ -21,13 +21,14 @@ extension EFIAction {
         case .mount: return String(localized: "Mount the EFI partition")
         case .apply: return String(localized: "Make these changes")
         case .settings: return String(localized: "Change these settings")
+        case .safari: return String(localized: "Turn Apple Secure Boot off")
         case .undo: return String(localized: "Undo the last EFI change")
         }
     }
     var explanation: String {
         switch self {
         case .mount: return String(localized: "Mounts the partition so that its files can be read and changed. Nothing is written to it.")
-        case .apply, .settings: return String(localized: "Backs up the whole EFI folder first, then makes exactly these changes. If the EFI changed since this list was made, nothing is written. Restart afterwards.")
+        case .apply, .settings, .safari: return String(localized: "Backs up the whole EFI folder first, then makes exactly these changes. If the EFI changed since this list was made, nothing is written. Restart afterwards.")
         case .undo: return String(localized: "Puts back, from the last backup, the files that change replaced. The backup stays. Restart afterwards.")
         }
     }
@@ -56,6 +57,7 @@ struct EFIView: View {
                 if efi.found && (efi.mounted || efi["efi_source"] == "folder") {
                     settings
                     files
+                    safari
                     undo
                 }
             }
@@ -139,6 +141,17 @@ struct EFIView: View {
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             planOrHint(.settings)
             applyButton(.settings)
+        }
+    }
+
+    /// only for the system-volume copy (Driver page, Safari and WebKit)
+    var safari: some View {
+        Section2(title: "Safari on the GPU (optional)") {
+            Text("The system-volume copy of the Metal driver (Driver page) changes the system volume's seal. OpenCore's Apple Secure Boot (Misc > Security > SecureBootModel) refuses to start macOS from such a volume, so it must be Disabled first. Only for the system-volume copy: without it, leave it as it is.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            LabeledContent("SecureBootModel") { Text(efi["secure_boot_model"].isEmpty ? "–" : efi["secure_boot_model"]) }
+            planOrHint(.safari)
+            applyButton(.safari)
         }
     }
 

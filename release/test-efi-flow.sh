@@ -218,5 +218,17 @@ grep -v 0be20000 "$ROOT/ioreg" > "$ROOT/ioreg3"
 got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg3" "$S" --package "$P" --efi "$F" --status | sed -n 's/^card_acpi_path=//p')
 [ -z "$got" ] && ok "ioreg: no card, no path" || bad "ioreg without a card: $got"
 
+# the Safari setting (system-volume copy): SecureBootModel to Disabled, apart from stage 2, and back
+plutil -replace Misc.Security.SecureBootModel -string Default "$C"; cp "$C" "$ROOT/config.sbm"
+expect "SecureBootModel Default" secure_boot_model Default
+efi --safari-plan > "$ROOT/fplan" 2>&1 || bad "--safari-plan exited with an error"
+has "safari plan: SecureBootModel" "$ROOT/fplan" "SecureBootModel: Default -> Disabled"
+efi --settings-plan > "$ROOT/out" 2>&1; hasnt "stage 2 leaves SecureBootModel alone" "$ROOT/out" "SecureBootModel"
+efi --safari-apply --expect "$(hash "$ROOT/fplan")" > "$ROOT/out" 2>&1 || { bad "--safari-apply exited with an error"; cat "$ROOT/out"; }
+expect "after --safari-apply" secure_boot_model Disabled
+efi --safari-plan > "$ROOT/out" 2>&1; hasnt "nothing left for Safari" "$ROOT/out" "SecureBootModel:"
+efi --undo > "$ROOT/out" 2>&1 || { bad "--undo of the Safari setting exited with an error"; cat "$ROOT/out"; }
+cmp -s "$C" "$ROOT/config.sbm" && ok "--undo of the Safari setting: config.plist back" || bad "--undo of the Safari setting"
+
 echo "== $fails failure(s)"
 exit $fails

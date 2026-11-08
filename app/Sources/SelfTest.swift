@@ -17,7 +17,7 @@ func renderSnapshots(into folder: String) {
     if let folder = selfTestEFIFolder, let package = manager.package, let script = efiScript(for: package) {
         manager.efiTarget = .folder(folder)
         manager.efi = efiStatus(script: script, package: package, target: manager.efiTarget)
-        for action in [EFIAction.apply, .settings, .undo] {
+        for action in [EFIAction.apply, .settings, .safari, .undo] {
             manager.efiPlans[action] = efiPlan(script: script, package: package, target: manager.efiTarget, action.planArgument!)
         }
         manager.efiNotice = EFINotice.after(.install, status: manager.efi)

@@ -65,6 +65,7 @@ final class SettingsState: ObservableObject {
     @Published var edit = DriverSettings()
     @Published var loaded = false
     @Published var loginItem = SMAppService.mainApp.status == .enabled
+    @Published var loginCheck = loginCheckEnabled()
 }
 
 struct SettingsView: View {
@@ -99,6 +100,7 @@ struct SettingsView: View {
                     do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {}
                     st.loginItem = SMAppService.mainApp.status == .enabled
                 }))
+                CaptionedToggle(title: "Check the driver at login", caption: "Without opening the app: after each login, a dialog only when something needs attention, such as a macOS update that removed the system-volume copy. Applies from the next login.", isOn: Binding(get: { st.loginCheck }, set: { setLoginCheck($0); st.loginCheck = loginCheckEnabled() }))
                 CaptionedToggle(title: "Check for a new release at start", caption: "Asks GitHub for the latest release when the app opens.", isOn: $autoUpdateCheck)
             }
         }

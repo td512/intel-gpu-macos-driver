@@ -121,6 +121,7 @@ extension Manager {
 
 final class SSVPageState: ObservableObject {
     @Published var confirming: SSVAction?
+    @Published var loginCheck = loginCheckEnabled()
 }
 
 /// The Driver page's section for the system-volume copy.
@@ -140,6 +141,21 @@ struct SSVSection: View {
             if s.installed, let from = s.loadedFrom {
                 LabeledContent("Metal loads the driver from") { Text(from).foregroundStyle(.secondary) }
             }
+            let installable = s.state != .inUse && s.state != .notUsed
+            if s.packageScript != nil && installable {
+                LabeledContent("OpenCore's Apple Secure Boot") {
+                    HStack(spacing: 8) {
+                        Label(secureBootText, systemImage: secureBootOK == true ? "checkmark.circle.fill" : secureBootOK == false ? "exclamationmark.triangle.fill" : "questionmark.circle")
+                            .foregroundStyle(secureBootOK == true ? Color.green : secureBootOK == false ? Color.orange : Color.secondary)
+                            .multilineTextAlignment(.trailing)
+                        if secureBootOK != true { Button("Open the EFI page") { manager.requestedSection = .efi }.fixedSize() }
+                    }
+                }
+            }
+            if s.installed || s.recordedBuild != nil {
+                CaptionedToggle(title: "Tell me at login when a macOS update removed it", caption: "A macOS update replaces the system volume, and this copy with it; Safari then draws in software again until it is installed once more. The same check as Check the driver at login on the Power and app page.",
+                                isOn: Binding(get: { page.loginCheck }, set: { setLoginCheck($0); page.loginCheck = loginCheckEnabled() }))
+            }
             if s.packageScript == nil {
                 Text(manager.package == nil ? String(localized: "Choose a package above: the system-volume copy comes from it.")
                                             : String(localized: "This package has no system-volume copy."))
@@ -151,11 +167,12 @@ struct SSVSection: View {
                     if s.state == .notUsed {
                         Button(SSVAction.use.title) { page.confirming = .use }.buttonStyle(.borderedProminent)
                     }
+                    // a changed seal does not boot with Apple Secure Boot on: install only once the EFI says it is off
                     if s.state == .notPackage {
-                        Button(String(localized: "Install this package's copy")) { page.confirming = .install }
-                    } else if s.state != .inUse && s.state != .notUsed {
+                        Button(String(localized: "Install this package's copy")) { page.confirming = .install }.disabled(secureBootOK != true)
+                    } else if installable {
                         Button(s.installed || s.recordedBuild != nil ? String(localized: "Install this package's copy") : SSVAction.install.title) { page.confirming = .install }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.borderedProminent).disabled(secureBootOK != true)
                     }
                     if s.installed {
                         Button(String(localized: "Remove…"), role: .destructive) { page.confirming = .uninstall }
@@ -169,6 +186,20 @@ struct SSVSection: View {
             Button("Cancel", role: .cancel) {}
         } message: { action in
             Text(action.explanation)
+        }
+    }
+
+    /// SecureBootModel in the config.plist of the EFI OpenCore booted from: nil when it could not be read (not mounted)
+    var secureBootOK: Bool? {
+        let e = manager.efi
+        guard e.readable, e.isOpenCore else { return nil }
+        return e["secure_boot_model"] == "Disabled"
+    }
+    var secureBootText: String {
+        switch secureBootOK {
+        case true?: return String(localized: "Off (SecureBootModel Disabled)")
+        case false?: return String(localized: "On (SecureBootModel \(manager.efi["secure_boot_model"].ifEmpty("?"))): macOS would not start; turn it off first")
+        case nil: return String(localized: "Not checked: mount the EFI partition")
         }
     }
 

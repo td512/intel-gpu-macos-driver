@@ -93,7 +93,7 @@ final class Manager: ObservableObject {
             }
             var plans: [EFIAction: EFIPlan] = [:]
             if status.readable && status.isOpenCore {
-                for action in [EFIAction.apply, .settings, .undo] {
+                for action in [EFIAction.apply, .settings, .safari, .undo] {
                     if let argument = action.planArgument, let plan = efiPlan(script: script, package: package, target: target, argument) {
                         plans[action] = plan
                     }
@@ -438,6 +438,7 @@ struct RootView: View {
                     w.setFrame(NSRect(x: w.frame.minX, y: screen.visibleFrame.maxY - height, width: max(w.frame.width, 980), height: height), display: true)
                 }
             }
+            refreshLoginCheckPath()
             await manager.refresh()
             if UserDefaults.standard.object(forKey: "autoUpdateCheck") as? Bool ?? true { await manager.checkForUpdate() }
             // first runs, until the setup assistant has been finished once: open it where the machine stands

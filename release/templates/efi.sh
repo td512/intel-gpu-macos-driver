@@ -8,6 +8,9 @@
 #   sudo ./efi.sh --apply           back up the whole EFI folder, then make those changes
 #   ./efi.sh --settings-plan        what --settings-apply would change (stage 2: SIP, AMFI and surfvram boot-args, quirks)
 #   sudo ./efi.sh --settings-apply  back up the whole EFI folder, then make those changes
+#   ./efi.sh --safari-plan          what --safari-apply would change: Misc > Security > SecureBootModel = Disabled, which
+#                                   the optional system-volume copy (Safari on the GPU) needs. Changes nothing.
+#   sudo ./efi.sh --safari-apply    back up the whole EFI folder, then make that change
 #   ./efi.sh --undo-plan            what --undo would put back
 #   sudo ./efi.sh --undo            put back, from the last backup, the files the last change replaced
 #   sudo ./efi.sh --mount           mount the EFI partition (macOS mounts it read-write; it stays mounted until restart)
@@ -29,15 +32,15 @@ KEXT=IntelXe.kext OLDKEXT=B580.kext SSDT=SSDT-ARCOFF.aml   # intelxe-rename: kee
 CMD="" EFIDIR="" PART="" EXPECT=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --status|--plan|--apply|--settings-plan|--settings-apply|--undo-plan|--undo|--mount) CMD=$1; shift;;
+        --status|--plan|--apply|--settings-plan|--settings-apply|--safari-plan|--safari-apply|--undo-plan|--undo|--mount) CMD=$1; shift;;
         --package) PKG=$(cd "$2" && pwd); shift 2;;
         --efi) EFIDIR=$(cd "$2" && pwd); shift 2;;
         --part) PART=$(printf '%s' "$2" | tr a-f A-F); shift 2;;
         --expect) EXPECT=$2; shift 2;;
-        *) sed -n '3,21p' "$0"; exit 2;;
+        *) sed -n '3,24p' "$0"; exit 2;;
     esac
 done
-[ -n "$CMD" ] || { sed -n '3,21p' "$0"; exit 2; }
+[ -n "$CMD" ] || { sed -n '3,24p' "$0"; exit 2; }
 if [ -n "$PART" ] && ! [[ "$PART" =~ ^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$ ]]; then
     echo "--part takes a partition UUID (see --status, candidate=), not a disk name"; exit 2
 fi
@@ -268,6 +271,17 @@ plan_settings() {
     return 0
 }
 
+# The system-volume copy (system-volume/ssv-install.sh) boots from a snapshot whose seal no longer matches Apple's:
+# Apple Secure Boot (any SecureBootModel but Disabled) refuses that, and the Mac does not boot. Kept apart from stage 2:
+# only those who install the system-volume copy need it, and it turns a macOS security feature off.
+plan_safari() {
+    local cur
+    if ! plutil -extract Misc.Security xml1 -o /dev/null "$CFG" 2>/dev/null; then NOTES+=("config.plist has no Misc > Security: not changed"); return 0; fi
+    cur=$(pget "$CFG" Misc.Security.SecureBootModel)
+    [ "$cur" = Disabled ] || { PLAN+=("config   Misc > Security > SecureBootModel: ${cur:-missing} -> Disabled (Apple Secure Boot refuses a system volume with a changed seal: needed for the system-volume copy, Safari on the GPU)"); op set Misc.Security.SecureBootModel string Disabled; }
+    return 0
+}
+
 # ---- backups --------------------------------------------------------------------------------------------------------
 BKD=$STATE/efi-backups/$KEY
 last_backup() { # the newest backup not yet put back
@@ -382,7 +396,8 @@ status() {
     if [ "$READABLE" = yes ]; then
         PLAN=() OPS=() NOTES=(); plan_files; echo "plan_changes=${#PLAN[@]}"
         PLAN=() OPS=() NOTES=(); plan_settings; echo "settings_changes=${#PLAN[@]}"
-    else echo "plan_changes="; echo "settings_changes="; fi
+        echo "secure_boot_model=$(pget "$CFG" Misc.Security.SecureBootModel)"
+    else echo "plan_changes="; echo "settings_changes="; echo "secure_boot_model="; fi
     i=$(last_backup); echo "backup=${i:-none}"; echo "backup_kind=$( [ -n "$i" ] && cat "$i/kind" 2>/dev/null || true)"
     candidates
 }
@@ -409,17 +424,17 @@ candidates() { # every EFI partition, "candidate=UUID|device|disk|size|mount poi
 
 case $CMD in
     --status) status;;
-    --plan|--settings-plan|--undo-plan)
+    --plan|--settings-plan|--safari-plan|--undo-plan)
         need_efi
-        case $CMD in --plan) plan_files;; --settings-plan) plan_settings;; --undo-plan) plan_undo;; esac
+        case $CMD in --plan) plan_files;; --settings-plan) plan_settings;; --safari-plan) plan_safari;; --undo-plan) plan_undo;; esac
         print_plan;;
-    --apply|--settings-apply)
+    --apply|--settings-apply|--safari-apply)
         need_root; need_efi
-        if [ $CMD = --apply ]; then plan_files; verify_package; else plan_settings; fi
+        case $CMD in --apply) plan_files; verify_package;; --settings-apply) plan_settings;; --safari-apply) plan_safari;; esac
         check_expect
         print_plan
         [ ${#OPS[@]} -gt 0 ] || { echo "== nothing to change"; exit 0; }
-        B=""; if [ $CMD = --apply ]; then backup "IntelXe files"; else backup settings; fi
+        B=""; case $CMD in --apply) backup "IntelXe files";; --settings-apply) backup settings;; --safari-apply) backup "Safari setting";; esac
         run_ops
         echo "== done. Restart to use it. To go back: sudo $0 --undo${PART:+ --part $PART}"
         ;;

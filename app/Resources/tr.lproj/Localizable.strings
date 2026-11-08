@@ -505,3 +505,17 @@
 "Installing, the self-test and removing need the Zink package." = "Kurmak, öz testi çalıştırmak ve kaldırmak için Zink paketi gerekir.";
 "Install again" = "Yeniden kur";
 "Use another folder…" = "Başka bir klasör kullan…";
+"Turn Apple Secure Boot off" = "Apple Güvenli Önyüklemeyi kapat";
+"Safari on the GPU (optional)" = "Safari GPU'da (isteğe bağlı)";
+"The system-volume copy of the Metal driver (Driver page) changes the system volume's seal. OpenCore's Apple Secure Boot (Misc > Security > SecureBootModel) refuses to start macOS from such a volume, so it must be Disabled first. Only for the system-volume copy: without it, leave it as it is." = "Metal sürücüsünün sistem birimi kopyası (Sürücü sayfası) sistem biriminin mührünü değiştirir. OpenCore'un Apple Güvenli Önyüklemesi (Misc > Security > SecureBootModel) macOS'u böyle bir birimden başlatmayı reddeder; bu yüzden önce Disabled yapılmalıdır. Yalnızca sistem birimi kopyası için: onu kurmayacaksanız olduğu gibi bırakın.";
+"OpenCore's Apple Secure Boot" = "OpenCore'un Apple Güvenli Önyüklemesi";
+"Off (SecureBootModel Disabled)" = "Kapalı (SecureBootModel Disabled)";
+"On (SecureBootModel %@): macOS would not start; turn it off first" = "Açık (SecureBootModel %@): macOS açılmaz; önce kapatın";
+"Not checked: mount the EFI partition" = "Denetlenmedi: EFI bölümünü bağlayın";
+"IntelXe Manager: one thing needs attention" = "IntelXe Manager: ilgilenmeniz gereken bir şey var";
+"IntelXe Manager: %lld things need attention" = "IntelXe Manager: ilgilenmeniz gereken %lld şey var";
+"Don't remind me of these" = "Bunları bir daha hatırlatma";
+"Check the driver at login" = "Girişte sürücüyü denetle";
+"Without opening the app: after each login, a dialog only when something needs attention, such as a macOS update that removed the system-volume copy. Applies from the next login." = "Uygulamayı açmadan: her girişten sonra, yalnızca ilgilenmeniz gereken bir şey varsa (örneğin bir macOS güncellemesi sistem birimi kopyasını sildiyse) bir pencere gösterir. Bir sonraki girişten itibaren geçerlidir.";
+"Tell me at login when a macOS update removed it" = "Bir macOS güncellemesi onu sildiğinde girişte haber ver";
+"A macOS update replaces the system volume, and this copy with it; Safari then draws in software again until it is installed once more. The same check as Check the driver at login on the Power and app page." = "Bir macOS güncellemesi sistem birimini, onunla birlikte bu kopyayı da değiştirir; Safari yeniden kurulana kadar yine yazılımla çizer. Güç ve uygulama sayfasındaki \"Girişte sürücüyü denetle\" ile aynı denetimdir.";

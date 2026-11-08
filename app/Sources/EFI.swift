@@ -86,13 +86,14 @@ struct EFIPlan: Hashable {
 }
 
 enum EFIAction: String, Identifiable {
-    case mount, apply, settings, undo
+    case mount, apply, settings, safari, undo
     var id: String { rawValue }
     var argument: String {
         switch self {
         case .mount: return "--mount"
         case .apply: return "--apply"
         case .settings: return "--settings-apply"
+        case .safari: return "--safari-apply"
         case .undo: return "--undo"
         }
     }
@@ -101,16 +102,18 @@ enum EFIAction: String, Identifiable {
         case .mount: return nil
         case .apply: return "--plan"
         case .settings: return "--settings-plan"
+        case .safari: return "--safari-plan"
         case .undo: return "--undo-plan"
         }
     }
 }
 
-/// The package's efi.sh, or the copy in this app for packages made before efi.sh.
+/// The package's efi.sh, or the copy in this app when the package's is older than it (made before efi.sh, or before
+/// --safari-plan, 0.1.4): the files still come from the package (--package), only the steps are the newer script's.
 func efiScript(for package: Package) -> URL? {
     let own = package.directory.appendingPathComponent("efi.sh")
-    if FileManager.default.fileExists(atPath: own.path) { return own }
-    return Bundle.main.url(forResource: "efi", withExtension: "sh")
+    if let text = try? String(contentsOf: own, encoding: .utf8), text.contains("--safari-plan") { return own }
+    return Bundle.main.url(forResource: "efi", withExtension: "sh") ?? (FileManager.default.fileExists(atPath: own.path) ? own : nil)
 }
 
 /// efi.sh's command line, as words.

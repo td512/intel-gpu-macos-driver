@@ -23,6 +23,8 @@ struct ManagerApp: App {
 
 if CommandLine.arguments.contains("--selftest") {
     selfTest()
+} else if CommandLine.arguments.contains("--login-check") {   // LoginCheck.swift: the LaunchAgent's run at login
+    runLoginCheck()
 } else if CommandLine.arguments.contains("--gputest") || CommandLine.arguments.contains("--longtest") {   // the Report page's tests, in Terminal
     let long = CommandLine.arguments.contains("--longtest")
     for r in (long ? runLongTest(progress: { _ in }) : runGPUTest(progress: { _ in })) {
