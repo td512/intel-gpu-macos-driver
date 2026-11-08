@@ -353,7 +353,7 @@
 "Step by step from a fresh macOS install to a working driver." = "Yeni bir macOS kurulumundan çalışan sürücüye adım adım.";
 "Open the setup assistant" = "Kurulum yardımcısını aç";
 "Setup assistant" = "Kurulum yardımcısı";
-"Step %lld of 6" = "Adım %lld/6";
+"Step %lld of 5" = "Adım %lld/5";
 "Check again" = "Yeniden denetle";
 "Finish" = "Bitir";
 "Close, continue later" = "Kapat, sonra devam et";
@@ -519,3 +519,9 @@
 "Without opening the app: after each login, a dialog only when something needs attention, such as a macOS update that removed the system-volume copy. Applies from the next login." = "Uygulamayı açmadan: her girişten sonra, yalnızca ilgilenmeniz gereken bir şey varsa (örneğin bir macOS güncellemesi sistem birimi kopyasını sildiyse) bir pencere gösterir. Bir sonraki girişten itibaren geçerlidir.";
 "Tell me at login when a macOS update removed it" = "Bir macOS güncellemesi onu sildiğinde girişte haber ver";
 "A macOS update replaces the system volume, and this copy with it; Safari then draws in software again until it is installed once more. The same check as Check the driver at login on the Power and app page." = "Bir macOS güncellemesi sistem birimini, onunla birlikte bu kopyayı da değiştirir; Safari yeniden kurulana kadar yine yazılımla çizer. Güç ve uygulama sayfasındaki \"Girişte sürücüyü denetle\" ile aynı denetimdir.";
+"Before you start" = "Başlamadan önce";
+"Safari on the GPU: the system-volume copy (Driver page)" = "Safari GPU'da: sistem birimi kopyası (Sürücü sayfası)";
+"Installed." = "Kurulu.";
+"Without it Safari draws in software. It needs OpenCore's Apple Secure Boot off first (EFI page); a macOS update removes it again." = "O olmadan Safari yazılımla çizer. Önce OpenCore'un Apple Güvenli Önyüklemesinin kapatılması gerekir (EFI sayfası); bir macOS güncellemesi onu yeniden siler.";
+"Minecraft and other LWJGL games through Zink (OpenGL page)" = "Minecraft ve diğer LWJGL oyunları Zink ile (OpenGL sayfası)";
+"A dialog after login only when something needs attention, such as a macOS update that removed the system-volume copy." = "Girişten sonra yalnızca ilgilenmeniz gereken bir şey varsa (örneğin bir macOS güncellemesi sistem birimi kopyasını sildiyse) bir pencere gösterir.";

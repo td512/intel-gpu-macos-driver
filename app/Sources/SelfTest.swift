@@ -33,7 +33,17 @@ func renderSnapshots(into folder: String) {
     let hidpiOff = Manager(), hidpiPending = Manager()
     hidpiOff.hidpi = HiDPIStatus(text: "hidpi_supported=1\nhidpi_nvram=0\nhidpi_override=none\nhidpi_windowserver=0\nhidpi_active=0\ndisplay=4c2d:750c\nnative=2560x1440\n")
     hidpiPending.hidpi = HiDPIStatus(text: "hidpi_supported=1\nhidpi_nvram=1\nhidpi_override=ours\nhidpi_windowserver=1\nhidpi_active=0\ndisplay=4c2d:750c\nnative=2560x1440\n")
+    // the setup assistant on its driver page and its last page, as on a working B580 machine
+    let setupDone = Manager(), setupDriver = Manager()
+    for m in [setupDone, setupDriver] {
+        m.facts.architecture = "x86_64"; m.facts.macOSMajor = 26; m.facts.hasCard = true; m.facts.sipRelaxed = true; m.facts.amfiRelaxed = true
+        m.package = manager.package ?? Package(directory: URL(fileURLWithPath: "/tmp/intel-gpu-macos-driver-0.1.4-tahoe"))
+    }
+    setupDone.facts.installedVersion = "0.1.4"; setupDone.facts.kextLoaded = true
+    setupDone.testResults = [TestResult(title: "Metal", value: "ok", state: .good)]
+    print("setup steps: driver page \(setupDriver.setupStep.number), last page \(setupDone.setupStep.number)")
     let pages: [(String, AnyView, CGFloat)] = [
+        ("setup-driver", AnyView(SetupView(close: {}).environmentObject(setupDriver).background(Color(nsColor: .windowBackgroundColor))), 520), ("setup-done", AnyView(SetupView(close: {}).environmentObject(setupDone).background(Color(nsColor: .windowBackgroundColor))), 520),
         ("system", AnyView(SystemView().environmentObject(manager)), 640), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
         ("efi", AnyView(EFIView().environmentObject(manager)), 1500), ("efi-choose", AnyView(EFIView().environmentObject(choosing)), 640),
         ("zink", AnyView(ZinkView().environmentObject(manager)), 640),

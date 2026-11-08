@@ -12,7 +12,7 @@ enum SetupStep: Equatable {
     case efiSettings, driver, efiKext, verify, done
 
     var number: Int {
-        switch self { case .blocked: return 1; case .efiSettings: return 2; case .driver: return 3; case .efiKext: return 4; case .verify: return 5; case .done: return 6 }
+        switch self { case .blocked: return 0; case .efiSettings: return 1; case .driver: return 2; case .efiKext: return 3; case .verify: return 4; case .done: return 5 }
     }
 }
 
@@ -37,6 +37,8 @@ extension Manager {
 
 final class SetupState: ObservableObject {
     @Published var downloading = false
+    @Published var confirmInstall = false
+    @Published var loginCheck = loginCheckEnabled()
 }
 
 struct SetupView: View {
@@ -50,9 +52,10 @@ struct SetupView: View {
             HStack {
                 Text("Setup assistant").font(.title2.bold())
                 Spacer()
-                Text("Step \(step.number) of 6").foregroundStyle(.secondary)
+                // the page headings carry the same numbers (1. Prepare OpenCore ... 5. Done)
+                Text(step.number == 0 ? String(localized: "Before you start") : String(localized: "Step \(step.number) of 5")).foregroundStyle(.secondary)
             }
-            ProgressView(value: Double(step.number), total: 6)
+            ProgressView(value: Double(step.number), total: 5)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 12) { page(step) }.frame(maxWidth: .infinity, alignment: .leading) }
             if let busy = manager.busy { HStack { ProgressView().controlSize(.small); Text(busy).foregroundStyle(.secondary) } }
@@ -87,7 +90,11 @@ struct SetupView: View {
             Text("The package puts the framebuffer, the accelerator and the Metal driver into /Library and rebuilds the kernel collection (a few minutes). It backs up what it replaces.")
             if let p = manager.package {
                 Label(String(localized: "Package \(p.directory.lastPathComponent) is ready."), systemImage: "checkmark.circle").foregroundStyle(.green)
-                Button("Install the driver") { manager.perform(.install) }.buttonStyle(.borderedProminent)
+                Button("Install the driver") { st.confirmInstall = true }.buttonStyle(.borderedProminent)
+                    .alert(DriverAction.install.title, isPresented: $st.confirmInstall) {
+                        Button(DriverAction.install.title) { manager.perform(.install) }
+                        Button("Cancel", role: .cancel) {}
+                    } message: { Text(DriverAction.install.explanation) }
             } else if let rel = manager.release {
                 Button(String(localized: "Download \(rel.tag_name)")) {
                     st.downloading = true
@@ -122,7 +129,15 @@ struct SetupView: View {
             }
             Text("Optional next steps:").padding(.top, 6)
             Button("HiDPI sizes and Variable refresh (Display page)") { manager.requestedSection = .display; close() }
+            Button("Safari on the GPU: the system-volume copy (Driver page)") { manager.requestedSection = .driver; close() }
+            Text(manager.ssv.state == .inUse || manager.ssv.state == .notPackage ? String(localized: "Installed.")
+                 : String(localized: "Without it Safari draws in software. It needs OpenCore's Apple Secure Boot off first (EFI page); a macOS update removes it again."))
+                .font(.callout).foregroundStyle(.secondary).padding(.leading, 4)
+            Button("Minecraft and other LWJGL games through Zink (OpenGL page)") { manager.requestedSection = .zink; close() }
             Button("GPU clock and temperature in the menu bar (Monitor page)") { manager.requestedSection = .monitor; close() }
+            CaptionedToggle(title: "Check the driver at login", caption: "A dialog after login only when something needs attention, such as a macOS update that removed the system-volume copy.",
+                            isOn: Binding(get: { st.loginCheck }, set: { setLoginCheck($0); st.loginCheck = loginCheckEnabled() }))
+                .padding(.top, 4)
             if manager.efi["efi_disk_location"].lowercased().contains("external") {
                 Label("Your EFI is on a USB stick. Once everything works you can copy it to the EFI partition of the macOS disk (install guide, the last stage), and keep the stick as a fallback.",
                       systemImage: "externaldrive").font(.callout)
