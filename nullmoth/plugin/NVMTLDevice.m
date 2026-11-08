@@ -2568,7 +2568,7 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
 - (NSUInteger)maxBufferLength {
     uint64_t range = 0; nvmtl_vk_pubcaps(NULL, NULL, &range, NULL);
     if (!range) { static int said; if (!said++) nvlog("maxBufferLength: NVK limits unavailable - answering 0 (UNKNOWN)"); return 0; }
-    uint64_t three_q = nvmtl_vk_working_set() / 4 * 3;
+    uint64_t three_q = nvmtl_vk_recommended_working_set() / 4 * 3;   // what apps are told they may use (Intel: ANV's budget)
     uint64_t v = range < three_q ? range : three_q;
     static int said;
     if (!said++) nvlog("maxBufferLength -> %llu MB (NVK maxStorageBufferRange %llu MB, 3/4 of working set %llu MB)",

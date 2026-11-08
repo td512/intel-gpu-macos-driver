@@ -526,6 +526,7 @@ bool IntelXe::start(IOService *provider) {
 	sysctl_register_oid(&sysctl__debug_intelxe_job_timeout_ms);
 	sysctl_register_oid(&sysctl__debug_intelxe_stats);
 	sysctl_register_oid(&sysctl__debug_intelxe_vram);
+	sysctl_register_oid(&sysctl__debug_intelxe_sensors);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram_mb);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram_stats);
@@ -627,6 +628,7 @@ void IntelXe::stop(IOService *provider) {
 	sysctl_unregister_oid(&sysctl__debug_intelxe_surfvram_mb);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_surfvram);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_vram);
+	sysctl_unregister_oid(&sysctl__debug_intelxe_sensors);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_stats);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_unbind_async);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_tlb_every_batch);

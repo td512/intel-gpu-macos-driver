@@ -2255,6 +2255,21 @@ uint64_t nvmtl_vk_recommended_working_set(void)
 {
     uint64_t limit = nvmtl_vk_working_set();
     const uint64_t card = nvmtl_vk_vram_bytes();
+    /* Intel (ANV): the formula above keeps back NVMTL_VRAM_NONIMAGE, 2.6 GB that NVK spent outside images on the cards
+       upstream measured; ANV has no such pool, and an Arc B580 (11.2 GB to Vulkan) answered 5.1 GB, so games sized their
+       textures for half the card. Here: ANV's own heap budget (VK_EXT_memory_budget, what is left after everyone's use)
+       less the headroom for the desktop, never more than the card less 2 GB. NVMTL_WS_INTEL=0: the formula. */
+    { static int on = -1; if (on < 0) { const char *e = getenv("NVMTL_WS_INTEL"); on = nvmtl_vk_vendor() == 0x8086 && !(e && e[0] == '0'); }
+      if (on && card > (3ull << 30)) {
+          uint64_t b = 0, u = 0; nvmtl_vk_vram_budget(&b, &u);
+          const uint64_t head = NVMTL_VRAM_HEADROOM, top = card - (2ull << 30);
+          uint64_t w = b > head ? b - head : limit;
+          if (w > top) w = top;
+          if (w < limit) w = limit;
+          static int said; if (!said++) nvlog("working set (Intel): budget %llu MB less %llu MB headroom, at most the card %llu MB less 2048 MB -> recommending %llu MB (the formula said %llu MB)",
+              (unsigned long long)(b >> 20), (unsigned long long)(head >> 20), (unsigned long long)(card >> 20), (unsigned long long)(w >> 20), (unsigned long long)(limit >> 20));
+          return w;
+      } }
     if (!card || limit >= card) return limit;   // residency v2's whole-card answer, or no card size
     const uint64_t reserve = nvmtl_vk_ws_reserve();
     const uint64_t cap = card > reserve ? card - reserve : 0;
