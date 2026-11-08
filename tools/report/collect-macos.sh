@@ -1005,7 +1005,8 @@ inst() { grep -A2 "^$1\$" "$W/driver/installed.txt" 2>/dev/null | grep -E '^  [0
 	done
 	for b in /System/Library/Extensions/NVMTLDriver.bundle /Library/GPUBundles/NVMTLDriverLib.bundle /Library/GPUBundles/NVMTLDriver.bundle; do
 		[ -d "$b" ] || continue
-		printf '  %-24s %s | %s\n' "$(basename "$b")" "$(case "$b" in /System/*) echo "system volume" ;; *) echo "/Library" ;; esac)" "$(inst "$b")"
+		_where=/Library; case "$b" in /System/*) _where="system volume" ;; esac
+		printf '  %-24s %s | %s\n' "$(basename "$b")" "$_where" "$(inst "$b")"
 	done
 	printf '  %-24s %s\n' "Metal plugin named" "$(grep -m1 '"MetalPluginName" =' "$IOREGL" 2>/dev/null | sed 's/.*= //' | grep . || echo "none (withheld or no accelerator)")"
 	printf '  %-24s %s | %s\n' "Mesa ANV" "$(sed -n 's/^Mesa: //p' "$W/driver/installed.txt" 2>/dev/null | grep . || echo -)" "$(inst "$ANV")"
