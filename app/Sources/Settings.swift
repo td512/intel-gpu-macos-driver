@@ -85,15 +85,6 @@ struct SettingsView: View {
                 }
                 Text("Applied at the next start.").font(.caption).foregroundStyle(.secondary)
             }
-            Section2(title: "Display troubleshooting") {
-                Toggle("Hardware cursor (turn off if the pointer flickers, leaves trails or has the wrong colours)", isOn: $st.edit.hwCursor)
-                Toggle("Turn the output off when the display sleeps (some monitors then wake more reliably, some less)", isOn: $st.edit.dpms)
-                Toggle("Low framerate compensation in Variable refresh (repeats frames below the monitor's lowest rate)", isOn: $st.edit.lfc)
-                Picker("Variable refresh lowest rate", selection: $st.edit.vrrFloor) {
-                    Text("The monitor's own").tag(0); Text("48 Hz").tag(48); Text("60 Hz").tag(60)
-                }
-                Text("Raise the lowest rate if the monitor flickers in Variable refresh at low frame rates.").font(.caption).foregroundStyle(.secondary)
-            }
             Section2(title: "Diagnostics") {
                 Toggle("GPU timing in the Metal driver's log (for performance reports; test builds only)", isOn: $st.edit.gpuTiming)
             }
@@ -111,6 +102,31 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .task {
+            if !st.loaded { let s = await Task.detached { DriverSettings.read() }.value; st.saved = s; st.edit = s; st.loaded = true }
+        }
+    }
+}
+
+/// The display settings (Display page): the same NVRAM keys and sysctls as the Power and app page's, saved together.
+struct DisplayTroubleshootingView: View {
+    @EnvironmentObject var manager: Manager
+    @StateObject var st = SettingsState()
+    var body: some View {
+        Section2(title: "Display troubleshooting") {
+                Toggle("Hardware cursor (turn off if the pointer flickers, leaves trails or has the wrong colours)", isOn: $st.edit.hwCursor)
+                Toggle("Turn the output off when the display sleeps (some monitors then wake more reliably, some less)", isOn: $st.edit.dpms)
+                Toggle("Low framerate compensation in Variable refresh (repeats frames below the monitor's lowest rate)", isOn: $st.edit.lfc)
+                Picker("Variable refresh lowest rate", selection: $st.edit.vrrFloor) {
+                    Text("The monitor's own").tag(0); Text("48 Hz").tag(48); Text("60 Hz").tag(60)
+                }
+                Text("Raise the lowest rate if the monitor flickers in Variable refresh at low frame rates.").font(.caption).foregroundStyle(.secondary)
+            }
+        HStack {
+            Spacer()
+            Button("Revert") { st.edit = st.saved }.disabled(st.edit == st.saved)
+            Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved)
+        }
         .task {
             if !st.loaded { let s = await Task.detached { DriverSettings.read() }.value; st.saved = s; st.edit = s; st.loaded = true }
         }

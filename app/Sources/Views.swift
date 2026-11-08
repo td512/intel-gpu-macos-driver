@@ -326,32 +326,51 @@ extension ZinkAction {
 }
 
 enum Section: String, CaseIterable, Identifiable {
-    case system, monitor, driver, efi, display, settings, zink, report, log
+    case system, monitor, driver, efi, zink, display, settings, tests, report, log
     var id: String { rawValue }
     var title: LocalizedStringKey {
         switch self {
-        case .system: return "System"
+        case .system: return "Overview"
         case .monitor: return "Monitor"
-        case .settings: return "Settings"
         case .driver: return "Driver"
         case .efi: return "EFI (OpenCore)"
-        case .display: return "Display"
         case .zink: return "OpenGL (Zink)"
+        case .display: return "Display"
+        case .settings: return "Power and app"
+        case .tests: return "Tests"
         case .report: return "Report"
         case .log: return "Log"
         }
     }
     var icon: String {
         switch self {
-        case .system: return "cpu"
+        case .system: return "gauge.with.dots.needle.33percent"
         case .monitor: return "waveform.path.ecg"
-        case .settings: return "slider.horizontal.3"
         case .driver: return "shippingbox"
         case .efi: return "externaldrive"
-        case .display: return "display"
         case .zink: return "cube.transparent"
+        case .display: return "display"
+        case .settings: return "slider.horizontal.3"
+        case .tests: return "checkmark.seal"
         case .report: return "stethoscope"
         case .log: return "text.alignleft"
+        }
+    }
+}
+
+/// The sidebar's groups, in order.
+enum SectionGroup: CaseIterable, Identifiable {
+    case status, install, configure, help
+    var id: Self { self }
+    var title: LocalizedStringKey {
+        switch self { case .status: return "Status"; case .install: return "Install"; case .configure: return "Configure"; case .help: return "Help" }
+    }
+    var sections: [Section] {
+        switch self {
+        case .status: return [.system, .monitor]
+        case .install: return [.driver, .efi, .zink]
+        case .configure: return [.display, .settings]
+        case .help: return [.tests, .report, .log]
         }
     }
 }
@@ -368,10 +387,14 @@ struct RootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(Section.allCases, selection: $page.section) { item in
-                Label(item.title, systemImage: item.icon).tag(item)
+            List(selection: $page.section) {
+                ForEach(SectionGroup.allCases) { group in
+                    SwiftUI.Section(group.title) {
+                        ForEach(group.sections) { item in Label(item.title, systemImage: item.icon).tag(item) }
+                    }
+                }
             }
-            .navigationSplitViewColumnWidth(170)
+            .navigationSplitViewColumnWidth(185)
         } detail: {
             VStack(spacing: 0) {
                 Banners()
@@ -383,6 +406,7 @@ struct RootView: View {
                 case .efi: EFIView()
                 case .display: DisplayView()
                 case .zink: ZinkView()
+                case .tests: TestsView()
                 case .report: ReportView()
                 case .log: LogView()
                 }
@@ -469,17 +493,56 @@ struct Banner<Actions: View>: View {
     }
 }
 
+/// One figure on the Overview page: a title, a value, a line under it and an optional action.
+struct OverviewCard<Action: View>: View {
+    let title: LocalizedStringKey
+    let symbol: String
+    let tint: Color
+    let value: String
+    let detail: String
+    @ViewBuilder var action: Action
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(title, systemImage: symbol).font(.subheadline).foregroundStyle(tint)
+                Text(value).font(.title3.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                action
+            }
+            .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+        }
+    }
+}
+
 struct SystemView: View {
     @EnvironmentObject var manager: Manager
+    @StateObject var live = MonitorModel()
     var body: some View {
         Form {
-            Section2(title: "This Mac") {
-                ForEach(manager.facts.checks) { check in
-                    CheckRow(check: check)
+            Section2(title: "At a glance") {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    OverviewCard(title: "Driver", symbol: "shippingbox", tint: manager.updateAvailable ? .orange : .accentColor,
+                                 value: installedText, detail: String(localized: "Latest release: \(releaseText)")) {
+                        if manager.updateAvailable { Button("Update on the Driver page") { manager.requestedSection = .driver }.controlSize(.small) }
+                    }
+                    OverviewCard(title: "GPU", symbol: "cpu", tint: .accentColor,
+                                 value: live.now.actMHz.map { $0 == 0 ? String(localized: "Idle") : "\($0) MHz" } ?? (manager.facts.metalDevice.isEmpty ? String(localized: "No Metal device") : manager.facts.metalDevice),
+                                 detail: [live.now.packageC.map { String(localized: "GPU \($0) °C") }, live.now.fps.map { String(format: "%.0f ", $0) + String(localized: "frames/s") }].compactMap { $0 }.joined(separator: " · ")) {
+                        EmptyView()
+                    }
+                    OverviewCard(title: "Problems", symbol: manager.health.isEmpty ? "checkmark.circle" : "exclamationmark.triangle",
+                                 tint: manager.health.isEmpty ? .green : .orange,
+                                 value: manager.health.isEmpty ? String(localized: "None found") : String(localized: "\(manager.health.count) to look at"),
+                                 detail: manager.health.isEmpty ? String(localized: "Checked at start: panics, boot guard, versions, HiDPI, CPU.") : String(localized: "Shown at the top of the window, each with what to do.")) {
+                        EmptyView()
+                    }
+                    let bad = manager.testResults.filter { $0.state == .bad }.count, warn = manager.testResults.filter { $0.state == .warning }.count
+                    OverviewCard(title: "Last test", symbol: "checkmark.seal", tint: manager.testResults.isEmpty ? .secondary : bad > 0 ? .red : warn > 0 ? .orange : .green,
+                                 value: manager.testResults.isEmpty ? String(localized: "Not run yet") : bad > 0 ? String(localized: "\(bad) failed") : warn > 0 ? String(localized: "\(warn) below expected") : String(localized: "All passed"),
+                                 detail: manager.testResults.isEmpty ? String(localized: "About 25 seconds, on the Tests page.") : String(localized: "\(manager.testResults.count) checks this session.")) {
+                        Button(manager.testResults.isEmpty ? "Run the GPU test" : "Open the Tests page") { manager.requestedSection = .tests }.controlSize(.small)
+                    }
                 }
-            }
-            if manager.facts.bootGuardOff {
-                Button("Clear the boot guard") { manager.clearBootGuard() }
             }
             Section2(title: "Setup") {
                 HStack {
@@ -488,22 +551,19 @@ struct SystemView: View {
                     Button("Open the setup assistant") { manager.showSetup = true }
                 }
             }
-            Section2(title: "Report a problem") {
-                HStack {
-                    Text("Something broken? The Report page makes a diagnostics report and tells you what it found.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Open the Report page") { manager.requestedSection = .report }
-                }
-            }
-            Section2(title: "Driver") {
-                LabeledContent("Installed") { Text(installedText) }
-                LabeledContent("Latest release") { Text(releaseText) }
-                if manager.updateAvailable {
-                    Label("A newer release is available. See the Driver page.", systemImage: "arrow.down.circle")
+            Section2(title: "This Mac") {
+                DisclosureGroup(manager.facts.checks.allSatisfy { $0.state != .bad } ? String(localized: "Requirements met") : String(localized: "Some requirements are not met")) {
+                    ForEach(manager.facts.checks) { check in
+                        CheckRow(check: check)
+                    }
+                    if manager.facts.bootGuardOff {
+                        Button("Clear the boot guard") { manager.clearBootGuard() }
+                    }
                 }
             }
         }
+        .onAppear { live.start() }
+        .onDisappear { live.stop() }
         .formStyle(.grouped)
         .toolbar {
             ToolbarItem {

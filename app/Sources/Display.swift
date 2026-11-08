@@ -133,6 +133,7 @@ struct DisplayView: View {
                     Button("Turn Variable refresh on") { manager.setVRR(true) }
                 }
             }
+            DisplayTroubleshootingView()
         }
         .formStyle(.grouped)
     }

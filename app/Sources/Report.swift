@@ -62,27 +62,6 @@ struct ReportView: View {
 
     var body: some View {
         Form {
-            Section2(title: "Quick GPU test") {
-                Text("About 15 seconds: checks that the GPU computes and draws correctly, measures its compute rate, memory bandwidth, upload rate and latency, and lists the video codecs macOS sees in hardware. Close games and other GPU-heavy apps first.")
-                    .font(.callout).foregroundStyle(.secondary)
-                HStack {
-                    Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil)
-                    Button("Long test (about 2 minutes)") { manager.runTest(long: true) }.disabled(manager.testing != nil)
-                        .help(String(localized: "Checks most of the video memory twice and keeps the GPU at full load for a minute, watching for errors, the clock and the temperature."))
-                    if let step = manager.testing { ProgressView().controlSize(.small); Text(step).foregroundStyle(.secondary) }
-                }
-                ForEach(manager.testResults) { r in
-                    VStack(alignment: .leading, spacing: 2) {
-                        LabeledContent {
-                            Text(r.value).textSelection(.enabled)
-                        } label: {
-                            Label(r.title, systemImage: r.state == .good ? "checkmark.circle.fill" : r.state == .warning ? "exclamationmark.triangle.fill" : r.state == .bad ? "xmark.octagon.fill" : "info.circle")
-                                .foregroundStyle(r.state == .good ? Color.green : r.state == .warning ? Color.orange : r.state == .bad ? Color.red : Color.secondary)
-                        }
-                        if !r.help.isEmpty { Text(r.help).font(.caption).foregroundStyle(.secondary) }
-                    }
-                }
-            }
             Section2(title: "Diagnostics report") {
                 Text("Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -136,5 +115,45 @@ struct ReportView: View {
         case "ssv-mesa", "ssv-build", "ssv-gone", "kext-version": Button("Open the Driver page") { manager.requestedSection = .driver }
         default: EmptyView()
         }
+    }
+}
+
+/// The Tests page: the quick test (with the smoothness window at its end) and the long one (GPUTest.swift, LongTest.swift).
+struct TestsView: View {
+    @EnvironmentObject var manager: Manager
+    var body: some View {
+        Form {
+            Section2(title: "GPU test") {
+                Text("About 15 seconds: checks that the GPU computes and draws correctly, measures its compute rate, memory bandwidth, upload rate and latency, and lists the video codecs macOS sees in hardware. Close games and other GPU-heavy apps first.")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil)
+                    Button("Long test (about 2 minutes)") { manager.runTest(long: true) }.disabled(manager.testing != nil)
+                        .help(String(localized: "Checks most of the video memory twice and keeps the GPU at full load for a minute, watching for errors, the clock and the temperature."))
+                    if let step = manager.testing { ProgressView().controlSize(.small); Text(step).foregroundStyle(.secondary) }
+                }
+                ForEach(manager.testResults) { r in
+                    VStack(alignment: .leading, spacing: 2) {
+                        LabeledContent {
+                            Text(r.value).textSelection(.enabled)
+                        } label: {
+                            Label(r.title, systemImage: r.state == .good ? "checkmark.circle.fill" : r.state == .warning ? "exclamationmark.triangle.fill" : r.state == .bad ? "xmark.octagon.fill" : "info.circle")
+                                .foregroundStyle(r.state == .good ? Color.green : r.state == .warning ? Color.orange : r.state == .bad ? Color.red : Color.secondary)
+                        }
+                        if !r.help.isEmpty { Text(r.help).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+            if manager.testResults.contains(where: { $0.state == .bad }) {
+                Section2(title: "Something failed") {
+                    HStack {
+                        Text("A diagnostics report holds what we need to find out why.").font(.callout)
+                        Spacer()
+                        Button("Open the Report page") { manager.requestedSection = .report }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }

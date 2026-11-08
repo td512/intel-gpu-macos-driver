@@ -404,3 +404,35 @@
 "Open the EFI page to choose it" = "Seçmek için EFI sayfasını aç";
 "Then restart and open this assistant again: it continues from there." = "Sonra yeniden başlatın ve bu yardımcıyı yeniden açın: kaldığı yerden devam eder.";
 "If the next boot stops at the Apple logo, choose the previous entry or your USB stick in the OpenCore picker: the backup is kept, and the EFI page can put it back." = "Sonraki açılış Apple logosunda kalırsa OpenCore seçicide önceki girişi ya da USB belleğinizi seçin: yedek saklanır ve EFI sayfası onu geri koyabilir.";
+
+/* sidebar groups and Overview page */
+"Overview" = "Genel bakış";
+"Power and app" = "Güç ve uygulama";
+"Tests" = "Testler";
+"Status" = "Durum";
+"Install" = "Kurulum";
+"Configure" = "Ayarlar";
+"Help" = "Yardım";
+"At a glance" = "Bir bakışta";
+"Latest release: %@" = "Son sürüm: %@";
+"Update on the Driver page" = "Sürücü sayfasında güncelle";
+"Idle" = "Boşta";
+"Problems" = "Sorunlar";
+"None found" = "Bulunmadı";
+"%lld to look at" = "%lld tanesine bakılmalı";
+"Checked at start: panics, boot guard, versions, HiDPI, CPU." = "Açılışta denetlendi: panikler, açılış koruması, sürümler, HiDPI, işlemci.";
+"Shown at the top of the window, each with what to do." = "Pencerenin üstünde, her biri ne yapılacağıyla birlikte gösteriliyor.";
+"Last test" = "Son test";
+"Not run yet" = "Henüz çalıştırılmadı";
+"%lld failed" = "%lld başarısız";
+"%lld below expected" = "%lld beklenenin altında";
+"All passed" = "Hepsi geçti";
+"About 25 seconds, on the Tests page." = "Yaklaşık 25 saniye, Testler sayfasında.";
+"%lld checks this session." = "Bu oturumda %lld denetim.";
+"Run the GPU test" = "GPU testini çalıştır";
+"Open the Tests page" = "Testler sayfasını aç";
+"Requirements met" = "Gereksinimler karşılanıyor";
+"Some requirements are not met" = "Bazı gereksinimler karşılanmıyor";
+"GPU test" = "GPU testi";
+"Something failed" = "Bir şey başarısız oldu";
+"A diagnostics report holds what we need to find out why." = "Nedenini bulmak için gerekenler tanılama raporunda.";
