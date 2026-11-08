@@ -161,6 +161,7 @@ func runGPUTest(progress: @escaping (String) -> Void) -> [TestResult] {
     }
     progress(String(localized: "Video…"))
     out.append(contentsOf: videoCheck().map(judged))
+    out.append(contentsOf: runVideoTests(progress: progress).map(judged))   // VideoTest.swift
     return out
 }
 
@@ -186,43 +187,6 @@ private func videoCheck() -> [TestResult] {
     }
     out.append(TestResult(title: String(localized: "Hardware video encoders"), value: encoders.isEmpty ? String(localized: "None") : encoders.joined(separator: ", "),
                           state: encoders.isEmpty ? .warning : .good))
-    if let fps = encodeRate(kCMVideoCodecType_HEVC) {
-        out.append(TestResult(title: String(localized: "HEVC encode, 1080p"), value: String(format: "%.0f fps", fps), state: fps >= 120 ? .good : fps >= 30 ? .warning : .bad))
-    }
     return out
 }
 
-/// Frames per second encoding 1080p frames in hardware for about two seconds (nil without a hardware encoder).
-private func encodeRate(_ codec: CMVideoCodecType) -> Double? {
-    let w = 1920, h = 1080
-    let spec = [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: true] as CFDictionary
-    var session: VTCompressionSession?
-    guard VTCompressionSessionCreate(allocator: nil, width: Int32(w), height: Int32(h), codecType: codec, encoderSpecification: spec,
-                                     imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: nil, refcon: nil,
-                                     compressionSessionOut: &session) == noErr, let s = session else { return nil }
-    defer { VTCompressionSessionInvalidate(s) }
-    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanFalse)
-    var pool: CVPixelBufferPool?
-    let attrs = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelBufferWidthKey as String: w,
-                 kCVPixelBufferHeightKey as String: h, kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary
-    CVPixelBufferPoolCreate(nil, nil, attrs, &pool)
-    guard let pool else { return nil }
-    let lock = NSLock(); var done = 0
-    let t0 = CFAbsoluteTimeGetCurrent(); var sent = 0
-    while CFAbsoluteTimeGetCurrent() - t0 < 2.0 && sent < 2000 {
-        var pb: CVPixelBuffer?
-        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
-        guard let pb else { break }
-        CVPixelBufferLockBaseAddress(pb, [])
-        if let y = CVPixelBufferGetBaseAddressOfPlane(pb, 0) { memset(y, Int32(sent & 255), CVPixelBufferGetBytesPerRowOfPlane(pb, 0) * h) }
-        CVPixelBufferUnlockBaseAddress(pb, [])
-        let st = VTCompressionSessionEncodeFrame(s, imageBuffer: pb, presentationTimeStamp: CMTime(value: CMTimeValue(sent), timescale: 60),
-                                                 duration: .invalid, frameProperties: nil, infoFlagsOut: nil) { _, _, _ in lock.lock(); done += 1; lock.unlock() }
-        if st != noErr { return nil }
-        sent += 1
-    }
-    VTCompressionSessionCompleteFrames(s, untilPresentationTimeStamp: .invalid)
-    let t = CFAbsoluteTimeGetCurrent() - t0
-    lock.lock(); let n = done; lock.unlock()
-    return n > 0 ? Double(n) / t : nil
-}
