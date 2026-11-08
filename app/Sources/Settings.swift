@@ -86,19 +86,20 @@ struct SettingsView: View {
                 Text("Applied at the next start.").font(.caption).foregroundStyle(.secondary)
             }
             Section2(title: "Diagnostics") {
-                Toggle("GPU timing in the Metal driver's log (for performance reports; test builds only)", isOn: $st.edit.gpuTiming)
-            }
-            HStack {
-                Spacer()
-                Button("Revert") { st.edit = st.saved }.disabled(st.edit == st.saved)
-                Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved).keyboardShortcut(.defaultAction)
+                CaptionedToggle(title: "GPU timing in the driver's log", caption: "For performance reports; test builds of the Metal driver only.", isOn: $st.edit.gpuTiming)
+                HStack {
+                    Text("Power and diagnostics are saved together; the power settings apply at the next start.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Revert") { st.edit = st.saved }.disabled(st.edit == st.saved)
+                    Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved).keyboardShortcut(.defaultAction)
+                }
             }
             Section2(title: "This app") {
-                Toggle("Open at login (keeps the menu bar item there)", isOn: Binding(get: { st.loginItem }, set: { on in
+                CaptionedToggle(title: "Open at login", caption: "Keeps the menu bar item there. Applies at once.", isOn: Binding(get: { st.loginItem }, set: { on in
                     do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {}
                     st.loginItem = SMAppService.mainApp.status == .enabled
                 }))
-                Toggle("Check for a new release at start", isOn: $autoUpdateCheck)
+                CaptionedToggle(title: "Check for a new release at start", caption: "Asks GitHub for the latest release when the app opens.", isOn: $autoUpdateCheck)
             }
         }
         .formStyle(.grouped)
@@ -114,21 +115,37 @@ struct DisplayTroubleshootingView: View {
     @StateObject var st = SettingsState()
     var body: some View {
         Section2(title: "Display troubleshooting") {
-                Toggle("Hardware cursor (turn off if the pointer flickers, leaves trails or has the wrong colours)", isOn: $st.edit.hwCursor)
-                Toggle("Turn the output off when the display sleeps (some monitors then wake more reliably, some less)", isOn: $st.edit.dpms)
-                Toggle("Low framerate compensation in Variable refresh (repeats frames below the monitor's lowest rate)", isOn: $st.edit.lfc)
+                CaptionedToggle(title: "Hardware cursor", caption: "Turn off if the pointer flickers, leaves trails or has the wrong colours.", isOn: $st.edit.hwCursor)
+                CaptionedToggle(title: "Output off when the display sleeps", caption: "Some monitors then wake more reliably, some less.", isOn: $st.edit.dpms)
+                CaptionedToggle(title: "Low framerate compensation", caption: "In Variable refresh: repeats frames below the monitor's lowest rate.", isOn: $st.edit.lfc)
                 Picker("Variable refresh lowest rate", selection: $st.edit.vrrFloor) {
                     Text("The monitor's own").tag(0); Text("48 Hz").tag(48); Text("60 Hz").tag(60)
                 }
                 Text("Raise the lowest rate if the monitor flickers in Variable refresh at low frame rates.").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Applied at once and kept for the next starts.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Revert") { st.edit = st.saved }.disabled(st.edit == st.saved)
+                    Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved)
+                }
             }
-        HStack {
-            Spacer()
-            Button("Revert") { st.edit = st.saved }.disabled(st.edit == st.saved)
-            Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved)
-        }
         .task {
             if !st.loaded { let s = await Task.detached { DriverSettings.read() }.value; st.saved = s; st.edit = s; st.loaded = true }
+        }
+    }
+}
+
+/// A switch with a short label and, under it, what it does.
+struct CaptionedToggle: View {
+    let title: LocalizedStringKey
+    let caption: LocalizedStringKey
+    @Binding var isOn: Bool
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(caption).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

@@ -103,9 +103,7 @@ struct DisplayView: View {
                 } else {
                     Text("Reading the display settings…").foregroundStyle(.secondary)
                 }
-            }
-            if status.known {
-                Section2(title: "Actions") {
+                if status.known {
                     if !status.supported {
                         Label("The installed driver has no HiDPI modes yet. Install release 0.1.3 or later first.", systemImage: "exclamationmark.triangle")
                     } else if status.foreignOverride {

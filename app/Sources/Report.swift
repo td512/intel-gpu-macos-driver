@@ -65,9 +65,9 @@ struct ReportView: View {
             Section2(title: "Diagnostics report") {
                 Text("Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop.")
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle("Administrator mode (asks for your password): adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock", isOn: $admin)
-                Toggle("ACPI tables (DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence)", isOn: $acpi)
-                Toggle("Staged-probe results (only for a GPU that is not supported yet)", isOn: $probe)
+                CaptionedToggle(title: "Administrator mode", caption: "Asks for your password. Adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock.", isOn: $admin)
+                CaptionedToggle(title: "ACPI tables", caption: "The DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence.", isOn: $acpi)
+                CaptionedToggle(title: "Staged-probe results", caption: "Only for a GPU that is not supported yet.", isOn: $probe)
                 Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
                     .keyboardShortcut(.defaultAction)
             }
@@ -97,10 +97,11 @@ struct ReportView: View {
                 }
             } else {
                 Section2(title: "Forms") {
-                    HStack {
-                        Link("Report a bug", destination: issueFormURL(template: "1-bug.yml", field: "report", value: nil))
-                        Link("Ask for a new GPU", destination: issueFormURL(template: "2-new-hardware.yml", field: "reports", value: nil))
-                    }
+                    LabeledContent { Link("Report a bug", destination: issueFormURL(template: "1-bug.yml", field: "report", value: nil)) } label: {
+                        Text("Something does not work").font(.callout) }
+                    LabeledContent { Link("Ask for a new GPU", destination: issueFormURL(template: "2-new-hardware.yml", field: "reports", value: nil)) } label: {
+                        Text("Another Intel GPU should be supported").font(.callout) }
+                    Text("Make a report first and attach it: the form asks for its ID.").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -124,7 +125,7 @@ struct TestsView: View {
     var body: some View {
         Form {
             Section2(title: "GPU test") {
-                Text("About 15 seconds: checks that the GPU computes and draws correctly, measures its compute rate, memory bandwidth, upload rate and latency, and lists the video codecs macOS sees in hardware. Close games and other GPU-heavy apps first.")
+                Text("About 25 seconds: checks that the GPU computes and draws correctly, checks the features apps use and video decoding and encoding, measures its compute rate, bandwidth and latency, and at the end opens a small window for 5 seconds to measure smoothness. Close games and other GPU-heavy apps first.")
                     .font(.callout).foregroundStyle(.secondary)
                 HStack {
                     Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil)

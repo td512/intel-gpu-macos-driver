@@ -436,3 +436,32 @@
 "GPU test" = "GPU testi";
 "Something failed" = "Bir şey başarısız oldu";
 "A diagnostics report holds what we need to find out why." = "Nedenini bulmak için gerekenler tanılama raporunda.";
+
+/* layout polish */
+"Hardware cursor" = "Donanım imleci";
+"Turn off if the pointer flickers, leaves trails or has the wrong colours." = "İmleç titriyor, iz bırakıyor ya da renkleri yanlışsa kapatın.";
+"Output off when the display sleeps" = "Ekran uyurken çıkışı kapat";
+"Some monitors then wake more reliably, some less." = "Bazı monitörler böyle daha güvenilir uyanır, bazıları daha zor.";
+"Low framerate compensation" = "Düşük kare hızı telafisi";
+"In Variable refresh: repeats frames below the monitor's lowest rate." = "Değişken yenilemede: monitörün en düşük hızının altında kareleri tekrarlar.";
+"Applied at once and kept for the next starts." = "Hemen uygulanır ve sonraki açılışlar için saklanır.";
+"GPU timing in the driver's log" = "Sürücü günlüğünde GPU zamanlaması";
+"For performance reports; test builds of the Metal driver only." = "Performans bildirimleri için; yalnız Metal sürücüsünün test sürümleri.";
+"Power and diagnostics are saved together; the power settings apply at the next start." = "Güç ve tanılama ayarları birlikte kaydedilir; güç ayarları bir sonraki açılışta uygulanır.";
+"Open at login" = "Girişte aç";
+"Keeps the menu bar item there. Applies at once." = "Menü çubuğu simgesini orada tutar. Hemen uygulanır.";
+"Asks GitHub for the latest release when the app opens." = "Uygulama açılınca GitHub'dan en son sürümü sorar.";
+"Show in the menu bar" = "Menü çubuğunda göster";
+"Frames, GPU clock and temperature, and the display sizes (HiDPI ones too) to switch with one click." = "Kare hızı, GPU saat hızı ve sıcaklık, ve tek tıkla geçilebilen ekran boyutları (HiDPI olanlar dahil).";
+"Administrator mode" = "Yönetici modu";
+"Asks for your password. Adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock." = "Parolanızı sorar. EFI bölümlerindeki OpenCore yapılandırmasını, sürücünün yalnız yöneticinin okuyabildiği sayaçlarını ve işlemci saat hızını ekler.";
+"ACPI tables" = "ACPI tabloları";
+"The DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence." = "macOS'un yüklediği haliyle DSDT ve SSDT'ler; Windows lisansını taşıyan tablolar asla.";
+"Staged-probe results" = "Aşamalı sonda sonuçları";
+"Only for a GPU that is not supported yet." = "Yalnız henüz desteklenmeyen bir GPU için.";
+"Something does not work" = "Bir şey çalışmıyor";
+"Another Intel GPU should be supported" = "Başka bir Intel GPU desteklenmeli";
+"Make a report first and attach it: the form asks for its ID." = "Önce rapor oluşturup ekleyin: form rapor numarasını sorar.";
+"About 25 seconds: checks that the GPU computes and draws correctly, checks the features apps use and video decoding and encoding, measures its compute rate, bandwidth and latency, and at the end opens a small window for 5 seconds to measure smoothness. Close games and other GPU-heavy apps first." = "Yaklaşık 25 saniye: GPU'nun doğru hesaplayıp çizdiğini, uygulamaların kullandığı özellikleri ve video çözme/kodlamayı denetler; hesaplama hızını, bant genişliğini ve gecikmeyi ölçer; sonunda akıcılığı ölçmek için 5 saniyeliğine küçük bir pencere açar. Önce oyunları ve GPU'yu yoğun kullanan uygulamaları kapatın.";
+"These need the Zink package: download it above (or choose its folder) first." = "Bunlar için Zink paketi gerekir: önce yukarıdan indirin (ya da klasörünü seçin).";
+"Installs, EFI changes, reports and tests write here as they run." = "Kurulumlar, EFI değişiklikleri, raporlar ve testler çalışırken buraya yazar.";

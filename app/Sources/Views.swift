@@ -419,6 +419,9 @@ struct RootView: View {
             if let section { page.section = section; manager.requestedSection = nil }
         }
         .task {
+            // --section <name> (e.g. tests): open on that page (for screenshots and support instructions)
+            if let i = CommandLine.arguments.firstIndex(of: "--section"), i + 1 < CommandLine.arguments.count,
+               let sec = Section(rawValue: CommandLine.arguments[i + 1]) { page.section = sec }
             await manager.refresh()
             if UserDefaults.standard.object(forKey: "autoUpdateCheck") as? Bool ?? true { await manager.checkForUpdate() }
             // first runs, until the setup assistant has been finished once: open it where the machine stands
@@ -734,6 +737,9 @@ struct ZinkView: View {
                 }
             }
             Section2(title: "Actions") {
+                if manager.zinkPackage == nil {
+                    Label("These need the Zink package: download it above (or choose its folder) first.", systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
+                }
                 let ready = manager.zinkPackage != nil
                 Button(ZinkAction.install.title) { manager.performZink(.install) }.disabled(!ready)
                 Button(ZinkAction.test.title) { manager.performZink(.test) }.disabled(!ready || !manager.facts.zinkInstalled)
@@ -753,13 +759,22 @@ struct ZinkView: View {
 struct LogView: View {
     @EnvironmentObject var manager: Manager
     var body: some View {
+        if manager.log.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "text.alignleft").font(.largeTitle).foregroundStyle(.tertiary)
+                Text("Nothing has run yet.").font(.headline)
+                Text("Installs, EFI changes, reports and tests write here as they run.").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
         ScrollView {
-            Text(manager.log.isEmpty ? String(localized: "Nothing has run yet.") : manager.log)
+            Text(manager.log)
                 .font(.system(.callout, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
         }
         .defaultScrollAnchor(.bottom)
+        }
     }
 }

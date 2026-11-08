@@ -11,6 +11,7 @@ struct ManagerApp: App {
             RootView().environmentObject(manager)
         }
         .windowToolbarStyle(.unified)
+        .defaultSize(width: 980, height: 720)
         .commands { CommandGroup(replacing: .newItem) {} }
         MenuBarExtra(isInserted: $menuBarItem) {
             MenuBarContent(model: menuModel).onAppear { menuModel.start() }

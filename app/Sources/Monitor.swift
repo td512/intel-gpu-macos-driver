@@ -101,9 +101,6 @@ struct MonitorView: View {
     var body: some View {
         let s = model.now
         Form {
-            Section2(title: "Menu bar") {
-                Toggle("Show IntelXe in the menu bar: frames, GPU clock and temperature, and the display sizes (HiDPI ones too) to switch with one click", isOn: $menuBarItem)
-            }
             Section2(title: "Display") {
                 LabeledContent("Mode") { Text(s.mode.isEmpty ? "–" : s.mode) }
                 LabeledContent("Variable refresh") { Text(manager.vrrActive ? String(localized: "Offered") : String(localized: "Off")) }
@@ -126,6 +123,9 @@ struct MonitorView: View {
                     }
                 }
                 LabeledContent("Video memory in use") { Text(s.vramUsedMB.map { String(format: "%.1f GB", Double($0) / 1024) } ?? "–") }
+            }
+            Section2(title: "Menu bar") {
+                CaptionedToggle(title: "Show in the menu bar", caption: "Frames, GPU clock and temperature, and the display sizes (HiDPI ones too) to switch with one click.", isOn: $menuBarItem)
             }
         }
         .formStyle(.grouped)
