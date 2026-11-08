@@ -19,6 +19,15 @@ final class Manager: ObservableObject {
     @Published var reportFile: String?
     @Published var reportWarnings: [ReportWarning] = []
     @Published var health: [HealthIssue] = []
+    @Published var testResults: [TestResult] = []
+    @Published var testing: String?
+    func runTest() {
+        testing = String(localized: "Starting…"); testResults = []
+        Task.detached {
+            let r = runGPUTest { step in Task { @MainActor in self.testing = step } }
+            await MainActor.run { self.testResults = r; self.testing = nil }
+        }
+    }
     /// dismissed health issues: code -> the key it had (a new key shows it again)
     var healthDismissed: [String: String] {
         get { UserDefaults.standard.dictionary(forKey: "healthDismissed") as? [String: String] ?? [:] }
