@@ -26,7 +26,10 @@ final class Manager: ObservableObject {
         Task.detached {
             let report: (String) -> Void = { step in Task { @MainActor in self.testing = step } }
             let r = long ? runLongTest(progress: report) : runGPUTest(progress: report)
-            await MainActor.run { self.testResults = r; self.testing = nil }
+            if long { await MainActor.run { self.testResults = r; self.testing = nil }; return }
+            await MainActor.run { self.testResults = r; self.testing = String(localized: "Smoothness (a window opens for 5 seconds)…") }
+            let smooth = await runSmoothTest()   // SmoothTest.swift, on the main thread
+            await MainActor.run { self.testResults = r + smooth; self.testing = nil }
         }
     }
     /// dismissed health issues: code -> the key it had (a new key shows it again)

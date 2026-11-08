@@ -335,3 +335,15 @@
 "Above about 85 °C the card lowers its clock; check the airflow in the case." = "Yaklaşık 85 °C üstünde kart saat hızını düşürür; kasadaki hava akışını kontrol edin.";
 "Clock and temperature" = "Saat hızı ve sıcaklık";
 "Not read (needs IntelXe.kext 0.1.4 or later)" = "Okunamadı (IntelXe.kext 0.1.4 veya sonrası gerekir)";
+
+/* smoothness test */
+"Smoothness (a window opens for 5 seconds)…" = "Akıcılık (5 saniyeliğine bir pencere açılır)…";
+"Smoothness test" = "Akıcılık testi";
+"Smoothness" = "Akıcılık";
+"Too few frames reached the screen (%lld)" = "Ekrana çok az kare ulaştı (%lld)";
+"Frame rate in a window" = "Pencerede kare hızı";
+"display" = "ekran";
+"The display's full rate was not reached: in a scaled (HiDPI) size the compositor does more work; in the monitor's own size this points at the driver." = "Ekranın tam hızına ulaşılamadı: ölçekli (HiDPI) bir boyutta birleştirici daha çok iş yapar; monitörün kendi boyutundaysa sorun sürücüdedir.";
+"Late frames" = "Geç kalan kareler";
+"%lld of %lld" = "%2$lld karenin %1$lld tanesi";
+"Frames shown a refresh or more late are visible as stutter." = "Bir yenileme ya da daha geç gösterilen kareler takılma olarak görünür.";
