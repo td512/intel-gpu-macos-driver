@@ -45,6 +45,8 @@ final class Manager: ObservableObject {
     @Published var efiTarget = EFITarget.recorded
     @Published var efiPlans: [EFIAction: EFIPlan] = [:]
     @Published var hidpi = HiDPIStatus()
+    /// the system-volume copy of the Metal driver (SystemVolume.swift)
+    @Published var ssv = SSVStatus()
     /// Adaptive-Sync (Variable refresh) modes: wanted (NVRAM intelxefb-vrr-modes, unset = on) and offered this boot
     @Published var vrrWanted = true
     @Published var vrrActive = false
@@ -132,6 +134,8 @@ final class Manager: ObservableObject {
     }
 
     func refreshPackageStatus() async {
+        let chosen = package
+        ssv = await Task.detached { SSVStatus.read(package: chosen) }.value
         guard let package else { packageStatus = [:]; return }
         packageStatus = await Task.detached { package.status() }.value
     }
@@ -274,9 +278,13 @@ final class Manager: ObservableObject {
     }
 
     func performZink(_ action: ZinkAction) {
-        guard let zinkPackage else { return }
-        let script = shellQuoted(zinkPackage.directory.appendingPathComponent("install.sh").path)
-        perform(title: action.title, command: "\(script) \(action.arguments)", needsRoot: action.needsRoot, then: { result in
+        let command: String
+        if let zinkPackage {
+            command = shellQuoted(zinkPackage.directory.appendingPathComponent("install.sh").path) + " " + action.arguments
+        } else if action == .globalOn || action == .globalOff {
+            command = zinkGlobalCommand(on: action == .globalOn)
+        } else { return }
+        perform(title: action.title, command: command, needsRoot: action.needsRoot, then: { result in
             self.lastResult = result.cancelled ? String(localized: "Cancelled. Nothing changed.")
                 : result.succeeded ? String(localized: "Finished.") : String(localized: "It did not finish. See the log.")
         })
@@ -422,6 +430,14 @@ struct RootView: View {
             // --section <name> (e.g. tests): open on that page (for screenshots and support instructions)
             if let i = CommandLine.arguments.firstIndex(of: "--section"), i + 1 < CommandLine.arguments.count,
                let sec = Section(rawValue: CommandLine.arguments[i + 1]) { page.section = sec }
+            // --window-height <points>: a taller window, so that a screenshot shows the whole page
+            if let i = CommandLine.arguments.firstIndex(of: "--window-height"), i + 1 < CommandLine.arguments.count, let h = Double(CommandLine.arguments[i + 1]) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {   // after SwiftUI has placed the window
+                    guard let w = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }), let screen = w.screen ?? NSScreen.main else { return }
+                    let height = min(h, screen.visibleFrame.height)
+                    w.setFrame(NSRect(x: w.frame.minX, y: screen.visibleFrame.maxY - height, width: max(w.frame.width, 980), height: height), display: true)
+                }
+            }
             await manager.refresh()
             if UserDefaults.standard.object(forKey: "autoUpdateCheck") as? Bool ?? true { await manager.checkForUpdate() }
             // first runs, until the setup assistant has been finished once: open it where the machine stands
@@ -646,6 +662,13 @@ struct DriverView: View {
                     LabeledContent("Folder") { Text(package.directory.path).textSelection(.enabled).lineLimit(2).truncationMode(.middle) }
                     LabeledContent("Version") { Text(manager.packageStatus["package_version"] ?? "–") }
                     LabeledContent("Compared with what is installed") { Text(stateText) }
+                    if !changedItems.isEmpty {
+                        DisclosureGroup(String(localized: "Which items")) {
+                            ForEach(changedItems, id: \.self) { item in
+                                Text(item).font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                        }
+                    }
                 } else {
                     Text("Choose a package before you install or repair. Download the latest release, or use a folder you unpacked.")
                         .foregroundStyle(.secondary)
@@ -661,13 +684,18 @@ struct DriverView: View {
                 Text("The download is compared with the hashes published with the release. That finds a damaged file; it does not prove who made the release.")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            Section2(title: "Actions") {
-                ForEach(DriverAction.allCases) { action in
-                    ActionRow(action: action, enabled: enabled(action)) {
-                        if action.confirms { page.confirming = action } else { manager.perform(action) }
-                    }
+            if manager.package != nil {
+                Section2(title: "Install") {
+                    ActionRow(action: .install, enabled: enabled(.install), prominent: installRecommended) { page.confirming = .install }
+                    ActionRow(action: .repair, enabled: enabled(.repair)) { page.confirming = .repair }
+                    ActionRow(action: .check, enabled: enabled(.check)) { manager.perform(.check) }
+                }
+                Section2(title: "Go back") {
+                    ActionRow(action: .undo, enabled: enabled(.undo)) { page.confirming = .undo }
+                    ActionRow(action: .uninstall, enabled: enabled(.uninstall), destructive: true) { page.confirming = .uninstall }
                 }
             }
+            SSVSection()
             if let result = manager.lastResult {
                 Text(result).foregroundStyle(.secondary)
             }
@@ -689,6 +717,15 @@ struct DriverView: View {
         }
     }
 
+    /// what install.sh --status (0.1.4 and later) lists as differing or missing
+    var changedItems: [String] {
+        let st = manager.packageStatus
+        let differ = (st["items_differing"] ?? "").split(separator: ",").map { String($0) + "  " + String(localized: "(differs)") }
+        let missing = (st["items_missing"] ?? "").split(separator: ",").map { String($0) + "  " + String(localized: "(missing)") }
+        return st["installed_state"] == "absent" ? [] : differ + missing
+    }
+    var installRecommended: Bool { ["different", "partial", "absent"].contains(manager.packageStatus["installed_state"] ?? "") }
+
     var stateText: String {
         switch manager.packageStatus["installed_state"] {
         case "same": return String(localized: "The same")
@@ -703,12 +740,20 @@ struct DriverView: View {
 struct ActionRow: View {
     let action: DriverAction
     let enabled: Bool
+    var prominent = false
+    var destructive = false
     let perform: () -> Void
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text(action.explanation).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer()
-            Button(action.title, action: perform).disabled(!enabled).fixedSize()
+            if prominent {
+                Button(action.title, action: perform).disabled(!enabled).fixedSize().buttonStyle(.borderedProminent)
+            } else if destructive {
+                Button(action.title, role: .destructive, action: perform).disabled(!enabled).fixedSize().foregroundStyle(.red)
+            } else {
+                Button(action.title, action: perform).disabled(!enabled).fixedSize()
+            }
         }
     }
 }
@@ -716,40 +761,64 @@ struct ActionRow: View {
 struct ZinkView: View {
     @EnvironmentObject var manager: Manager
     var body: some View {
+        let f = manager.facts, ready = manager.zinkPackage != nil
         Form {
             Section2(title: "Zink") {
                 Text("Optional. LWJGL 3 Java games such as Minecraft render through Mesa's Zink straight to Vulkan, instead of Apple's OpenGL. Native applications stay on Apple's OpenGL.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                LabeledContent("Installed") { Text(manager.facts.zinkInstalled ? "Yes" : "No") }
-                LabeledContent("Every LWJGL application") { Text(manager.facts.zinkGlobal ? "On" : "Off") }
-            }
-            Section2(title: "Package") {
-                if let package = manager.zinkPackage {
-                    LabeledContent("Folder") { Text(package.directory.path).lineLimit(2).truncationMode(.middle).textSelection(.enabled) }
+                LabeledContent("Installed") {
+                    Label(f.zinkInstalled ? String(localized: "Yes") : String(localized: "No"), systemImage: f.zinkInstalled ? "checkmark.circle.fill" : "circle.dashed")
+                        .foregroundStyle(f.zinkInstalled ? .green : .secondary)
                 }
-                HStack {
-                    if let release = manager.release, release.asset("-zink-gl.zip") != nil {
-                        Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: true) } }
-                    } else if manager.release != nil {
-                        Text("The latest release has no Zink package.").foregroundStyle(.secondary)
+            }
+            Section2(title: "Every LWJGL application") {
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(f.zinkGlobal ? "On: LWJGL 3 applications use Zink." : "Off: they use Apple's OpenGL.")
+                        Text("It applies to applications started afterwards. Running ones must be restarted. A single game can use Zink without this, through its launcher's Java arguments.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
-                    Button("Use a folder…") { manager.pickFolder(zink: true) }
+                    Spacer()
+                    if f.zinkGlobal {
+                        Button(ZinkAction.globalOff.title) { manager.performZink(.globalOff) }.fixedSize()
+                    } else {
+                        Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.fixedSize().disabled(!f.zinkInstalled)
+                    }
                 }
             }
-            Section2(title: "Actions") {
-                if manager.zinkPackage == nil {
-                    Label("These need the Zink package: download it above (or choose its folder) first.", systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
-                }
-                let ready = manager.zinkPackage != nil
-                Button(ZinkAction.install.title) { manager.performZink(.install) }.disabled(!ready)
-                Button(ZinkAction.test.title) { manager.performZink(.test) }.disabled(!ready || !manager.facts.zinkInstalled)
-                if manager.facts.zinkGlobal {
-                    Button(ZinkAction.globalOff.title) { manager.performZink(.globalOff) }.disabled(!ready)
+            Section2(title: "Install") {
+                if let package = manager.zinkPackage {
+                    LabeledContent("Package") { Text(package.directory.path).lineLimit(2).truncationMode(.middle).textSelection(.enabled) }
                 } else {
-                    Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.disabled(!ready || !manager.facts.zinkInstalled)
+                    HStack(alignment: .firstTextBaseline, spacing: 14) {
+                        Text("Installing, the self-test and removing need the Zink package.").foregroundStyle(.secondary)
+                        Spacer()
+                        if let release = manager.release, release.asset("-zink-gl.zip") != nil {
+                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: true) } }.fixedSize()
+                        } else if manager.release != nil {
+                            Text("The latest release has no Zink package.").foregroundStyle(.secondary)
+                        }
+                        Button("Use a folder…") { manager.pickFolder(zink: true) }.fixedSize()
+                    }
                 }
-                Text("It applies to applications started afterwards. Running ones must be restarted.").font(.callout).foregroundStyle(.secondary)
-                Button(ZinkAction.undo.title, role: .destructive) { manager.performZink(.undo) }.disabled(!ready || !manager.facts.zinkInstalled)
+                if ready {
+                    HStack(spacing: 10) {
+                        if f.zinkInstalled {
+                            Button(ZinkAction.test.title) { manager.performZink(.test) }
+                        }
+                        Spacer()
+                        if f.zinkInstalled {
+                            Button(ZinkAction.undo.title, role: .destructive) { manager.performZink(.undo) }.foregroundStyle(.red)
+                            Button(String(localized: "Install again")) { manager.performZink(.install) }
+                        } else {
+                            Button(ZinkAction.install.title) { manager.performZink(.install) }.buttonStyle(.borderedProminent)
+                        }
+                    }
+                    Button("Use another folder…") { manager.pickFolder(zink: true) }.buttonStyle(.link).font(.callout)
+                }
+            }
+            if let result = manager.lastResult {
+                Text(result).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

@@ -240,12 +240,12 @@ package_items() {
 differs() { ! diff -rq -x ssv-component.plist "$1" "$2" >/dev/null 2>&1; }
 
 status() {
-    local installed=none state=absent present=0 changed=0 i p d
+    local installed=none state=absent present=0 changed=0 i p d differing="" missing=""
     [ -f "$BK/installed-version" ] && installed=$(cat "$BK/installed-version")
     while IFS='|' read -r p d; do
-        [ -e "$d" ] || continue
+        [ -e "$d" ] || { missing="$missing${missing:+,}$d"; continue; }
         present=$((present + 1))
-        differs "$H/$p" "$d" && changed=$((changed + 1))
+        differs "$H/$p" "$d" && { changed=$((changed + 1)); differing="$differing${differing:+,}$d"; }
     done < <(package_items)
     i=$(package_items | wc -l | tr -d ' ')
     if [ "$present" = 0 ]; then state=absent
@@ -258,6 +258,8 @@ status() {
     echo "installed_state=$state"
     echo "items_present=$present/$i"
     echo "items_different=$changed"
+    echo "items_differing=$differing"   # installed paths, comma-separated (the app lists them)
+    echo "items_missing=$missing"
     [ -s "$BK/last-backup" ] && [ -d "$(cat "$BK/last-backup")" ] && echo "backup=$(cat "$BK/last-backup")" || echo "backup=none"
     [ -e "$USELIB" ] && echo "use_library=yes" || echo "use_library=no"
     [ -f "$SSV/Contents/MacOS/NVMTLDriver" ] && echo "system_volume_copy=yes" || echo "system_volume_copy=no"

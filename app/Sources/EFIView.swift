@@ -52,9 +52,10 @@ struct EFIView: View {
                 }
             } else {
                 partition
-                if efi.found {
-                    files
+                // nothing below can be read until the partition is mounted: the one hint for that is in the section above
+                if efi.found && (efi.mounted || efi["efi_source"] == "folder") {
                     settings
+                    files
                     undo
                 }
             }
@@ -72,13 +73,6 @@ struct EFIView: View {
         Section2(title: "EFI partition") {
             Text("For a Mac installed with a plain OpenCore EFI (stage 1 of the install guide): this page does stages 2 and 4 on the EFI that OpenCore booted from, or on an EFI folder you choose, such as a USB stick's.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                if manager.efiFolder != nil {
-                    Button("Use the EFI partition instead") { manager.useEFIPartition() }
-                }
-                Spacer()
-                Button("Use an EFI folder…") { manager.pickEFIFolder() }
-            }
             if !efi.known {
                 Text(manager.probing ? String(localized: "Checking…") : "–").foregroundStyle(.secondary)
             } else {
@@ -92,8 +86,13 @@ struct EFIView: View {
                         LabeledContent("Mounted") { Text(efi.mounted ? efi["efi_mount_point"] : String(localized: "No")).textSelection(.enabled) }
                     }
                     LabeledContent("OpenCore") { Text(openCoreText) }
-                    if !efi.mounted {
-                        Button(EFIAction.mount.title + "…") { page.confirming = .mount }
+                    if !efi.mounted && efi["efi_source"] != "folder" {
+                        HStack(alignment: .firstTextBaseline, spacing: 14) {
+                            Text("Mount the EFI partition to see what stages 2 and 4 would change. Mounting changes nothing.")
+                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button(EFIAction.mount.title + "…") { page.confirming = .mount }.buttonStyle(.borderedProminent).fixedSize()
+                        }
                     }
                 }
                 if efi["efi_source"] == "none" || efi["efi_source"] == "chosen" {
@@ -109,6 +108,16 @@ struct EFIView: View {
                     }
                 }
             }
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text(manager.efiFolder != nil ? String(localized: "This page works on a folder you chose, not on a partition.")
+                                              : String(localized: "Another EFI, such as a USB stick's or a copy:"))
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                if manager.efiFolder != nil {
+                    Button("Use the EFI partition instead") { manager.useEFIPartition() }.fixedSize()
+                }
+                Button("Use an EFI folder…") { manager.pickEFIFolder() }.fixedSize()
+            }
         }
     }
 
@@ -120,8 +129,7 @@ struct EFIView: View {
             LabeledContent("ACPI > Add entry") { Text(entryText(efi["ssdt_entry"])) }
             LabeledContent("The card's ACPI path") { Text(cardText).textSelection(.enabled).multilineTextAlignment(.trailing) }
             planOrHint(.apply)
-            Button(EFIAction.apply.title + "…") { page.confirming = .apply }
-                .disabled(!(manager.efiPlans[.apply]?.changes ?? false))
+            applyButton(.apply)
         }
     }
 
@@ -130,8 +138,7 @@ struct EFIView: View {
             Text("SIP (csr-active-config), the boot-args amfi_get_out_of_my_way=0x1 and intelxe_surfvram=2, ResizeAppleGpuBars, DisableIoMapper and ReconnectGraphicsOnConnect, as stage 2 of the install guide sets them. Separate from the files above; your other settings stay as they are.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             planOrHint(.settings)
-            Button(EFIAction.settings.title + "…") { page.confirming = .settings }
-                .disabled(!(manager.efiPlans[.settings]?.changes ?? false))
+            applyButton(.settings)
         }
     }
 
@@ -152,11 +159,25 @@ struct EFIView: View {
         }
     }
 
+    /// right-aligned; the default button when there is something to change, else a note that there is nothing
+    @ViewBuilder func applyButton(_ action: EFIAction) -> some View {
+        let changes = manager.efiPlans[action]?.changes ?? false
+        HStack {
+            if manager.efiPlans[action] != nil && !changes {
+                Label("Nothing to change", systemImage: "checkmark.circle").foregroundStyle(.green)
+            }
+            Spacer()
+            if changes {
+                Button(action.title + "…") { page.confirming = action }.buttonStyle(.borderedProminent)
+            } else {
+                Button(action.title + "…") { page.confirming = action }.disabled(true)
+            }
+        }
+    }
+
     @ViewBuilder func planOrHint(_ action: EFIAction) -> some View {
         if let plan = manager.efiPlans[action] {
-            PlanText(plan: plan)
-        } else if !efi.mounted {
-            Text("Mount the EFI partition to see what would change.").foregroundStyle(.secondary)
+            if plan.changes { PlanText(plan: plan) }   // without changes the button row says so
         } else if !efi.isOpenCore {
             Text("This partition has no EFI/OC/OpenCore.efi and config.plist: it is not an OpenCore EFI.").foregroundStyle(.secondary)
         } else if !efi.readable {

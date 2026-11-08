@@ -74,3 +74,20 @@ enum ZinkAction: String, Identifiable {
     }
     var needsRoot: Bool { self != .test }
 }
+
+/// zink-gl/install.sh --global on|off without the package (it is only needed to install): the same LaunchAgent, which
+/// sets JAVA_TOOL_OPTIONS at every login, and the same variable for the user logged in now.
+func zinkGlobalCommand(on: Bool) -> String {
+    let gl = "/Library/IntelXe/GL"
+    let options = "-Dorg.lwjgl.glfw.libname=\(gl)/libglfw.3.dylib -Dorg.lwjgl.opengl.libname=\(gl)/libGLzink.dylib"
+    let agent = shellQuoted(zinkAgent), domain = shellQuoted(String(zinkAgent.dropLast(6)))
+    let user = "u=$(stat -f %Su /dev/console); "
+    if !on {
+        return "rm -f \(agent); " + user + "if [ -n \"$u\" ] && [ \"$u\" != root ]; then launchctl asuser \"$(id -u \"$u\")\" launchctl unsetenv JAVA_TOOL_OPTIONS; fi; echo off"
+    }
+    return "set -e; [ -d \(gl) ] || { echo 'Zink is not installed'; exit 1; }; rm -f \(agent); "
+        + "defaults write \(domain) Label -string io.github.yusufklncc.intelxe.zink-gl; "
+        + "defaults write \(domain) ProgramArguments -array /bin/launchctl setenv JAVA_TOOL_OPTIONS \(shellQuoted(options)); "
+        + "defaults write \(domain) RunAtLoad -bool true; chown root:wheel \(agent); chmod 644 \(agent); plutil -convert xml1 \(agent); "
+        + user + "if [ -n \"$u\" ] && [ \"$u\" != root ]; then launchctl asuser \"$(id -u \"$u\")\" launchctl setenv JAVA_TOOL_OPTIONS \(shellQuoted(options)); fi; echo on"
+}
