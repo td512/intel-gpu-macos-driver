@@ -462,6 +462,30 @@ bool IntelXe::start(IOService *provider) {
 	int sv = 0;
 	if (intelxeBootArg("IntelXe", "intelxe_surfvram", &sv, sizeof(sv))) gSurfVram = sv;
 	if (gSurfVram < 0 || gSurfVram > 3) gSurfVram = 0;
+	// IntelXe Manager's power settings, kept in NVRAM, read before SLPC starts (xe_core.cpp sends them at its init):
+	// intelxe-gpu-profile 0 base / 1 power saving (SLPC_PARAM_POWER_PROFILE), intelxe-gpu-min-mhz and intelxe-gpu-max-mhz
+	// (SLPC global min / max; 0 = the default). "ok" or anything not a number counts as absent.
+	{
+		auto nvInt = [](const char *key, int lo, int hi, int *out) {
+			IORegistryEntry *opt = IORegistryEntry::fromPath("/options", gIODTPlane);
+			if (!opt) return;
+			if (OSObject *o = opt->copyProperty(key)) {
+				char b[16] = {};
+				if (OSData *d = OSDynamicCast(OSData, o)) bcopy(d->getBytesNoCopy(), b, d->getLength() < sizeof b - 1 ? d->getLength() : sizeof b - 1);
+				else if (OSString *str = OSDynamicCast(OSString, o)) strlcpy(b, str->getCStringNoCopy(), sizeof b);
+				o->release();
+				if (b[0] >= '0' && b[0] <= '9') {
+					long v = 0; for (const char *p = b; *p >= '0' && *p <= '9' && v < 100000; p++) v = v * 10 + (*p - '0');
+					if (v >= lo && v <= hi) *out = (int)v;
+				}
+			}
+			opt->release();
+		};
+		nvInt("intelxe-gpu-profile", 0, 1, &gSlpcProfile);
+		nvInt("intelxe-gpu-min-mhz", 0, 3000, &gSlpcMin);
+		nvInt("intelxe-gpu-max-mhz", 0, 3000, &gSlpcMax);
+		if (gSlpcMin == 0) gSlpcMin = 1200;   // 0 in NVRAM: the default floor (Wa_14022085890)
+	}
 	int wf = 0;   // rb7q: debug.intelxe.surfvram_wsfull at boot (default 1)
 	if (intelxeBootArg("IntelXe", "intelxe_svwsfull", &wf, sizeof(wf))) gSurfVramWsFull = wf;
 	int fds = 0;   // rb7t: debug.intelxe.fds at boot (default 0: no object fds, no /dev/intelxeobj). Switched on with the first

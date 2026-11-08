@@ -286,3 +286,31 @@
 "Display size" = "Ekran boyutu";
 "Open IntelXe Manager" = "IntelXe Manager'ı aç";
 "Quit" = "Çık";
+
+/* Settings page */
+"Settings" = "Ayarlar";
+"Power" = "Güç";
+"GPU power profile" = "GPU güç profili";
+"Balanced" = "Dengeli";
+"Power saving" = "Güç tasarrufu";
+"GPU clock" = "GPU saat hızı";
+"Default (1200–2850 MHz)" = "Varsayılan (1200–2850 MHz)";
+"Quiet (up to 1800 MHz: less heat and fan noise)" = "Sessiz (en çok 1800 MHz: daha az ısı ve fan sesi)";
+"Performance (at least 2400 MHz: lowest latency, more power)" = "Performans (en az 2400 MHz: en düşük gecikme, daha çok güç)";
+"Applied at the next start." = "Bir sonraki açılışta uygulanır.";
+"Display troubleshooting" = "Ekran sorun giderme";
+"Hardware cursor (turn off if the pointer flickers, leaves trails or has the wrong colours)" = "Donanım imleci (imleç titriyor, iz bırakıyor ya da renkleri yanlışsa kapatın)";
+"Turn the output off when the display sleeps (some monitors then wake more reliably, some less)" = "Ekran uyurken çıkışı kapat (bazı monitörler böyle daha güvenilir, bazıları daha zor uyanır)";
+"Low framerate compensation in Variable refresh (repeats frames below the monitor's lowest rate)" = "Değişken yenilemede düşük kare hızı telafisi (monitörün en düşük hızının altında kareleri tekrarlar)";
+"Variable refresh lowest rate" = "Değişken yenilemenin en düşük hızı";
+"The monitor's own" = "Monitörün kendi değeri";
+"Raise the lowest rate if the monitor flickers in Variable refresh at low frame rates." = "Monitör düşük kare hızlarında Değişken yenilemede titriyorsa en düşük hızı yükseltin.";
+"Diagnostics" = "Tanılama";
+"GPU timing in the Metal driver's log (for performance reports; test builds only)" = "Metal sürücüsünün günlüğünde GPU zamanlaması (performans bildirimleri için; yalnız test sürümleri)";
+"Revert" = "Geri al";
+"Save" = "Kaydet";
+"This app" = "Bu uygulama";
+"Open at login (keeps the menu bar item there)" = "Girişte aç (menü çubuğu simgesi orada kalsın)";
+"Check for a new release at start" = "Açılışta yeni sürümü denetle";
+"Save the driver settings" = "Sürücü ayarlarını kaydet";
+"Saved. The display settings apply now; the power settings at the next start." = "Kaydedildi. Ekran ayarları hemen, güç ayarları bir sonraki açılışta uygulanır.";

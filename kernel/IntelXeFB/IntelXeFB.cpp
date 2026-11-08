@@ -3549,6 +3549,23 @@ bool IntelXeFramebuffer::start(IOService *provider)
 		}
 	}
 	publishScalerInfo();
+	{
+		// IntelXe Manager's display settings, kept in NVRAM (the sysctls of the same names change them until the next boot):
+		// intelxefb-hwcursor 0/1, intelxefb-dpms 0/1 (display sleep powers the output down), intelxefb-vrr-lfc 0/1 and
+		// intelxefb-vrr-floor (Hz, 0 = the panel's). "ok" or anything else not a number counts as absent.
+		auto nvNum = [](const char *key, long lo, long hi, long *out) {
+			char b[16];
+			if (!nvramRead(key, b, sizeof b) || b[0] < '0' || b[0] > '9') return false;
+			long v = 0; for (const char *p = b; *p >= '0' && *p <= '9' && v < 100000; p++) v = v * 10 + (*p - '0');
+			if (v < lo || v > hi) return false;
+			*out = v; return true;
+		};
+		long v = 0;
+		if (nvNum("intelxefb-hwcursor", 0, 1, &v)) gHwCursor = (int)v;
+		if (nvNum("intelxefb-dpms", 0, 1, &v)) gDpms = (int)v;
+		if (nvNum("intelxefb-vrr-lfc", 0, 1, &v)) gVrrLfc = (int)v;
+		if (nvNum("intelxefb-vrr-floor", 0, 500, &v)) gVrrFloorHz = (uint32_t)v;
+	}
 	cursorInit();
 	{
 		// macOS Adaptive-Sync modes, on unless boot-arg intelxefb_vrrmodes=0 or NVRAM intelxefb-vrr-modes=0 (the EDID change needs it at start)

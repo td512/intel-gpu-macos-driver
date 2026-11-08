@@ -321,12 +321,13 @@ extension ZinkAction {
 }
 
 enum Section: String, CaseIterable, Identifiable {
-    case system, monitor, driver, efi, display, zink, report, log
+    case system, monitor, driver, efi, display, settings, zink, report, log
     var id: String { rawValue }
     var title: LocalizedStringKey {
         switch self {
         case .system: return "System"
         case .monitor: return "Monitor"
+        case .settings: return "Settings"
         case .driver: return "Driver"
         case .efi: return "EFI (OpenCore)"
         case .display: return "Display"
@@ -339,6 +340,7 @@ enum Section: String, CaseIterable, Identifiable {
         switch self {
         case .system: return "cpu"
         case .monitor: return "waveform.path.ecg"
+        case .settings: return "slider.horizontal.3"
         case .driver: return "shippingbox"
         case .efi: return "externaldrive"
         case .display: return "display"
@@ -371,6 +373,7 @@ struct RootView: View {
                 switch page.section ?? .system {
                 case .system: SystemView()
                 case .monitor: MonitorView()
+                case .settings: SettingsView()
                 case .driver: DriverView()
                 case .efi: EFIView()
                 case .display: DisplayView()
@@ -388,7 +391,7 @@ struct RootView: View {
         }
         .task {
             await manager.refresh()
-            await manager.checkForUpdate()
+            if UserDefaults.standard.object(forKey: "autoUpdateCheck") as? Bool ?? true { await manager.checkForUpdate() }
         }
     }
 }
