@@ -267,8 +267,30 @@ SYSCTL_PROC(_debug_intelxe, OID_AUTO, surfvram_list, CTLTYPE_STRING | CTLFLAG_RD
 SYSCTL_INT(_debug_intelxe, OID_AUTO, surfvram_wsfull, CTLFLAG_RW, &gSurfVramWsFull, 0,
 	"rb7q: 1 = WindowServer only imports (never makes) a VRAM backing of at least one scan-out frame; 0 = as rb7p");
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, vram, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_ANYBODY, nullptr, 0, vramHandler, "A", "VRAM and BAR window use by process");
+// debug.intelxe.sensors (anyone may read; IntelXe Manager's monitor): the render GT's actual and requested clock and its
+// limits, and the package and VRAM temperatures, as Linux xe reads them: xe_guc_pc_get_act_freq reads CAGF from
+// MTL_MIRROR_TARGET_WP1 without forcewake (0 while the GT sits in RC6), the caps from MTL_RP_STATE_CAP; xe_hwmon reads
+// BMG_PACKAGE_TEMPERATURE and BMG_VRAM_TEMPERATURE, degrees Celsius in bits 7:0 (xe_pcode_regs.h TEMP_MASK). No write,
+// no forcewake: reading it does not wake the GPU.
+static int sensorsHandler SYSCTL_HANDLER_ARGS {
+	char buf[256];
+	const int n = gDev ? gDev->sensorsString(buf, sizeof buf) : snprintf(buf, sizeof buf, "no device\n");
+	return SYSCTL_OUT(req, buf, (size_t)(n < (int)sizeof buf - 1 ? n : (int)sizeof buf - 1) + 1);
+}
+SYSCTL_PROC(_debug_intelxe, OID_AUTO, sensors, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_ANYBODY, nullptr, 0, sensorsHandler, "A",
+	"act/req MHz, RP0/RPn MHz, package and VRAM temperature (C)");
 // rb7r: purgeable BOs (DRM_IOCTL_XE_MADVISE). purge: write 1 = purge every DONTNEED BO that can be now (memory pressure
 // on demand); purge_stats: madvise and purge counters.
+int IntelXe::sensorsString(char *buf, size_t len)
+{
+	if (!bar0 || suspended) return snprintf(buf, len, "unavailable (%s)\n", suspended ? "asleep" : "not mapped");
+	auto mhz = [](uint32_t raw) { return (raw * 50 + 1) / 3; };   // units of 50/3 MHz (decode_freq)
+	const uint32_t wp1 = rd(0xc60), req = rd(0xa008), cap = rd(0x138000);
+	const uint32_t pkg = rd(BMG_PACKAGE_TEMPERATURE), vram = rd(BMG_VRAM_TEMPERATURE);
+	if (wp1 == 0xffffffffu && cap == 0xffffffffu) return snprintf(buf, len, "unavailable (the device does not answer)\n");
+	return snprintf(buf, len, "act %u MHz, req %u MHz, RP0 %u MHz, RPn %u MHz, package %u C, VRAM %u C\n", mhz(wp1 & 0x1ff),
+		mhz(req >> 23 & 0x1ff), mhz(cap & 0x1ff), mhz(cap >> 16 & 0x1ff), pkg & 0xff, vram & 0xff);
+}
 static int purgeHandler SYSCTL_HANDLER_ARGS {
 	int v = 0, err = sysctl_handle_int(oidp, &v, 0, req);
 	if (err || !req->newptr) return err;

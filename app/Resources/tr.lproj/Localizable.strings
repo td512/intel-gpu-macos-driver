@@ -258,3 +258,21 @@
 "Variable modes" = "Değişken modlar";
 "Turn Variable refresh off" = "Değişken yenilemeyi kapat";
 "Turn Variable refresh on" = "Değişken yenilemeyi aç";
+
+/* Monitor page */
+"Monitor" = "İzleme";
+"Mode" = "Mod";
+"Variable refresh" = "Değişken yenileme";
+"Offered" = "Sunuluyor";
+"Frames presented" = "Gösterilen kareler";
+"Frames the display took in the last second: it rises with motion on screen and falls to a few when nothing moves." = "Ekranın son bir saniyede aldığı kareler: ekranda hareket olunca yükselir, hiçbir şey kıpırdamazken birkaça düşer.";
+"GPU" = "GPU";
+"The GPU clock and temperatures need IntelXe.kext 0.1.4 or later in your EFI." = "GPU saat hızı ve sıcaklıklar için EFI'nizde IntelXe.kext 0.1.4 veya sonrası gerekir.";
+"Clock" = "Saat hızı";
+"idle (power saving)" = "boşta (güç tasarrufu)";
+"max" = "en çok";
+"Temperature" = "Sıcaklık";
+"GPU %lld °C" = "GPU %lld °C";
+"memory %lld °C" = "bellek %lld °C";
+"Video memory in use" = "Kullanılan video belleği";
+"pixels" = "piksel";

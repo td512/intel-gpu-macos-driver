@@ -321,11 +321,12 @@ extension ZinkAction {
 }
 
 enum Section: String, CaseIterable, Identifiable {
-    case system, driver, efi, display, zink, report, log
+    case system, monitor, driver, efi, display, zink, report, log
     var id: String { rawValue }
     var title: LocalizedStringKey {
         switch self {
         case .system: return "System"
+        case .monitor: return "Monitor"
         case .driver: return "Driver"
         case .efi: return "EFI (OpenCore)"
         case .display: return "Display"
@@ -337,6 +338,7 @@ enum Section: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .system: return "cpu"
+        case .monitor: return "waveform.path.ecg"
         case .driver: return "shippingbox"
         case .efi: return "externaldrive"
         case .display: return "display"
@@ -368,6 +370,7 @@ struct RootView: View {
                 Banners()
                 switch page.section ?? .system {
                 case .system: SystemView()
+                case .monitor: MonitorView()
                 case .driver: DriverView()
                 case .efi: EFIView()
                 case .display: DisplayView()

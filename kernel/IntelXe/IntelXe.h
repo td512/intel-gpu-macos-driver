@@ -101,6 +101,7 @@ private:
 	bool mCtOn {false};
 public:
 	void mediaDown() { mCtOn = mHucOn = mSlpcOn = false; }   // after suspend: reloaded by mediaUp on next use
+	int sensorsString(char *buf, size_t len);   // debug.intelxe.sensors: GT clock and temperatures, read-only
 private:
 	IOBufferMemoryDescriptor *mHucMem {nullptr}, *mSlpcMem {nullptr};
 	bool mHucOn {false}, mSlpcOn {false};
