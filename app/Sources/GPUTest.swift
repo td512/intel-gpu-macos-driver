@@ -111,6 +111,14 @@ func runGPUTest(progress: @escaping (String) -> Void) -> [TestResult] {
         let n = 160 * 1024 * 16
         let o = d.makeBuffer(length: n * 4, options: .storageModePrivate)!
         var a: Float = 0.999
+        // the GT clock rises from its 1200 MHz floor only under a steady load: half a second of it first
+        let warm = Date().addingTimeInterval(0.5)
+        while Date() < warm {
+            guard let cb = q.makeCommandBuffer(), let e = cb.makeComputeCommandEncoder() else { break }
+            e.setComputePipelineState(p); e.setBuffer(o, offset: 0, index: 0); e.setBytes(&a, length: 4, index: 1)
+            e.dispatchThreads(MTLSize(width: n, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1)); e.endEncoding()
+            cb.commit(); cb.waitUntilCompleted()
+        }
         let t = gpuTime(q) { cb in
             let e = cb.makeComputeCommandEncoder()!; e.setComputePipelineState(p); e.setBuffer(o, offset: 0, index: 0); e.setBytes(&a, length: 4, index: 1)
             e.dispatchThreads(MTLSize(width: n, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1)); e.endEncoding()
@@ -180,9 +188,10 @@ private func videoCheck() -> [TestResult] {
     var list: CFArray?
     if VTCopyVideoEncoderList(nil, &list) == noErr, let items = list as? [[String: Any]] {
         for item in items where (item[kVTVideoEncoderList_IsHardwareAccelerated as String] as? Bool) == true {
-            // the main codecs only (Apple Silicon lists ProRes, depth and alpha variants too)
-            if let n = item[kVTVideoEncoderList_DisplayName as String] as? String, n.range(of: #"H\.?264|HEVC|AV1|VP9"#, options: .regularExpression) != nil,
-               !n.contains("Depth"), !n.contains("Disparity"), !n.contains("Alpha"), !encoders.contains(n) { encoders.append(n) }
+            // the main codecs only, by codec type (Apple Silicon lists ProRes, depth and alpha variants too)
+            let type = (item[kVTVideoEncoderList_CodecType as String] as? NSNumber)?.uint32Value ?? 0
+            let names: [CMVideoCodecType: String] = [kCMVideoCodecType_H264: "H.264", kCMVideoCodecType_HEVC: "HEVC", kCMVideoCodecType_AV1: "AV1"]
+            if let n = names[type], !encoders.contains(n) { encoders.append(n) }
         }
     }
     out.append(TestResult(title: String(localized: "Hardware video encoders"), value: encoders.isEmpty ? String(localized: "None") : encoders.joined(separator: ", "),
