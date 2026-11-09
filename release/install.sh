@@ -293,7 +293,7 @@ uninstall() {
     for k in "${KEXTS[@]}" "${OLD_KEXTS[@]}"; do
         if [ -e /Library/Extensions/$k.kext ]; then rm -rf /Library/Extensions/$k.kext; echo "  ok    removed /Library/Extensions/$k.kext"; fi
     done
-    for g in NVMTLDriverLib.bundle NVMTLDriver.bundle nvmtl nvmtl-allow.txt NVMTLDriver.use-library; do
+    for g in NVMTLDriverLib.bundle NVMTLDriver.bundle nvmtl nvmtl-allow.txt NVMTLDriver.use-library NVMTLDriver.no-low-latency; do
         if [ -e $GB/$g ]; then rm -rf $GB/$g; echo "  ok    removed $GB/$g"; fi
     done
     guard_remove

@@ -492,6 +492,8 @@ nvk() { if _v=$(nvram "$1" 2>/dev/null); then printf '%s = %s\n' "$1" "$(printf 
 	done
 	printf 'NVMTLDriver.use-library (NMXAccel uses the /Library copy even with a system-volume copy): %s\n' \
 		"$([ -e /Library/GPUBundles/NVMTLDriver.use-library ] && echo present || echo absent)"
+	printf 'NVMTLDriver.no-low-latency (no GuC low-latency hint for apps: IntelXe Manager Fast GPU response off): %s\n' \
+		"$([ -e /Library/GPUBundles/NVMTLDriver.no-low-latency ] && echo present || echo absent)"
 	if [ -f /Library/GPUBundles/nvmtl/ssv-component.plist ]; then
 		echo "system-volume copy record (nvmtl/ssv-component.plist):"
 		plutil -p /Library/GPUBundles/nvmtl/ssv-component.plist 2>/dev/null | sed 's/^/  /'

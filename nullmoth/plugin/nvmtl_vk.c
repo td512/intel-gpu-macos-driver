@@ -768,10 +768,33 @@ static void nvmtl_vkmsg_arm(void)
     }
 }
 
+/* The GuC's low-latency hint (Mesa's driconf force_guc_low_latency -> DRM_XE_EXEC_QUEUE_LOW_LATENCY_HINT -> the GuC
+   SLPC treats the queue's work as compute and keeps the GT clock up while it runs). Without it, SLPC sees short,
+   spaced-out submissions as low load and leaves the GT at its 1200 MHz floor: one tiny dispatch's round trip 94 us
+   instead of 56 us, Geekbench 7 Metal 92.7k -> 96.1k and OpenCL 86.1k -> 91.1k (B580, 2026-11-09). When idle the GT is in
+   RC6 either way. On for every process but WindowServer and the system's own interface, which run whenever anything on
+   screen moves; /Library/GPUBundles/NVMTLDriver.no-low-latency (IntelXe Manager's switch) turns it off everywhere,
+   NVMTL_GUC_LOW_LATENCY=0/1 decides for one process, and a force_guc_low_latency a process was started with stands. */
+static void nvmtl_guc_hint_env(void)
+{
+    static const char *const ui[] = { "WindowServer", "loginwindow", "Dock", "com.apple.dock.extra", "SystemUIServer",
+        "ControlCenter", "NotificationCenter", "WindowManager", "ScreenSaverEngine", "legacyScreenSaver" };
+    const char *me = getprogname(), *o = getenv("NVMTL_GUC_LOW_LATENCY"), *why; int on;
+    int system_ui = 0;
+    for (size_t i = 0; me && i < sizeof ui / sizeof *ui; i++) system_ui |= !strcmp(me, ui[i]);
+    if (o && *o) { on = *o != '0'; why = "NVMTL_GUC_LOW_LATENCY"; }
+    else if (access("/Library/GPUBundles/NVMTLDriver.no-low-latency", F_OK) == 0) { on = 0; why = "turned off (NVMTLDriver.no-low-latency)"; }
+    else if (system_ui) { on = 0; why = "the system's interface"; }
+    else if (getenv("force_guc_low_latency") && *getenv("force_guc_low_latency")) return;   // set by whoever started it
+    else { on = 1; why = "default"; }
+    setenv("force_guc_low_latency", on ? "true" : "false", 1);
+    nvlog("vk: GuC low-latency hint %s for %s (%s)", on ? "on" : "off", me ? me : "?", why);
+}
 static int nvmtl_vk_initialize(void)
 {
     if (g_state) return g_state == 1 ? 0 : -1;
     g_state = -1;
+    nvmtl_guc_hint_env();
     if (!getenv("NVRM_FLUSH_TIMEOUT_MS")) {
         char budget[32]; snprintf(budget, sizeof budget, "%ld", nvmtl_gpu_wait_budget_ms());
         setenv("NVRM_FLUSH_TIMEOUT_MS", budget, 1);
