@@ -406,6 +406,13 @@ struct XeQueue {
 	uint32_t karmaSeq;          // xe_sched_invalidate_job: the job (seqno) the GT resets and timeouts below count against,
 	uint8_t karma;              // and how many there were (more than 2: banned)
 	XeQueue *reapNext;
+	// debug.intelxe.direct (gSchedLock): a slot is armed in the ring (direct submission, see dsEnter); the mailbox and
+	// stub entry in gDsMem + 1 (0 none; kept until the guc_id goes); the seqno of the last slot of the last direct
+	// stretch; when the queue last submitted (eligible queues, while the switch is on)
+	bool dsArmed;
+	uint8_t dsEntry;
+	uint32_t dsEndSeq;
+	uint64_t dsLastNs;
 };
 
 // guc_id -> queue (g2h_exec_queue_lookup), per GuC. gSchedLock.
@@ -2665,15 +2672,299 @@ static bool tlbFlushDue(const XeQueue *q, uint32_t gen) {
 		(q->logicalMask & (q->logicalMask - 1));
 }
 
+// ─── direct submission (debug.intelxe.direct, off by default; docs/design/DESIGN-direct-submission.md) ────────────
+// Linux xe has none: every job is a ring write and SCHED_CONTEXT, and the GuC puts the context on the engine for it
+// (29 of a 56 us round trip here). Intel's compute runtime keeps a context on the engine polling a mailbox with
+// MI_SEMAPHORE_WAIT (ULLS), in user space. This does it in the ring of a primary-GT compute queue that has
+// DRM_XE_EXEC_QUEUE_LOW_LATENCY_HINT, so fences, the watchdog, bans and GT-reset replay keep working. While the queue is
+// armed its ring ends with one slot for the next seqno a, and the LRC tail right after it:
+//   preparser off, MI_SEMAPHORE_WAIT (poll, GGTT mailbox >= a), preparser on   (the context waits on the engine here)
+//   MI_BATCH_BUFFER_START (first level, GGTT) to stub[a % 256]
+//   jobPost: flush, seqno a, MI_USER_INTERRUPT, MI_ARB_CHECK
+// Job a goes in through its stub (jobPre: the invalidating PIPE_CONTROL, with TLB invalidation when the page tables
+// changed, CTX_TIMESTAMP and the start seqno, then a chained MI_BATCH_BUFFER_START, PPGTT, to the batch, whose
+// MI_BATCH_BUFFER_END returns to the ring) and then mailbox = a: the job starts. Then, off the latency path, the slot
+// for a + 1 and SCHED_CONTEXT for the new tail (the GuC moves the tail of the running context, as for any job submitted
+// while the previous one runs). A job submitted while the previous one runs takes the slot that one's submit armed, so
+// one slot is armed at a time and back-to-back jobs need no fallback.
+// Leaving (dsExit: idle for debug.intelxe.direct_idle_us, another queue on the engine class, an exec that waits in the
+// FIFO, suspend, GT reset, close, the switch off): stub = MI_BATCH_BUFFER_END and the slot's seqno is consumed like an
+// empty kernel job, with nothing armed after it; the ring runs dry and the GuC switches the context out. A job that
+// finds no ring room for the next slot leaves the same way (it is the stretch's last). A ban only drops the state: the
+// context stays off. The next job takes the normal path; one that follows it within the idle time arms again (dsEnter).
+// Invariants (gSchedLock): armed => the FIFO is empty and seqno == submitted (the slot's seqno is submitted + 1 and no
+// fence has it yet); at most one queue armed (gDsQ); stub[x % 256] is written for job x only after x - 256 completed
+// (at most 255 jobs outstanding, as ringRoom); a stretch starts only when the last one's slots have all run, so the
+// mailbox can be set to a - 1; a is never 0 (the >= would pass on the previous value 0xffffffff). The mailbox only grows
+// within a stretch, so a GT reset replays every slot left in the ring without waiting.
+int gDirect = 0, gDirectIdleUs = 2000;
+static constexpr uint32_t kDsEntries = 32, kDsStubBytes = 128, kDsEntryBytes = 256 * kDsStubBytes;
+// Page 0: a mailbox per entry, 64 bytes apart; then per entry 256 stubs of 32 dwords. System memory, GGTT-mapped by the
+// first debug.intelxe.direct=1, never freed (as gJtMem).
+static IOBufferMemoryDescriptor *gDsMem;
+static uint32_t gDsG, gDsBits;   // its GGTT address; entries in use (gResLock)
+static thread_call_t gDsCall;    // dsIdleRun
+static XeQueue *gDsQ;            // the armed queue (gSchedLock)
+static const XeQueue *gDsLastQ;  // the last queue that submitted to the primary GT's compute class (only compared) and
+static uint64_t gDsLastNs;       // when (gSchedLock)
+
+static void queueBan(XeQueue *q);
+
+static uint64_t dsIdleNs() {
+	const int us = gDirectIdleUs;
+	return (uint64_t)(us < 20 ? 20 : us > 1000000 ? 1000000 : us) * 1000;
+}
+static uint32_t dsMboxG(const XeQueue *q) { return gDsG + (q->dsEntry - 1u) * 64; }
+static uint32_t dsStubG(const XeQueue *q, uint32_t s) {
+	return gDsG + 0x1000 + (q->dsEntry - 1u) * kDsEntryBytes + s % 256 * kDsStubBytes;
+}
+static uint32_t *dsCpu(uint32_t g) {
+	return reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(gDsMem->getBytesNoCopy()) + (g - gDsG));
+}
+
+// The mailbox, out of the CPU cache (the semaphore polls memory) after everything written before it.
+static void dsMboxSet(const XeQueue *q, uint32_t v) {
+	volatile uint32_t *m = dsCpu(dsMboxG(q));
+	*m = v;
+	flushRange(const_cast<uint32_t *>(m), 4);
+}
+
+// The stub of job s: jobPre (at most 27 dwords) and the jump to the batch, or MI_BATCH_BUFFER_END after it for a job
+// without batch, or MI_BATCH_BUFFER_END alone for the no-op that leaves direct mode.
+static void dsStubWrite(const XeQueue *q, uint32_t s, uint64_t batch, bool flush, bool noop) {
+	uint32_t *p = dsCpu(dsStubG(q, s));
+	uint32_t n = 0;
+	if (!noop) n = jobPre(q, batch, s, flush, jobTimeAddr(q), p, 0);
+	if (noop || !batch) p[n++] = MI_BATCH_BUFFER_END;
+	flushRange(p, n * 4);
+}
+
+// The armed slot for seqno a (at most 32 dwords, even). The preparser is off across the wait, so nothing after it (the
+// stub) is fetched before the mailbox moves.
+static uint32_t dsSlot(const XeQueue *q, uint32_t a, uint32_t *dw) {
+	uint32_t n = 0;
+	dw[n++] = MI_INSTR(0x5) | 1u << 8 | 1;   // preparser disable
+	// MI_SEMAPHORE_WAIT (xe_mi_commands.h, XE_INSTR_NUM_DW(5)): MI_SEMW_GGTT, MI_SEMW_POLL, COMPARE_OP_SAD_GTE_SDD;
+	// semaphore data, address, token
+	dw[n++] = MI_INSTR(0x1c) | 1u << 22 | 1u << 15 | 1u << 12 | 3;
+	dw[n++] = a;
+	dw[n++] = dsMboxG(q);
+	dw[n++] = 0;
+	dw[n++] = 0;
+	dw[n++] = MI_INSTR(0x5) | 1u << 8;       // preparser enable
+	dw[n++] = MI_INSTR(0x31) | 1;            // MI_BATCH_BUFFER_START, first level, GGTT (privileged, as the ring)
+	dw[n++] = dsStubG(q, a);
+	dw[n++] = 0;
+	n = jobPost(q, nullptr, 0, a, jobTimeAddr(q), dw, n);
+	if (n & 1) dw[n++] = MI_NOOP;
+	return n;
+}
+
+// Room for n more dwords while armed: the engine is at or after where job `done` ended (the armed slot's start when
+// every job has completed). ringRoom's q->tail case does not hold here: the armed slot is never consumed.
+static bool dsRoom(const XeQueue *q, uint32_t n, uint32_t done) {
+	const uint32_t used = (q->tail - q->ringPos[done % 256] + ringSize) % ringSize;
+	return ringSize - used > n * 4 + 64;
+}
+
+static bool dsEntryGet(XeQueue *q) {
+	IOLockLock(gResLock);
+	if (!q->dsEntry && ~gDsBits) {
+		const uint32_t e = (uint32_t)__builtin_ctz(~gDsBits);
+		gDsBits |= 1u << e;
+		q->dsEntry = (uint8_t)(e + 1);
+	}
+	IOLockUnlock(gResLock);
+	return q->dsEntry != 0;
+}
+
+// The entry goes with the guc_id, once the context is off the hardware (its slots may run until then). gResLock.
+static void dsEntryPut(XeQueue *q) {
+	if (!q->dsEntry) return;
+	gDsBits &= ~(1u << (q->dsEntry - 1));
+	q->dsEntry = 0;
+}
+
+static void dsDisarm(XeQueue *q) {
+	q->dsArmed = false;
+	q->dsEndSeq = q->submitted;
+	gDsQ = nullptr;
+}
+
+// Leaves direct mode: the armed slot runs a no-op whose seqno is consumed like an empty kernel job, and nothing is
+// armed after it. No H2G: the slot is inside the tail already. why: the counter. gSchedLock.
+static void dsExit(XeQueue *q, uint32_t *why) {
+	if (!q->dsArmed) return;
+	if (q->seqno != q->submitted || q->jobHead) {   // never: a fence has the slot's seqno and must not signal early
+		g2hLog("direct: queue guc_id %u armed with seqno %u handed out, %u submitted: banned\n", q->gucId, q->seqno,
+			q->submitted);
+		queueBan(q);
+		return;
+	}
+	const uint32_t s = q->submitted + 1;
+	dsStubWrite(q, s, 0, false, true);
+	dsMboxSet(q, s);
+	q->submitted = q->seqno = s;
+	if (gJobTimeoutMs > 0) watchArm();
+	dsDisarm(q);
+	(*why)++;
+}
+
+// Another queue's job on the armed queue's engine class: the armed one leaves, so the GuC does not timeslice the new
+// job against a context that polls. gSchedLock.
+static void dsContend(const XeQueue *q) {
+	XeQueue *a = gDsQ;
+	if (a->eng->gt == q->eng->gt && a->eng->drmClass == q->eng->drmClass) dsExit(a, &gStats.dsContendExits);
+}
+
+// Job seq (submitted + 1, the armed slot's seqno) into the armed slot: its stub, then the mailbox; then the slot for
+// seq + 1, or none (the queue leaves direct mode with this job) when the switch is off, the queue is held, a reset or
+// suspend is on, or the ring or the 256 ringPos entries have no room. Always emits. gSchedLock.
+static bool dsSubmit(XeQueue *q, uint64_t batch, uint32_t seq) {
+	const uint32_t gen = q->vm->ptGen;
+	const bool flush = tlbFlushDue(q, gen);
+	dsStubWrite(q, seq, batch, flush, false);
+	if (flush) {
+		q->flushedGen = gen;
+		gStats.tlbRingFlushes++;
+	}
+	jtSubmit(q, seq);
+	dsMboxSet(q, seq);   // the job starts: the latency path ends here
+	q->submitted = seq;
+	if (gJobTimeoutMs > 0) watchArm();
+	gStats.dsSubmits++;
+	gDsLastQ = q;
+	gDsLastNs = q->dsLastNs = nowNs();
+	const uint32_t done = seqnoOf(q->slot);
+	uint32_t sdw[40];
+	const uint32_t m = dsSlot(q, seq + 1, sdw);
+	if (!gDirect || seq + 1 == 0 || q->tdr || gResetting || gSuspended || gWedged || seq - done >= 255 ||
+		!dsRoom(q, m, done)) {
+		dsDisarm(q);
+		gStats.dsOtherExits++;
+		return true;
+	}
+	ringCopy(q, sdw, m);
+	q->ringPos[(seq + 1) % 256] = q->tail;
+	auto *regs = lrcRegs(q);
+	regs[CTX_RING_TAIL] = q->tail;
+	lrcSync(q, regs + CTX_RING_TAIL, 4);
+	uint32_t act[2] = {0x1000, q->gucId};
+	gDev->guc(act, 2, 0);
+	return true;
+}
+
+// After job seq on the normal path (dw, n: its ring dwords, ringRoom checked): a low-latency compute queue of the primary
+// GT whose previous job was less than the idle time ago, and that shared the engine class with no other queue in that
+// time, gets the slot for seq + 1 behind the job, in the same ring write and SCHED_CONTEXT. Only on the exec path with
+// an empty FIFO (seq is the last seqno handed out). False: not armed, nothing written. gSchedLock, the switch on.
+static bool dsEnter(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq, uint32_t nInl) {
+	if (q->eng->gt || q->eng->drmClass != DRM_XE_ENGINE_CLASS_COMPUTE) return false;
+	const uint64_t now = nowNs(), idle = dsIdleNs();
+	const bool alone = gDsLastQ == q || now - gDsLastNs >= idle, recent = q->dsLastNs && now - q->dsLastNs < idle;
+	gDsLastQ = q;
+	gDsLastNs = q->dsLastNs = now;
+	if (!q->lowLatency || q->kernel || nInl || !alone || !recent || !gDsMem || !gDsCall) return false;
+	if (q->banned || q->closed || q->tdr || gResetting || gSuspended || gWedged) return false;
+	if (q->jobHead || seq != q->seqno + 1 || seq + 1 == 0) return false;
+	const uint32_t done = seqnoOf(q->slot);
+	if (seq - done >= 255 || (q->dsEntry && (int32_t)(done - q->dsEndSeq) < 0)) return false;
+	if (!dsEntryGet(q)) return false;
+	uint32_t sdw[40];
+	const uint32_t m = dsSlot(q, seq + 1, sdw);
+	if (!ringRoom(q, n + m)) return false;
+	dsMboxSet(q, seq);   // the slot waits for its job
+	ringCopy(q, dw, n);
+	const uint32_t jobEnd = q->tail;
+	ringWrite(q, sdw, m, seq);   // the tail after the slot, SCHED_CONTEXT
+	q->ringPos[seq % 256] = jobEnd;
+	q->ringPos[(seq + 1) % 256] = q->tail;
+	q->dsArmed = true;
+	gDsQ = q;
+	gStats.dsArms++;
+	uint64_t deadline;
+	nanoseconds_to_absolutetime(now + idle, &deadline);
+	thread_call_enter_delayed(gDsCall, deadline);
+	return true;
+}
+
+// The idle exit: the armed queue leaves once it has submitted nothing for debug.intelxe.direct_idle_us (at once when the
+// switch went off), so nothing polls and the engine can idle. Thread call.
+static void dsIdleRun(thread_call_param_t, thread_call_param_t) {
+	IOLockLock(gSchedLock);
+	if (XeQueue *q = gDsQ) {
+		const uint64_t now = nowNs(), idle = dsIdleNs();
+		if (!gDirect) {
+			dsExit(q, &gStats.dsOtherExits);
+		} else if (now - q->dsLastNs >= idle) {
+			dsExit(q, &gStats.dsIdleExits);
+		} else {
+			uint64_t deadline;
+			nanoseconds_to_absolutetime(q->dsLastNs + idle, &deadline);
+			thread_call_enter_delayed(gDsCall, deadline);
+		}
+	}
+	IOLockUnlock(gSchedLock);
+}
+
+// debug.intelxe.direct: 1 allocates and maps the mailboxes and stubs the first time (kept); 0 makes the armed queue leave.
+int xeDirectSet(int on) {
+	if (on && !gDsMem) {
+		if (!gDev || !gDev->up) return ENXIO;
+		int err = 0;
+		IOLockLock(gDevLock);
+		if (!gDsMem) {
+			const uint32_t len = 0x1000 + kDsEntries * kDsEntryBytes;
+			thread_call_t c = thread_call_allocate_with_options(dsIdleRun, nullptr, THREAD_CALL_PRIORITY_KERNEL, 0);
+			IOBufferMemoryDescriptor *m = c ? gDev->allocSys(len, false) : nullptr;
+			uint32_t g = 0;
+			if (m) {
+				bzero(m->getBytesNoCopy(), len);
+				flushRange(m->getBytesNoCopy(), len);
+			}
+			IOLockLock(gResLock);
+			err = m ? ggttRangeAlloc(len, 0x1000, false, &g) : ENOMEM;
+			IOLockUnlock(gResLock);
+			if (!err && (err = gDev->ggttMapMem(m, g))) {
+				IOLockLock(gResLock);
+				ggttRangeFree(g);
+				IOLockUnlock(gResLock);
+			}
+			if (err) {
+				OSSafeReleaseNULL(m);
+				if (c) thread_call_free(c);
+			} else {
+				gDsG = g;
+				gDsCall = c;
+				__asm__ volatile("" : : : "memory");
+				gDsMem = m;
+			}
+		}
+		IOLockUnlock(gDevLock);
+		if (err) return err;
+	}
+	IOLockLock(gSchedLock);
+	gDirect = on ? 1 : 0;
+	IOLockUnlock(gSchedLock);
+	if (!on && gDsCall) thread_call_enter(gDsCall);
+	return 0;
+}
+
 // Emits the job if the ring has room. gSchedLock. The VM's page-table generation is read here, when the job goes to
 // the ring: binds bump it after their PTE writes and before signaling their out-fences, so a job that depends on a
 // bind sees it.
+// Direct submission: an armed queue's job goes into its armed slot (dsSubmit), another queue's job on the armed one's
+// engine class makes that one leave first (dsContend), and a compute queue may arm behind its job (dsEnter).
 static bool queueEmitEx(XeQueue *q, uint64_t batch, const uint32_t *inl, uint32_t nInl, uint32_t seq, uint32_t *dw) {
+	if (gDsQ) {   // debug.intelxe.direct: a queue is armed
+		if (gDsQ == q) return dsSubmit(q, batch, seq);
+		dsContend(q);
+	}
 	const uint32_t gen = q->vm->ptGen;
 	const bool flush = tlbFlushDue(q, gen);
 	const uint32_t n = jobDwords(q, batch, inl, nInl, seq, flush, dw);
 	if (!ringRoom(q, n)) return false;
-	ringWrite(q, dw, n, seq);
+	if (!gDirect || !dsEnter(q, dw, n, seq, nInl)) ringWrite(q, dw, n, seq);
 	if (flush) {
 		q->flushedGen = gen;
 		gStats.tlbRingFlushes++;
@@ -2721,6 +3012,10 @@ static IOMemoryDescriptor *statusPage() {
 static void queueBan(XeQueue *q) {
 	if (q->banned) return;
 	q->banned = true;
+	if (q->dsArmed) {   // direct submission: the armed slot stays in the ring of a context that stays off
+		dsDisarm(q);
+		gStats.dsOtherExits++;
+	}
 	if (gBanEpoch) { __sync_synchronize(); OSIncrementAtomic64(reinterpret_cast<volatile SInt64 *>(gBanEpoch)); }
 	queueDropJobs(q);
 	q->submitted = q->seqno;
@@ -3074,6 +3369,8 @@ static void xeGtReset(const char *why) {
 	xePowerEvent(3);
 	IOLockLock(gSchedLock);
 	gResetting = true;
+	// direct submission: the armed slot runs a no-op; the replay then passes every slot (the mailbox is at the last one)
+	if (gDsQ) dsExit(gDsQ, &gStats.dsOtherExits);
 	IOLockUnlock(gSchedLock);
 	IOLockLock(gDevLock);
 	const int err = gDev->gtReset();
@@ -3201,6 +3498,7 @@ static void queueTeardown(XeQueue *q) {
 		gDev->ggttClear(q->lrcGgtt, q->lrcLen, q->eng->gt);
 		idFree(gSlotBits, q->slot);
 		idFree(gGucIdBits[g], id);
+		dsEntryPut(q);
 	}
 	IOLockUnlock(gResLock);
 	if (dereg) {
@@ -3243,6 +3541,7 @@ static void zombieFree() {
 		gDev->ggttClear(q->lrcGgtt, q->lrcLen, 0);
 		idFree(gSlotBits, q->slot);
 		idFree(gGucIdBits[0], q->gucId);
+		dsEntryPut(q);
 		q->reapNext = list;
 		list = q;
 	}
@@ -3273,6 +3572,7 @@ static void reapRun(thread_call_param_t, thread_call_param_t) {
 static void queueClose(XeQueue *q) {
 	IOLockLock(gSchedLock);
 	q->closed = true;
+	if (q->dsArmed) dsExit(q, &gStats.dsOtherExits);   // direct submission: out first; the teardown waits for the no-op
 	queueDropJobs(q);
 	for (XeQueue **pp = &gSchedHead; *pp; pp = &(*pp)->schedNext)
 		if (*pp == q) {
@@ -4645,6 +4945,9 @@ static int queueExec(XeQueue *q, uint64_t batch, const DepList &deps, XeFence *o
 	bool kick = false;
 	int err = 0;
 	IOLockLock(gSchedLock);
+	// direct submission: a job that is to wait in the FIFO takes the queue out of direct mode first (an armed queue's
+	// FIFO stays empty: the armed slot's seqno is the next one handed out)
+	if (q->dsArmed && j && (deps.n || q->tdr || gResetting || gSuspended)) dsExit(q, &gStats.dsOtherExits);
 	if (q->banned || q->closed || gWedged) {
 		err = ECANCELED;
 	} else if (j && q->jobCount >= kMaxJobsPerQueue) {
@@ -5549,6 +5852,7 @@ int xeSuspend() {
 	if (!gDev || !gDev->up) return 0;
 	IOLockLock(gSchedLock);
 	gSuspended = true;
+	if (gDsQ) dsExit(gDsQ, &gStats.dsOtherExits);   // direct submission: out, so the queue drains below
 	IOLockUnlock(gSchedLock);
 	if (waitUntil(nullptr, (int64_t)(nowNs() + 2000000000ull), kWaitKernel, [] { return queuesIdle(true); })) {
 		IOLockLock(gSchedLock);   // what still runs after 2 s will not finish: banned (xe_guc_submit_stop)
@@ -8022,7 +8326,7 @@ bool xeCoreInit() {
 }
 
 void xeCoreFini() {
-	thread_call_t *calls[] = {&gWorkCall, &gReapCall, &gWatchCall};
+	thread_call_t *calls[] = {&gWorkCall, &gReapCall, &gWatchCall, &gDsCall};
 	for (thread_call_t *t : calls)
 		if (*t) {
 			thread_call_cancel_wait(*t);
@@ -8046,6 +8350,7 @@ void xeCoreFini() {
 int xeStatsString(char *out, size_t len) {
 	uint32_t live = 0, waiting = 0, jobs = 0;
 	IOLockLock(gSchedLock);
+	const int dsArmedId = gDsQ ? (int)gDsQ->gucId : -1;
 	for (uint32_t g = 0; g < 2; g++)
 		for (uint32_t i = 0; i < kMaxGucIds; i++)
 			if (gQueueByGuc[g][i]) live++;
@@ -8090,6 +8395,8 @@ int xeStatsString(char *out, size_t len) {
 		"missed by wait: sync %u clear %u tlb %u teardown %u ring %u submit %u deps %u kernel %u surface %u migrate %u\n"
 		"jobs: direct %u, via worker %u, now waiting %u in %u queues; worker runs %u; bans %u (watchdog %u); same-queue "
 		"in-fences skipped %u\n"
+		"direct submission (debug.intelxe.direct %d, idle %d us): submits %u, arms %u; exits idle %u, contention %u, other "
+		"%u; armed guc_id %d\n"
 		"TDR: checks %u, re-enabled %u, never started %u; GuC context resets %u; GT resets %u%s (queues banned %u, "
 		"replayed %u); H2G full %u, dead %u; page faults %u (lost %u)%s\n"
 		"queues: live %u, freed %u, leaked %u; GGTT: system mappings %u, display ranges %u/64 (%llu MB)\n"
@@ -8103,6 +8410,7 @@ int xeStatsString(char *out, size_t len) {
 		st.fallbackWakes, st.rescued, st.raced, st.g2hFound, st.identTimeouts,
 		m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9],
 		st.jobsDirect, st.jobsDeferred, jobs, waiting, st.workerRuns, st.bans, st.watchdogBans, st.sameQueueDeps,
+		gDirect, gDirectIdleUs, st.dsSubmits, st.dsArms, st.dsIdleExits, st.dsContendExits, st.dsOtherExits, dsArmedId,
 		st.tdrChecks, st.tdrRearms, st.tdrNotStarted, st.gucCtxResets, st.gtResets, gResetting ? " (stopped)" : "",
 		st.resetBans, st.resetReplays, st.h2gFull, st.h2gDead, st.pageFaults, st.pageFaultsLost, gWedged ? "; WEDGED" : "",
 		live, st.queuesFreed, st.queuesLeaked, ggttRecCount(), ggttRanges, ggttRangeBytes >> 20,

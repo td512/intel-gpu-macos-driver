@@ -94,3 +94,23 @@ The 29 us of GuC scheduling becomes about 4 us. A tiny command buffer would go f
 and from 94 to about 55 us at 1200 MHz. Windows is still ahead in the batch (8.6 us), the interrupt path (10 us)
 and the plugin's CPU cost per command buffer (back to back 18-21 us against 1.9: the plugin's class-wide lock),
 which is separate work.
+
+## Implementation (branch direct-submit, 2026-11-09, untested on the hardware)
+
+`xe_core.cpp`, section "direct submission"; `debug.intelxe.direct` (default 0) and `debug.intelxe.direct_idle_us`
+(default 2000); counters in the "direct submission" line of `debug.intelxe.stats`. Differences from the plan above:
+
+- The whole pre-job part (preparser off, the invalidating PIPE_CONTROL, preparser on, CTX_TIMESTAMP and start seqno)
+  is in the stub, not in the ring: the TLB-invalidate bit depends on the job, and one PIPE_CONTROL is cheaper than two.
+  The ring slot is preparser off, `MI_SEMAPHORE_WAIT`, preparser on (as the compute runtime disables the prefetcher
+  around its semaphore), the jump to the stub, and `jobPost`.
+- Back-to-back jobs: each submit arms the slot for the next seqno before it returns, so a job submitted while the
+  previous one runs finds its slot armed; there is no fallback to the normal path for it.
+- Entering: a job on the normal path arms the next slot when the queue's previous job was less than the idle limit ago
+  and no other queue used the compute class in that time; so the first two jobs of a burst take the normal path.
+- An exec that has to wait in the FIFO (in-fences, a held queue) makes the queue leave first: an armed queue's FIFO is
+  always empty, so the no-op never takes a seqno a fence already has.
+- A GT reset makes the queue leave before the reset; the replay then passes every slot left in the ring, since the
+  mailbox only grows within a stretch, and a new stretch starts only once the last one's slots have all run.
+- Stubs: 256 per queue (one per `ringPos` entry; job x's stub is written only after job x - 256 completed), 32 entries
+  of 32 KB plus a mailbox page in system memory, GGTT-mapped at the first `debug.intelxe.direct=1`.

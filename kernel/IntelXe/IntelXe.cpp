@@ -385,6 +385,16 @@ static int jobTimeStatsHandler SYSCTL_HANDLER_ARGS {
 	return SYSCTL_OUT(req, buf, (size_t)(n > 0 && n < (int)sizeof buf - 1 ? n : (int)sizeof buf - 1) + 1);
 }
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, jobtime_stats, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_ANYBODY, nullptr, 0, jobTimeStatsHandler, "A", "job timing averages");
+// debug.intelxe.direct / direct_idle_us: direct submission (xe_core.cpp): a low-latency compute queue keeps its context on
+// the engine, polling a mailbox, while its jobs come less than direct_idle_us apart. Off by default; the counters are in
+// debug.intelxe.stats.
+static int directHandler SYSCTL_HANDLER_ARGS {
+	int v = gDirect, err = sysctl_handle_int(oidp, &v, 0, req);
+	if (err || !req->newptr) return err;
+	return xeDirectSet(v);
+}
+SYSCTL_PROC(_debug_intelxe, OID_AUTO, direct, CTLTYPE_INT | CTLFLAG_RW, nullptr, 0, directHandler, "I", "1 = direct submission for low-latency compute queues (armed ring slot, mailbox); 0 = off (default)");
+SYSCTL_INT(_debug_intelxe, OID_AUTO, direct_idle_us, CTLFLAG_RW, &gDirectIdleUs, 0, "direct submission: a queue leaves after this long without a job (us, 20-1000000)");
 // debug.intelxe.dump: every value a report needs, read-only, in one call (tools/report/collect-macos.sh reads it first).
 // Format: "intelxe-dump 1", then "[section]" blocks: the integer tunables as name = value, the bring-up report
 // (debug.intelxe.state), interrupt/scheduler/TLB counters (stats), VRAM and BAR window use (vram) and the VRAM-shared
@@ -412,7 +422,7 @@ static int dumpHandler SYSCTL_HANDLER_ARGS {
 		&sysctl__debug_intelxe_irq, &sysctl__debug_intelxe_unbind_async, &sysctl__debug_intelxe_hugepages,
 		&sysctl__debug_intelxe_range_inval, &sysctl__debug_intelxe_ctx_policies, &sysctl__debug_intelxe_rc_yield, &sysctl__debug_intelxe_lrc_vram, &sysctl__debug_intelxe_usm,
 		&sysctl__debug_intelxe_job_timeout_ms, &sysctl__debug_intelxe_video, &sysctl__debug_intelxe_media_slpc, &sysctl__debug_intelxe_vcs_single,
-		&sysctl__debug_intelxe_nonpriv,
+		&sysctl__debug_intelxe_nonpriv, &sysctl__debug_intelxe_direct_idle_us,
 		&sysctl__debug_intelxe_surfvram, &sysctl__debug_intelxe_surfvram_mb, &sysctl__debug_intelxe_surfvram_wsfull, &sysctl__debug_intelxe_display_irqs,
 		&sysctl__debug_intelxe_freq, &sysctl__debug_intelxe_freq_manual, &sysctl__debug_intelxe_slpc_min,
 		&sysctl__debug_intelxe_slpc_max, &sysctl__debug_intelxe_slpc_ignore_eff, &sysctl__debug_intelxe_slpc_strategy,
@@ -434,7 +444,7 @@ static int dumpHandler SYSCTL_HANDLER_ARGS {
 		if (u) dumpf(b, kLen, &n, "%s = %u\n", o->oid_name, (unsigned)v);
 		else dumpf(b, kLen, &n, "%s = %d\n", o->oid_name, v);
 	}
-	dumpf(b, kLen, &n, "fw_hold = %d\nstep = %d\ndevice = %s\n", gFwHold, gStep, gDev ? "up" : "none");
+	dumpf(b, kLen, &n, "fw_hold = %d\ndirect = %d\nstep = %d\ndevice = %s\n", gFwHold, gDirect, gStep, gDev ? "up" : "none");
 	IOLockLock(gSayLock);
 	dumpText(b, kLen, &n, "state", gState, strnlen(gState, sizeof(gState)));
 	IOLockUnlock(gSayLock);
@@ -543,6 +553,8 @@ bool IntelXe::start(IOService *provider) {
 	sysctl_register_oid(&sysctl__debug_intelxe_sensors);
 	sysctl_register_oid(&sysctl__debug_intelxe_jobtime);
 	sysctl_register_oid(&sysctl__debug_intelxe_jobtime_stats);
+	sysctl_register_oid(&sysctl__debug_intelxe_direct);
+	sysctl_register_oid(&sysctl__debug_intelxe_direct_idle_us);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram_mb);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram_stats);
@@ -648,6 +660,8 @@ void IntelXe::stop(IOService *provider) {
 	sysctl_unregister_oid(&sysctl__debug_intelxe_vram);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_sensors);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_jobtime_stats);
+	sysctl_unregister_oid(&sysctl__debug_intelxe_direct_idle_us);
+	sysctl_unregister_oid(&sysctl__debug_intelxe_direct);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_jobtime);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_stats);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_unbind_async);
