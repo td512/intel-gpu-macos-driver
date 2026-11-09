@@ -10,7 +10,12 @@
 // Both timed from the CPU's "go" (exec ioctl / mailbox write) to the store being visible to a spinning CPU, with a
 // CPU gap between jobs (0, 20, 100 us, 1 ms). The persistent batch ends after the last slot, well inside the job
 // watchdog (debug.intelxe.job_timeout_ms). Measurement only.
+// "chain" (3rd argument): each job's second-level batch is a stub that chains (MI_BATCH_BUFFER_START with the second
+// level bit clear) to the batch that stores, as ANV's batches chain, and the persistent batch stores the job number to
+// a second dword after the call returns: a kernel-side direct submission would call an application's chained batch at
+// the second level, so its MI_BATCH_BUFFER_END has to come back to the persistent batch.
 //   clang -arch x86_64 -O2 -I../../../kernel/IntelXe/uapi -o ulls ulls.c -framework IOKit
+//   ./ulls [jobs] [compute|render] [chain]
 #include <IOKit/IOKitLib.h>
 #include <errno.h>
 #include <immintrin.h>
@@ -61,9 +66,10 @@ static void st(const char *nm, double *v, int n) {
 #define MI_SDI (0x20u << 23 | 2)                    // MI_STORE_DATA_IMM, PPGTT, one dword
 #define MI_BBE (0x0au << 23)                        // MI_BATCH_BUFFER_END
 #define MI_BBS2 (0x31u << 23 | 1u << 22 | 1u << 8 | 1)   // MI_BATCH_BUFFER_START, second level, PPGTT
+#define MI_BBSC (0x31u << 23 | 1u << 8 | 1)             // MI_BATCH_BUFFER_START, chained (no level change), PPGTT
 #define MI_SEMA_GTE_POLL (0x1cu << 23 | 1u << 15 | 1u << 12 | 3)   // MI_SEMAPHORE_WAIT, polling, SAD >= SDD, PPGTT
 enum { RING = 0x100000, WORK = 0x400000, MBOX = 0x800000, TARGET = 0x900000 };
-enum { SLOT_DW = 8, WORK_DW = 8 };
+enum { SLOT_DW = 12, WORK_DW = 16 };
 
 int main(int argc, char **argv) {
 	mach_timebase_info(&tb);
@@ -71,6 +77,7 @@ int main(int argc, char **argv) {
 	if (!svc || IOServiceOpen(svc, mach_task_self(), 0, &conn)) { fprintf(stderr, "no IntelXe service\n"); return 1; }
 	const int N = argc > 1 ? atoi(argv[1]) : 1000;
 	const uint16_t cls = argc > 2 && !strcmp(argv[2], "render") ? DRM_XE_ENGINE_CLASS_RENDER : DRM_XE_ENGINE_CLASS_COMPUTE;
+	const int chain = argc > 3 && !strcmp(argv[3], "chain");
 	const uint64_t gaps[] = {0, 20000, 100000, 1000000};
 	const uint64_t ringBytes = (uint64_t)(4 * N + 16) * SLOT_DW * 4, workBytes = (uint64_t)4 * N * WORK_DW * 4;
 	const uint64_t ringSize = (ringBytes + 0xffff) & ~0xffffull, workSize = (workBytes + 0xffff) & ~0xffffull;
@@ -89,7 +96,8 @@ int main(int argc, char **argv) {
 	xioctl(DRM_IOCTL_SYNCOBJ_CREATE, &sc);
 	uint32_t h[1] = {sc.handle};
 	double *lat = calloc(N, 8);
-	printf("ulls on %s, %d jobs per gap\n", cls == DRM_XE_ENGINE_CLASS_COMPUTE ? "compute" : "render", N);
+	printf("ulls on %s, %d jobs per gap%s\n", cls == DRM_XE_ENGINE_CLASS_COMPUTE ? "compute" : "render", N,
+		chain ? ", chained second-level batches" : "");
 
 	// 1. through the kernel: one exec per job, the CPU spinning on the store
 	uint32_t seq = 0x1000;
@@ -125,6 +133,9 @@ int main(int argc, char **argv) {
 		const uint64_t wa = WORK + (uint64_t)k * WORK_DW * 4;
 		s[0] = MI_SEMA_GTE_POLL; s[1] = (uint32_t)(k + 1); s[2] = MBOX; s[3] = 0; s[4] = 0;
 		s[5] = MI_BBS2; s[6] = (uint32_t)wa; s[7] = (uint32_t)(wa >> 32);
+		// after the call returns: the job number to the second dword (0 jobs' worth of extra work without chain: a no-op
+		// store to an unused dword keeps the slot the same size)
+		s[8] = MI_SDI; s[9] = TARGET + (chain ? 4 : 64); s[10] = 0; s[11] = (uint32_t)(k + 1);
 	}
 	ring[(size_t)total * SLOT_DW] = MI_BBE; ring[(size_t)total * SLOT_DW + 1] = 0;
 	mbox[0] = 0; tg[0] = 0;
@@ -138,14 +149,26 @@ int main(int argc, char **argv) {
 		for (int i = 0; i < n + 5; i++, k++) {
 			volatile uint32_t *b = work + (size_t)k * WORK_DW;
 			const uint32_t v = 0x80000000u | (uint32_t)k;
-			b[0] = MI_SDI; b[1] = TARGET; b[2] = 0; b[3] = v; b[4] = MI_BBE; b[5] = 0;
-			flush(b, 32);
+			if (chain) {   // stub: chain to dword 8 of the same slot, which stores and ends
+				const uint64_t to = WORK + ((uint64_t)k * WORK_DW + 8) * 4;
+				b[0] = MI_BBSC; b[1] = (uint32_t)to; b[2] = (uint32_t)(to >> 32); b[3] = 0;
+				b[8] = MI_SDI; b[9] = TARGET; b[10] = 0; b[11] = v; b[12] = MI_BBE; b[13] = 0;
+				flush(b, 64);
+			} else {
+				b[0] = MI_SDI; b[1] = TARGET; b[2] = 0; b[3] = v; b[4] = MI_BBE; b[5] = 0;
+				flush(b, 32);
+			}
 			spin_ns(gaps[gi]);
 			const uint64_t t0 = ns();
 			mbox[0] = (uint32_t)(k + 1);
 			flush(mbox, 64);
 			while (tg[0] != v && ns() - t0 < 1000000000ull) __asm__ volatile("pause");
 			const uint64_t t1 = ns();
+			if (chain) {   // back in the persistent batch?
+				while (tg[1] != (uint32_t)(k + 1) && ns() - t0 < 1000000000ull) __asm__ volatile("pause");
+				if (tg[1] != (uint32_t)(k + 1)) { printf("chain: job %d stored 0x%x but the persistent batch did not go on (0x%x)\n", k, tg[0], tg[1]);
+					mbox[0] = 0xffffffffu; flush(mbox, 64); return 1; }
+			}
 			if (tg[0] != v) { printf("direct: store missing at job %d (mailbox %u, target 0x%x)\n", k, mbox[0], tg[0]); mbox[0] = 0xffffffffu; flush(mbox, 64); return 1; }
 			if (i >= 5) lat[i - 5] = (t1 - t0) / 1e3;
 		}
