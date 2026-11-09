@@ -5,10 +5,11 @@
 //
 // As Mesa's EGL: the current context is per thread, and a context current on one thread cannot be made current on another
 // (EGL_BAD_ACCESS). FAKEEGL_ZINK_NAMES=1 refuses the 58 table names zink did not resolve on the B580 (5 Nov 2026), so
-// that the layer's replacements for Apple's extensions run.
+// that the layer's replacements for Apple's extensions run. FAKEEGL_ZINK_STRINGS=1 reports zink's version and extensions.
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/CGLContext.h>
+#include <OpenGL/gl.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -100,10 +101,60 @@ V unsigned eglMakeCurrent(EGLDisplay d, EGLSurface r, EGLSurface s, EGLContext c
 V unsigned eglSwapBuffers(EGLDisplay d, EGLSurface s) { g_swaps++; return 1; }
 V unsigned eglSwapInterval(EGLDisplay d, EGLint i) { g_intervals++; g_interval = i; return 1; }
 V EGLint eglGetError(void) { EGLint e = t_error; t_error = 0x3000; return e; }
+// FAKEEGL_ZINK_STRINGS: the version and extensions say what zink says (4.6, GLSL 4.60, one extension Apple does not have,
+// GL_ARB_buffer_storage), so that the layer must give the application Apple's again.
+#define GL_NUM_EXTENSIONS_ 0x821D
+#define GL_MAJOR_VERSION_ 0x821B
+#define GL_MINOR_VERSION_ 0x821C
+static int fake_core(void) { const char *v = (const char *)g_fake_table->get_string(g_fake_rend, GL_VERSION); return v && v[0] >= '3'; }
+static __thread char t_list[32768];
+static __thread const char *t_items[1024];
+static int fake_extensions(void) {   // Apple's list for the context's profile, then the extra one
+    int n = 0;
+    t_list[0] = 0;
+    if (fake_core()) {
+        GLint count = 0; g_fake_table->get_integerv(g_fake_rend, GL_NUM_EXTENSIONS_, &count);
+        for (GLint i = 0; i < count && n < 1023; i++) t_items[n++] = (const char *)g_fake_table->get_stringi(g_fake_rend, GL_EXTENSIONS, i);
+    } else {
+        strlcpy(t_list, (const char *)g_fake_table->get_string(g_fake_rend, GL_EXTENSIONS), sizeof t_list);
+        char *save = NULL;
+        for (char *t = strtok_r(t_list, " ", &save); t && n < 1023; t = strtok_r(NULL, " ", &save)) t_items[n++] = t;
+    }
+    t_items[n++] = "GL_ARB_buffer_storage";
+    return n;
+}
+static const GLubyte *zs_GetString(GLenum name) {
+    static __thread char joined[32768];
+    if (name == GL_VERSION) return (const GLubyte *)(fake_core() ? "4.6 (Core Profile) Mesa 27.0.0-devel" : "4.6 (Compatibility Profile) Mesa 27.0.0-devel");
+    if (name == GL_SHADING_LANGUAGE_VERSION) return (const GLubyte *)"4.60";
+    if (name == GL_EXTENSIONS && !fake_core()) {
+        int n = fake_extensions();
+        joined[0] = 0;
+        for (int i = 0; i < n; i++) { strlcat(joined, t_items[i], sizeof joined); strlcat(joined, " ", sizeof joined); }
+        return (const GLubyte *)joined;
+    }
+    return g_fake_table->get_string(g_fake_rend, name);
+}
+static const GLubyte *zs_GetStringi(GLenum name, GLuint index) {
+    if (name != GL_EXTENSIONS) return g_fake_table->get_stringi(g_fake_rend, name, index);
+    int n = fake_extensions();
+    return index < (GLuint)n ? (const GLubyte *)t_items[index] : NULL;
+}
+static void zs_GetIntegerv(GLenum pname, GLint *v) {
+    if (pname == GL_NUM_EXTENSIONS_) { *v = fake_extensions(); return; }
+    if (pname == GL_MAJOR_VERSION_) { *v = 4; return; }
+    if (pname == GL_MINOR_VERSION_) { *v = 6; return; }
+    g_fake_table->get_integerv(g_fake_rend, pname, v);
+}
 // FAKEEGL_TINT: the clear colour comes out wrong, which shows that the application's GL calls really arrive here.
 static void tinted_clear_color(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { g_fake_table->clear_color(g_fake_rend, 1 - r, g, b, a); }
 V void *eglGetProcAddress(const char *name) {
     if (getenv("FAKEEGL_TINT") && !strcmp(name, "glClearColor")) return (void *)tinted_clear_color;
+    if (getenv("FAKEEGL_ZINK_STRINGS")) {
+        if (!strcmp(name, "glGetString")) return (void *)zs_GetString;
+        if (!strcmp(name, "glGetStringi")) return (void *)zs_GetStringi;
+        if (!strcmp(name, "glGetIntegerv")) return (void *)zs_GetIntegerv;
+    }
     if (getenv("FAKEEGL_ZINK_NAMES"))
         for (size_t i = 0; i < sizeof zink_lacks / sizeof *zink_lacks; i++) if (!strcmp(zink_lacks[i], name)) { g_refused++; return NULL; }
     for (int i = 0; i < (int)(sizeof cglt_names / sizeof *cglt_names); i++)

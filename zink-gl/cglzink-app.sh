@@ -11,8 +11,8 @@
 #
 # "X (zink).app" starts the real X through LaunchServices with DYLD_INSERT_LIBRARIES set for that launch only; X keeps its
 # own name, icon, documents and settings. If X is already running, quit it first: a running application is only brought
-# to the front. Nothing system-wide is changed: macOS's launchd refuses DYLD_* variables (launchctl setenv), so there is
-# no switch for every application, and that is also safer (it would load the layer into every process).
+# to the front. Nothing system-wide is changed. (With AMFI off, launchctl setenv would pass DYLD_* to every application
+# started later; such a switch is not offered until the gains are measured: it loads the layer into every process.)
 # Off: open X itself, or remove "X (zink).app". The layer's log of the last start: ~/Library/Logs/cglzink/X.log
 set -euo pipefail
 GL=${CGLZINK_GL_DIR:-/Library/IntelXe/GL}            # the overrides are for tests

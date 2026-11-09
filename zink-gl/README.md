@@ -41,7 +41,7 @@ JAVA_TOOL_OPTIONS" at each start; that is expected. To keep one application on A
 ## Native OpenGL applications (CGL / NSOpenGL), experimental
 
 `libcglzink.dylib` (sources in `cgl/`, details in `cgl/README.md`) sends an application's CGL and NSOpenGL contexts to
-zink instead of Apple's OpenGL. It is opt-in per application, never global:
+zink instead of Apple's OpenGL. It is opt-in per application:
 
 | Command | What it does |
 |---|---|
@@ -53,9 +53,10 @@ zink instead of Apple's OpenGL. It is opt-in per application, never global:
 `X (zink).app` starts the real application through LaunchServices with `DYLD_INSERT_LIBRARIES` for that launch only (log:
 `~/Library/Logs/cglzink/X.log`). If X is already running, quit it first. This works for signed and Apple applications
 because the driver's setup turns AMFI off (`amfi_get_out_of_my_way=0x1`); with AMFI on, macOS drops `DYLD_*` variables
-for hardened applications. There is no switch for every application: `launchctl setenv` refuses `DYLD_*` names, and
-loading the layer into every process would be unsafe anyway (a missing library stops every program it was given to).
-Not covered yet: MSAA, drawing into IOSurfaces (browsers), CGL pbuffers; see `cgl/README.md`.
+for hardened applications. There is no switch for every application yet. With AMFI off, `launchctl setenv` does pass
+`DYLD_*` to applications started later (on the test machine; with AMFI on, launchd drops it), so one is possible; it
+waits for measured gains, because it loads the layer into every process the user starts and a missing library would
+stop each of them. Not covered yet: drawing into IOSurfaces (browsers), CGL pbuffers; see `cgl/README.md`.
 
 ## Contents and sources
 

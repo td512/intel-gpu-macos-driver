@@ -9,8 +9,10 @@
 // NSOpenGLContext's flushBuffer), attaching a view, the context's lifetime, IOSurface textures. Nothing here is required:
 // when EGL cannot be opened, or CGLZINK_OFF is set, every context stays on Apple's OpenGL.
 //
-// Contexts that Core Animation makes for a CAOpenGLLayer / NSOpenGLLayer stay on Apple's OpenGL. Not handled: MSAA (the
-// EGL platform has no multisampled config), CGLSetPBuffer, CGLSetOffScreen, a fixed backing size. See README.md.
+// The context reports Apple's version, GLSL version and extensions for its profile (appleview.h), not zink's 4.6.
+//
+// Contexts that Core Animation makes for a CAOpenGLLayer / NSOpenGLLayer stay on Apple's OpenGL. Not handled:
+// CGLSetPBuffer, CGLSetOffScreen, a fixed backing size, drawing into IOSurfaces. See README.md.
 //
 // History: prototype in the hackintosh research tree, tools/b580/cgl-zink (0640304, cb58869, ea35ef0, 57e1f0c, 5 Nov 2026).
 #define GL_SILENCE_DEPRECATION
@@ -81,6 +83,10 @@ static struct {
 } egl;
 static EGLDisplay g_display;
 static int g_log;
+// CGLZINK_FPS=<seconds>: presents per second on stderr, for applications without a counter of their own.
+// CGLZINK_APPLE=1: nothing is adopted (Apple's GL), but the counter runs: the same measurement before and after.
+static double g_fps_interval;
+static int g_apple_only;
 static uintptr_t g_main_thread;
 #define LOG(...) do { if (g_log) { fprintf(stderr, "cglzink: " __VA_ARGS__); fputc('\n', stderr); } } while (0)
 // Said once per process, also without CGLZINK_LOG: something the application relies on does not work through zink.
@@ -104,6 +110,7 @@ typedef struct Adopted {
     _Atomic(uintptr_t) owner;  // the thread the EGL context is current on, 0 for none
     _Atomic int multi;         // seen on two threads: given up at every CGLUnlockContext from then on
     int dead;
+    struct AppleView *apple_view;   // Apple's version and extensions for this profile (appleview.h)
     GLenum element_type;       // GL_APPLE_element_array
     const GLvoid *element_pointer;
 } Adopted;
@@ -130,6 +137,8 @@ static uintptr_t missing_entry(void) { return 0; }
 
 static void present(Adopted *a);
 #include "appleext.h"
+#include "appleview.h"
+static AppleView *current_view(void) { return t_current ? t_current->apple_view : NULL; }
 
 static void *open_backend(void) {
     // A sandboxed application cannot read /usr/local, where zink's @rpath and the Vulkan loader's manifests point. With the
@@ -186,6 +195,7 @@ static void backend_init(void) {
         cglt_backend[i] = entry ? entry : (void *)missing_entry;
     }
     LOG("EGL %d.%d, %d of %d table entries, %d more made from core functions", major, minor, found, CGLT_N, made);
+    view_install();
     g_display = display;
     log_configs();
     t_inside--;
@@ -207,7 +217,8 @@ static EGLConfig choose_config(CGLPixelFormatObj format) {
     // A platform may give window and pbuffer surfaces in different configs: an offscreen context without a pbuffer binds
     // no surface at all.
     const EGLint surfaces[] = { EGL_WINDOW_BIT | EGL_PBUFFER_BIT, EGL_WINDOW_BIT, EGL_PBUFFER_BIT };
-    // The macOS platform offers no multisampled config: such a request goes on without MSAA instead of staying on Apple's GL
+    // Without a multisampled config (the build Mac's stand-in has none; the B580 offers up to 8 samples) the request goes on
+    // without MSAA instead of staying on Apple's GL
     for (int ms = msaa; ms >= 0; ms--) {
         for (int i = 0; i < 3; i++) {
             const EGLint wanted[] = {
@@ -248,6 +259,7 @@ __attribute__((visibility("default"))) int cglzink_adopted(CGLContextObj cgl) { 
 
 static void adopt(CGLContextObj cgl, CGLPixelFormatObj format, CGLContextObj share) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
+    if (g_apple_only) return;
     pthread_once(&once, backend_init);
     if (!g_display || t_inside || find_cgl(cgl)) return;
     if (t_no_adopt) { LOG("%p belongs to a CAOpenGLLayer: it stays on Apple's OpenGL", (void *)cgl); return; }
@@ -286,8 +298,10 @@ static void adopt(CGLContextObj cgl, CGLPixelFormatObj format, CGLContextObj sha
     a->next = g_adopted;
     g_adopted = a;
     pthread_mutex_unlock(&g_lock);
+    a->apple_view = view_from_apple(cgl, core);   // before the table is replaced
     memcpy(&cgl->disp, cglt_table, sizeof cglt_table);
-    LOG("adopted %p, profile 0x%x%s", (void *)cgl, profile, shared ? ", shared" : "");
+    LOG("adopted %p, profile 0x%x%s; told %s, GLSL %s, %d of Apple's extensions to filter", (void *)cgl, profile,
+        shared ? ", shared" : "", a->apple_view->version, a->apple_view->glsl, a->apple_view->napple);
     t_inside--;
 }
 
@@ -441,6 +455,21 @@ static CGLError my_CGLUnlockContext(CGLContextObj cgl) {
     return CGLUnlockContext(cgl);
 }
 
+static void count_present(void) {
+    static _Atomic uint64_t frames, since;
+    if (g_fps_interval <= 0) return;
+    const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    uint64_t start = atomic_load(&since);
+    if (!start) { atomic_compare_exchange_strong(&since, &start, now); return; }
+    const uint64_t n = atomic_fetch_add(&frames, 1) + 1;
+    const double seconds = (now - start) / 1e9;
+    if (seconds >= g_fps_interval && atomic_compare_exchange_strong(&since, &start, now)) {
+        atomic_fetch_sub(&frames, n);
+        fprintf(stderr, "cglzink: %.1f fps (%llu presents in %.1f s, %s)\n", n / seconds, (unsigned long long)n, seconds,
+                g_apple_only ? "Apple's GL" : "zink");
+    }
+}
+
 static void present(Adopted *a) {
     if (!a) return;
     if (t_current != a || !t_bound) bind_context(a);
@@ -462,6 +491,7 @@ static void present(Adopted *a) {
 }
 
 static CGLError my_CGLFlushDrawable(CGLContextObj cgl) {
+    if (!t_inside) count_present();
     Adopted *a = t_inside ? NULL : find_cgl(cgl);
     if (!a) return CGLFlushDrawable(cgl);
     present(a);
@@ -663,8 +693,12 @@ static id hook_initCGL(NSOpenGLContext *self, SEL cmd, void *cgl) {
 }
 
 static void hook_flush(NSOpenGLContext *self, SEL cmd) {
+    if (!t_inside) count_present();
     Adopted *a = t_inside ? NULL : find_cgl(self.CGLContextObj);
-    if (a) present(a); else ((void (*)(id, SEL))orig_flush)(self, cmd);
+    if (a) { present(a); return; }
+    t_inside++;   // AppKit's CGLFlushDrawable inside is not counted again
+    ((void (*)(id, SEL))orig_flush)(self, cmd);
+    t_inside--;
 }
 
 static void hook_setView(NSOpenGLContext *self, SEL cmd, NSView *view) {
@@ -777,6 +811,8 @@ static void on_image(const struct mach_header *header, intptr_t slide) {
 __attribute__((constructor)) static void start(void) {
     if (getenv("CGLZINK_OFF")) return;
     g_log = getenv("CGLZINK_LOG") != NULL;
+    g_fps_interval = getenv("CGLZINK_FPS") ? atof(getenv("CGLZINK_FPS")) : 0;
+    g_apple_only = getenv("CGLZINK_APPLE") != NULL;
     g_main_thread = (uintptr_t)pthread_self();   // an inserted library's constructor runs on the main thread
     _dyld_register_func_for_add_image(on_image);
 }

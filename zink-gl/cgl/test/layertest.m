@@ -195,6 +195,54 @@ static void view(void) {
         [ns clearDrawable]; [NSOpenGLContext clearCurrentContext];
     }
 }
+
+// What a context says about itself must be Apple's for its profile (4.1 core / 2.1 legacy, Apple's extensions), whatever
+// draws: an application resolves functions from OpenGL.framework, which has nothing past 4.1 (GZDoom's NULL glBufferStorage).
+// gl3.h's names; this file includes gl.h for the 2.1 parts
+#define GL_MAJOR_VERSION 0x821B
+#define GL_MINOR_VERSION 0x821C
+#define GL_NUM_EXTENSIONS 0x821D
+extern const GLubyte *glGetStringi(GLenum name, GLuint index);
+static void strings(const char *label, CGLOpenGLProfile profile) {
+    CGLContextObj c = make(profile, NULL);
+    CGLSetCurrentContext(c);
+    const char *version = (const char *)glGetString(GL_VERSION), *glsl = (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION);
+    int vmaj = 0, vmin = 0; sscanf(version ? version : "", "%d.%d", &vmaj, &vmin);
+    uint64_t h = 1469598103934665603ull; int n = 0, bad = 0;
+    const char *problem = "";
+    if (profile != kCGLOGLPVersion_Legacy) {
+        GLint major = 0, minor = 0, count = 0;
+        glGetIntegerv(GL_MAJOR_VERSION, &major); glGetIntegerv(GL_MINOR_VERSION, &minor); glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+        if (major != vmaj || minor != vmin) problem = " MAJOR/MINOR DIFFER from GL_VERSION";
+        for (GLint i = 0; i < count; i++) {
+            const char *e = (const char *)glGetStringi(GL_EXTENSIONS, (GLuint)i);
+            if (!e) { problem = " NULL extension"; continue; }
+            n++; h = fnv((const GLubyte *)e, (int)strlen(e)) ^ (h * 31);
+            bad += !strcmp(e, "GL_ARB_buffer_storage");
+        }
+        if (glGetString(GL_EXTENSIONS)) problem = " GL_EXTENSIONS string in a core context";
+    } else {
+        const char *all = (const char *)glGetString(GL_EXTENSIONS);
+        char *copy = strdup(all ? all : ""), *save = NULL;
+        for (char *t = strtok_r(copy, " ", &save); t; t = strtok_r(NULL, " ", &save)) {
+            n++; h = fnv((const GLubyte *)t, (int)strlen(t)) ^ (h * 31);
+            bad += !strcmp(t, "GL_ARB_buffer_storage");
+        }
+        free(copy);
+    }
+    while (glGetError()) {}
+    if (bad) problem = " ADVERTISES GL_ARB_buffer_storage";
+    if (vmaj > 4 || (vmaj == 4 && vmin > 1)) problem = " VERSION ABOVE 4.1";
+    printf("strings %-6s %s | GLSL %s | %d extensions %016llx%s\n", label, version, glsl, n, h, *problem ? problem : " consistent");
+    CGLSetCurrentContext(NULL); CGLDestroyContext(c);
+}
+static void no_late_functions(void) {
+    // past Apple's 4.1 (glTexStorage2D is not: Apple has ARB_texture_storage and exports it)
+    const char *late[] = { "glBufferStorage", "glBindImageTexture", "glDispatchCompute", "glClearTexImage" };
+    printf("dlsym 4.2+ functions:");
+    int found = 0; for (int i = 0; i < 4; i++) if (dlsym(RTLD_DEFAULT, late[i])) { printf(" %s", late[i]); found++; }
+    printf("%s\n", found ? " FOUND" : " none");
+}
 static CGLContextObj g_core;
 static uint64_t g_thread_hash;
 static void *other_thread(void *a) { CGLSetCurrentContext(g_core); g_thread_hash = clear_only(0.75f); CGLSetCurrentContext(NULL); return 0; }
@@ -258,6 +306,10 @@ int main(void) { @autoreleasepool {
     apple_extensions();
     iosurface();
     calayer();
+    strings("core4", kCGLOGLPVersion_GL4_Core);
+    strings("core3", kCGLOGLPVersion_GL3_Core);
+    strings("legacy", kCGLOGLPVersion_Legacy);
+    no_late_functions();
     if (getenv("LAYERTEST_VIEW")) view();
     printf("done\n");
     return 0;
