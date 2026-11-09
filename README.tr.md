@@ -21,12 +21,12 @@ masaüstü (WindowServer), Metal uygulamaları ve oyunlar, VideoToolbox video i�
 | | Arc B580'de (macOS 26.7.1) |
 |---|---|
 | Masaüstü | GPU'da çiziliyor; 180 Hz monitörde pencere sürüklerken 165 fps, VRR, isteğe bağlı HiDPI modları |
-| Geekbench 7 | Metal **92 898** · OpenCL **86 920** (aynı kartın Windows'taki Vulkan / OpenCL skorlarının %80–84'ü) |
+| Geekbench 7 | Metal **95,7k** · OpenCL **85,5k** (0.1.4; aynı kartın Windows'taki Vulkan / OpenCL skorlarının %86 / %79'u) |
 | Video | H.264 / HEVC / AV1 / VP9 çözme bit bit doğru ve 4K'ya kadar Windows'tan hızlı; H.264 / HEVC / AV1 kodlama |
 | Vulkan uyumluluk testi | 3,15 milyon vaka, hiç takılmadan: 1,77 milyonu geçti, 84'ü başarısız |
 
 > [!WARNING]
-> **Deneysel bir proje.** Tek bir kart destekleniyor ve tek bir makinede test edildi. Kurmak için sistem güvenliğinin
+> **Deneysel bir proje.** İki kart destekleniyor (B580, B570), yalnız B580 test edildi, tek bir makinede. Kurmak için sistem güvenliğinin
 > gevşetilmesi gerekiyor (SIP ve AMFI ayarları, imzasız kext'ler); hatalı bir derleme Mac'in açılmasını engelleyebilir.
 > Denemeden önce çalışan bir OpenCore EFI'sini USB bellekte hazır tutun. Sürüm paketleri imzasızdır ve destek verilmez.
 
@@ -34,7 +34,7 @@ masaüstü (WindowServer), Metal uygulamaları ve oyunlar, VideoToolbox video i�
 
 | | Desteklenen | Not |
 |---|---|---|
-| Ekran kartı | Intel Arc **B580** (8086:E20B) | Diğer Intel kartları için [Projenin durumu](#projenin-durumu) bölümüne bakın; bir kart gerçekten çalışmadan onun için hiçbir şey iddia etmiyoruz. |
+| Ekran kartı | Intel Arc **B580** (8086:E20B); 0.1.4'ten beri Arc **B570** (8086:E20C) | B570 test edilmedi, raporlarınızı bekliyoruz. Diğer Intel kartları için [Projenin durumu](#projenin-durumu) bölümüne bakın; bir kart gerçekten çalışmadan onun için hiçbir şey iddia etmiyoruz. |
 | macOS | **26 Tahoe** (26.7.1'de test edildi); 15 Sequoia (aynı kaynaktan derlendi, Tahoe'ya geçtikten sonra yeniden denenmedi) | Yalnızca x86_64 |
 | Bilgisayar | OpenCore ile çalışan bir PC (test edilen: Z790, i7-14700K) | Above 4G Decoding ve Resizable BAR açık olmalı |
 | Monitör | B580'e DisplayPort ile bağlı tek monitör | İkinci monitör henüz desteklenmiyor |
@@ -100,7 +100,7 @@ Aynı makinede aynı kart; Intel'in Windows sürücüsü ve bu sürücü ([büt�
 
 | | Windows | macOS (bu sürücü) |
 |---|---|---|
-| Geekbench 7 GPU | Vulkan 111 056 · OpenCL 108 544 | Metal 92 898 · OpenCL 86 920 |
+| Geekbench 7 GPU | Vulkan 111 056 · OpenCL 108 544 | Metal 95,7k · OpenCL 85,5k (isteğe bağlı doğrudan gönderimle 97,2k / 92,9k) |
 | 4K'ya kadar video çözme | referans | bit bit doğru ve daha hızlı |
 | Intel QSV'ye göre kodlama kalitesi (BD-rate) | referans | HEVC ve AV1'de daha iyi; H.264'te fark %1,5'in altında |
 | Minecraft Java 1.21.1, Sodium + Iris + BSL (HIGH), pencereli, aynı nokta | 214–218 fps (Intel'in OpenGL'i) | 197–205 fps (Zink) |
@@ -196,8 +196,9 @@ sürüm numarasını taşıyor. Kext'ler ve Metal sürücüsü ise kendilerini e
 **Bu Intel'in ya da Apple'ın resmi sürücüsü mü?** Hayır. Bağımsız bir proje; Intel, Apple ya da NullMoth Systems ile
 bağlantısı yok.
 
-**Arc A serisi kartım, başka bir B serisi kart ya da işlemcinin kendi grafiği çalışır mı?** Henüz değil. Yalnızca B580
-destekleniyor; [durum tablosu](#projenin-durumu) bu kartların B580'le ne kadar kodu paylaştığını gösteriyor.
+**Arc A serisi kartım, başka bir B serisi kart ya da işlemcinin kendi grafiği çalışır mı?** Arc B570 dışında henüz değil
+(B570 0.1.4'ten beri destekleniyor, bizim tarafımızda test edilmedi). Yalnızca B580 ve B570 destekleniyor;
+[durum tablosu](#projenin-durumu) diğer kartların bunlarla ne kadar kodu paylaştığını gösteriyor.
 
 **Güvenli mi?** Mac'in açılışını değiştiriyor ve gevşetilmiş güvenlikle çalışıyor. Önyükleme yapabilen bir USB EFI'si
 tutun; geri dönmek için `./install.sh --undo` var.
