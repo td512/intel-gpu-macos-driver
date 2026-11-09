@@ -462,6 +462,11 @@ struct XeClientState {
 	uint32_t orphanMaps;     // CPU maps whose BO handle was closed while the mapping was still there
 	int pid;                 // the process that opened the connection, and its name (debug.intelxe.vram)
 	char name[24];
+	// Bind user fences whose bind fence had not signaled when VM_BIND returned (bindUfenceSignal): written by this
+	// client's next ioctl or WAIT_USER_FENCE poll once it has (lateUfFlush). xe writes them from a worker whenever the
+	// fence signals; this driver writes user memory only from the client's own task.
+	struct { uint64_t addr, value; XeFence f; } lateUf[8];
+	uint32_t nLateUf;
 };
 static XeClientState *gClients;
 // INTELXE_CAP_SURFACE_VRAM_LAYOUT: the WindowServer client that imported with SURFACE_VRAM2 (its plugin reads tiled
@@ -5031,24 +5036,50 @@ static struct { uint32_t execs, binds, bindFaults, bindLate, waits, met, timeout
 // A bind's user fence (xe_sync.c xe_sync_entry_signal -> user_fence_cb -> user_fence_worker): the value goes to the user
 // pointer once the bind's fence has signaled, then the waiters are woken (wake_up_all(&xe->ufence_wq)). Binds are
 // synchronous here: the PTEs are in when VM_BIND gets here, and the bind's fence is the copy-engine clear of the BOs it
-// bound (f, ctx.clear), waited for first (bounded; interrupted sleeps are taken again, since the bind itself is done and
-// its fence must still be written). The write is a copyout from the calling thread, where xe's worker writes into the
-// caller's mm (kthread_use_mm); a write that faults is no error of the ioctl (xe: XE_WARN_ON "Copy to user failed").
-// Client lock held (dropped while asleep).
+// bound (f, ctx.clear), waited for first for up to 2 s (interrupted sleeps are taken again, since the bind itself is
+// done and its fence must still be written; an abort that interrupts every sleep at once - process exit - ends the wait).
+// A fence still not signaled then (a GT reset or suspend holding the copy engine) is not dropped: it goes on the
+// client's late list and its value is written once it signals, by the client's next ioctl or by the WAIT_USER_FENCE
+// that waits for it (lateUfFlush), as xe's worker writes it whenever the fence signals. The write is a copyout from the
+// client's own task, where xe's worker writes into the caller's mm (kthread_use_mm); a write that faults is no error of
+// the ioctl (xe: XE_WARN_ON "Copy to user failed"). Client lock held (dropped while asleep).
+static void ufWrite(uint64_t addr, uint64_t v) {
+	if (putUser(addr, &v, sizeof(v))) gUfSt.bindFaults++;
+	else gUfSt.binds++;
+	wakeAll();
+}
+
+// The late bind fences whose fence has signaled meanwhile: written, in the order they came. Only from the task that
+// opened the client (the user pointers are its addresses). Client lock held.
+static void lateUfFlush(XeClientState *c) {
+	if (!c->nLateUf || c->task != current_task()) return;
+	uint32_t k = 0;
+	for (uint32_t i = 0; i < c->nLateUf; i++) {
+		if (fenceSignaled(c->lateUf[i].f)) ufWrite(c->lateUf[i].addr, c->lateUf[i].value);
+		else c->lateUf[k++] = c->lateUf[i];
+	}
+	c->nLateUf = k;
+}
+
 static void bindUfenceSignal(XeClientState *c, const drm_xe_sync &s, const XeFence &f) {
 	const int64_t until = (int64_t)(nowNs() + 2000000000ull);
+	uint32_t intr = 0;
 	while (!fenceSignaled(f) && !c->dying && (int64_t)nowNs() < until)
-		waitUntil(c, until, kWaitClear, [&] { return fenceSignaled(f); });
+		if (waitUntil(c, until, kWaitClear, [&] { return fenceSignaled(f); }) == EINTR && ++intr >= 8) break;
 	if (c->dying) return;
 	if (!fenceSignaled(f)) {
 		gUfSt.bindLate++;
-		g2hLog("VM_BIND: user fence at 0x%llx not written: the bind's clear did not complete within 2 s\n", s.addr);
+		if (c->nLateUf < sizeof(c->lateUf) / sizeof(c->lateUf[0])) {
+			c->lateUf[c->nLateUf++] = {s.addr, s.timeline_value, f};
+			g2hLog("VM_BIND: user fence at 0x%llx late: written once the bind's clear completes\n", s.addr);
+		} else {
+			g2hLog("VM_BIND: user fence at 0x%llx not written: the bind's clear did not complete within 2 s and %u "
+				"late fences are pending\n", s.addr, c->nLateUf);
+		}
 		return;
 	}
-	const uint64_t v = s.timeline_value;
-	if (putUser(s.addr, &v, sizeof(v))) gUfSt.bindFaults++;
-	else gUfSt.binds++;
-	wakeAll();
+	lateUfFlush(c);   // earlier late ones first: their values come before this one on a timeline
+	ufWrite(s.addr, s.timeline_value);
 }
 
 static int signalSyncsOut(XeClientState *c, const SyncList &sl, XeFence f) {
@@ -7414,6 +7445,7 @@ int xeIoctl(XeClientState *c, uint32_t request, uint64_t arg) {
 	}
 	if (!err) {
 		deferReap();
+		lateUfFlush(c);
 		err = xeIoctlLocked(c, request, buf);
 	}
 	IOLockUnlock(c->lock);
@@ -7507,6 +7539,7 @@ static int waitUserFence(XeClientState *c, drm_xe_wait_user_fence &a) {
 	const int64_t until = xeUfenceDeadline(a, start);
 	int res = 1;
 	int err = waitUntil(c, until, kWaitSync, [&] {
+		lateUfFlush(c);   // a late bind fence this wait may be for (bindUfenceSignal)
 		uint64_t v;
 		if (getUser(a.addr, &v, sizeof(v))) {
 			res = EFAULT;
@@ -8185,10 +8218,10 @@ static int xeIoctlLocked(XeClientState *c, uint32_t request, uint8_t *buf) {
 			// Signal the out-fences even when an op failed: Mesa allocates a bind-timeline point per bind and every
 			// later exec waits on it; a failed userptr import (ENOMEM) left the point unmaterialized and WindowServer's
 			// next exec waited for it forever (watchdog kill, 2026-10-28).
-			const int opErr = err;
 			if (int serr = signalSyncsOut(c, sl, ctx.clear); !err) err = serr;
-			// the user fence only after a bind that succeeded: xe unwinds a failed one and signals nothing
-			if (!opErr && sl.ufence >= 0) bindUfenceSignal(c, sl.s[sl.ufence], ctx.clear);
+			// the user fence only after a bind that succeeded, out-fences included: xe parses every sync before it binds,
+			// unwinds a failed bind and signals nothing
+			if (!err && sl.ufence >= 0) bindUfenceSignal(c, sl.s[sl.ufence], ctx.clear);
 			break;
 		}
 		case DRM_IOCTL_XE_EXEC_QUEUE_CREATE: {
