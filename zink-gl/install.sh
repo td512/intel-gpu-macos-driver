@@ -13,6 +13,12 @@
 #   sudo ./install.sh --global off back to Apple's OpenGL for them
 #   ./install.sh --status
 #   ./cglzink-app.sh ...           native CGL/NSOpenGL applications through zink, one at a time (experimental; see there)
+#   sudo ./install.sh --global-gl on|off   EXPERIMENTAL: every native OpenGL application through zink (cglzink): a
+#                                  LaunchAgent puts libcglzink-boot into DYLD_INSERT_LIBRARIES of the login session;
+#                                  it takes part only in application bundles that are not Apple's (Chess excepted),
+#                                  browsers, Electron apps or video players; /Library/IntelXe/GL/cglzink-global.txt
+#                                  ("-bundle.id" / "+bundle.id") refuses or allows one. Turn it off before deleting
+#                                  /Library/IntelXe/GL by hand: an inserted library that is missing stops every launch.
 #
 # Installs:
 #   /Library/IntelXe/GL/                   libEGL (Mesa EGL, macOS platform), libgallium (zink), libGLzink (LWJGL's
@@ -31,7 +37,9 @@ VL=/usr/local/lib VLIB=libvulkan.1.4.363.dylib
 ICDD=/usr/local/share/vulkan/icd.d ICD=intel_icd.x86_64.json
 LA=/Library/LaunchAgents/io.github.yusufklncc.intelxe.zink-gl.plist
 LIBS="libEGL.1.dylib libgallium-27.0.0-devel.dylib libGLzink.dylib libglfw.3.dylib"
-OPTLIBS="libcglzink.dylib"   # installed when the package has it
+OPTLIBS="libcglzink.dylib libcglzink-boot.dylib"   # installed when the package has them
+LAGL=/Library/LaunchAgents/io.github.yusufklncc.intelxe.cglzink-global.plist
+BOOT=$GL/libcglzink-boot.dylib
 JOPTS="-Dorg.lwjgl.glfw.libname=$GL/libglfw.3.dylib -Dorg.lwjgl.opengl.libname=$GL/libGLzink.dylib"
 
 root() { [ "$(id -u)" = 0 ] || { echo "needs root: sudo $0 $*"; exit 1; }; }
@@ -46,6 +54,7 @@ status() {
     [ -e $ICDD/$ICD ] && echo "  ICD: $ICDD/$ICD -> $(sed -n 's/.*"library_path": *"\([^"]*\)".*/\1/p' $ICDD/$ICD)" || echo "  ICD: none"
     if [ -e $LA ]; then echo "  global: on ($LA)"; else echo "  global: off"; fi
     if [ -e $GL/libcglzink.dylib ]; then echo "  cglzink: installed; per application with ./cglzink-app.sh"; fi
+    if [ -e $LAGL ]; then echo "  cglzink for every OpenGL application: on ($LAGL, experimental)"; else echo "  cglzink for every OpenGL application: off"; fi
     local u; u=$(console_user)
     if [ -n "$u" ] && [ "$u" != root ]; then
         if [ "$(id -u)" = 0 ]; then echo "  JAVA_TOOL_OPTIONS for $u: $(launchctl asuser "$(id -u "$u")" launchctl getenv JAVA_TOOL_OPTIONS 2>/dev/null || true)"
@@ -86,6 +95,45 @@ EOF
     esac
 }
 
+# --global-gl on|off: libcglzink-boot in DYLD_INSERT_LIBRARIES of the login session. The LaunchAgent sets it only while
+# both libraries are there (a missing inserted library would stop every application from starting); off unsets it
+# for the logged-in user at once.
+global_gl() {
+    root "--global-gl $1"
+    local u; u=$(console_user)
+    case "$1" in
+    on)
+        [ -f $BOOT ] && [ -f $GL/libcglzink.dylib ] || { echo "this installation has no libcglzink-boot.dylib: install a package that has it first"; exit 1; }
+        cat > $LAGL.new <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>io.github.yusufklncc.intelxe.cglzink-global</string>
+	<key>ProgramArguments</key>
+	<array><string>/bin/sh</string><string>-c</string><string>[ -f $BOOT ] &amp;&amp; [ -f $GL/libcglzink.dylib ] &amp;&amp; exec /bin/launchctl setenv DYLD_INSERT_LIBRARIES $BOOT</string></array>
+	<key>RunAtLoad</key><true/>
+</dict>
+</plist>
+PLIST
+        chown root:wheel $LAGL.new; chmod 644 $LAGL.new; mv $LAGL.new $LAGL
+        if [ -n "$u" ] && [ "$u" != root ]; then
+            launchctl asuser "$(id -u "$u")" launchctl setenv DYLD_INSERT_LIBRARIES $BOOT
+            echo "on (experimental): OpenGL applications $u starts from now on draw through zink, where cglzink-global's rules allow."
+        else echo "on (experimental): from the next login."; fi
+        echo "Off: sudo $0 --global-gl off. Running applications keep what they had until they are restarted." ;;
+    off)
+        rm -f $LAGL
+        if [ -n "$u" ] && [ "$u" != root ]; then
+            case "$(launchctl asuser "$(id -u "$u")" launchctl getenv DYLD_INSERT_LIBRARIES 2>/dev/null)" in
+                *libcglzink-boot*) launchctl asuser "$(id -u "$u")" launchctl unsetenv DYLD_INSERT_LIBRARIES ;;
+            esac
+        fi
+        echo "off: OpenGL applications started from now on use Apple's OpenGL (cglzink-app.sh launchers still work)." ;;
+    *) echo "usage: $0 --global-gl on|off"; exit 2 ;;
+    esac
+}
+
 # place SRC DST: replace DST (file or directory) with a root-owned copy of SRC
 place() { rm -rf "$2.new"; ditto "$1" "$2.new"; chown -R root:wheel "$2.new"; chmod -R go-w "$2.new"; rm -rf "$2"; mv "$2.new" "$2"; }
 
@@ -94,6 +142,9 @@ install_all() {
     sums
     [ -f /Library/GPUBundles/nvmtl/libvulkan_intel.dylib ] || { echo "REFUSED: the driver is not installed (no /Library/GPUBundles/nvmtl/libvulkan_intel.dylib)"; exit 1; }
     local f; for f in $LIBS; do sig "$H/lib/$f"; done; sig "$H/vulkan/$VLIB"
+    # the global switch is on but this package lacks its library: replacing the folder would leave the session inserting
+    # a missing library, which stops every application from starting
+    if [ -e $LAGL ] && [ ! -f "$H/lib/libcglzink-boot.dylib" ]; then echo "REFUSED: cglzink's global switch is on and this package has no libcglzink-boot.dylib: sudo $0 --global-gl off first"; exit 1; fi
     for f in $OPTLIBS; do [ -f "$H/lib/$f" ] && sig "$H/lib/$f"; done
     if [ ! -d "$B" ]; then
         mkdir -p "$B"
@@ -123,6 +174,7 @@ undo() {
     root
     [ -d "$B" ] || { echo "nothing to undo (not installed from this folder)"; exit 1; }
     [ -e $LA ] && global off
+    [ -e $LAGL ] && global_gl off   # first: the libraries it inserts go below
     if [ -d "$B/GL" ]; then place "$B/GL" $GL; else rm -rf $GL; rmdir /Library/IntelXe 2>/dev/null || true; fi
     if [ -e "$B/$VLIB" ]; then install -o root -g wheel -m 755 "$B/$VLIB" $VL/$VLIB
     else rm -f $VL/$VLIB $VL/libvulkan.1.dylib $VL/libvulkan.dylib; fi
@@ -136,6 +188,7 @@ case "${1:-}" in
     --undo) undo ;;
     --test) sums; exec /usr/bin/perl -e 'alarm shift; exec @ARGV' 30 "$H/bin/zink-gl-selftest" 200 native ;;
     --global) global "${2:-}" ;;
+    --global-gl) global_gl "${2:-}" ;;
     --status) status ;;
-    *) sed -n '5,13p' "$0"; exit 2 ;;
+    *) sed -n '5,20p' "$0"; exit 2 ;;
 esac

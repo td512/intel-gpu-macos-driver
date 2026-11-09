@@ -53,10 +53,17 @@ zink instead of Apple's OpenGL. It is opt-in per application:
 `X (zink).app` starts the real application through LaunchServices with `DYLD_INSERT_LIBRARIES` for that launch only (log:
 `~/Library/Logs/cglzink/X.log`). If X is already running, quit it first. This works for signed and Apple applications
 because the driver's setup turns AMFI off (`amfi_get_out_of_my_way=0x1`); with AMFI on, macOS drops `DYLD_*` variables
-for hardened applications. There is no switch for every application yet. With AMFI off, `launchctl setenv` does pass
-`DYLD_*` to applications started later (on the test machine; with AMFI on, launchd drops it), so one is possible; it
-waits for measured gains, because it loads the layer into every process the user starts and a missing library would
-stop each of them. Not covered yet: drawing into IOSurfaces (browsers), CGL pbuffers; see `cgl/README.md`.
+for hardened applications. Not covered yet: drawing into IOSurfaces (browsers), CGL pbuffers; see `cgl/README.md`.
+
+**Every application at once (experimental, off by default):** `sudo ./install.sh --global-gl on`. With AMFI off,
+`launchctl setenv` passes `DYLD_*` to the applications the session starts later, so a LaunchAgent puts the small
+`libcglzink-boot.dylib` into `DYLD_INSERT_LIBRARIES` at login. It is plain C (no AppKit) and decides in each process:
+only application bundles take part, not Apple's (Chess excepted), browsers, Electron/Chromium apps, video players or
+IntelXe Manager; `/Library/IntelXe/GL/cglzink-global.txt` refuses (`-bundle.id`) or allows (`+bundle.id`) one. A taking
+part application loads `libcglzink.dylib`, the others go straight to Apple's OpenGL. `sudo ./install.sh --global-gl off`
+undoes it; do that before deleting `/Library/IntelXe/GL` by hand, as an inserted library that is missing stops every
+application from starting (the LaunchAgent sets the variable only while both libraries are there, and `--undo` turns it
+off first).
 
 ## Contents and sources
 
@@ -96,5 +103,9 @@ kapatır, `--undo` kaldırır. Sürücünün kurulu ve `intelxe_surfvram=2` ayar
 doğrudan kullanan yerel uygulamalar yine Apple'ın OpenGL'ini kullanır. macOS'un girişte kendiliğinden yeniden açtığı
 bir uygulama ayardan önce başlayıp Apple'ın OpenGL'inde kalabilir: kapatıp yeniden açın. Deneysel: CGL/NSOpenGL kullanan
 yerel bir uygulama `./cglzink-app.sh add /Applications/X.app` ile `~/Applications/X (zink).app` olarak Zink'e geçer; X'in
-kendisi Apple'ın OpenGL'inde kalır, `./cglzink-app.sh remove X` kaldırır. Bütün uygulamalar için tek bir anahtar yok
-(macOS `DYLD_*` değişkenlerini launchd üzerinden geçirmiyor).
+kendisi Apple'ın OpenGL'inde kalır, `./cglzink-app.sh remove X` kaldırır. Bütün uygulamalar için deneysel anahtar:
+`sudo ./install.sh --global-gl on` (varsayılan kapalı): AMFI kapalıyken oturuma `DYLD_INSERT_LIBRARIES` ile küçük
+`libcglzink-boot.dylib` girer; yalnız uygulama paketlerinde devreye girer, Apple'ın (Satranç hariç), tarayıcıların,
+Electron uygulamalarının ve video oynatıcıların dışında; `/Library/IntelXe/GL/cglzink-global.txt` bir uygulamayı
+reddeder (`-paket.kimliği`) ya da ekler (`+paket.kimliği`). Kapatmak: `sudo ./install.sh --global-gl off`;
+`/Library/IntelXe/GL`'yi elle silmeden önce kapatın.
