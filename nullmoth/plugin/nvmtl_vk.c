@@ -18,6 +18,7 @@
 #define VK_NO_PROTOTYPES 1
 #include <vulkan/vulkan.h>
 #include "nvmtl_vk.h"
+#include "nvmtl_plock.h"
 #include "nvmtl_tex_upload.h"
 #include "nvmtl_cmd_refusal.h"
 #include "nvmtl_sampler_state.h"
@@ -3185,6 +3186,39 @@ typedef struct { nvmtl_slot s[2][NVMTL_NBIND];
                     table's own addresses) depend on where each snapshot lands and are written per snapshot. */
                  uint64_t tab[2][2 * NVMTL_NBUF + NVMTL_NTEX]; uint8_t tinit[2];
                  uint32_t lastneed[2];   /* the entries the last set's table holds (stage 1d; 0 = all) */ } nvmtl_bindtable;   /* the texel-buffer mask the last set was written with */
+/* NVMTL_LOCK_V2 (NVMTL_BTPOOL=0 turns this piece off): binding tables (~36 KB) come from a small pool, cleared by the
+   thread that retires them (the execution worker) instead of calloc's clear and fresh pages on the encoding thread at the
+   first setBuffer of every command buffer (11% of cbcost's main thread, sample 2026-11-09). A pooled table is all zero,
+   as calloc's is. */
+#define NVMTL_BT_POOL 16
+static os_unfair_lock g_bt_pool_lock = OS_UNFAIR_LOCK_INIT;
+static void *g_bt_pool[NVMTL_BT_POOL]; static unsigned g_bt_npool;
+static int nvmtl_bt_pool_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("NVMTL_BTPOOL"); on = nvmtl_lock_v2() && !(e && e[0] == '0'); }
+    return on;
+}
+static void *nvmtl_bt_get(void)
+{
+    if (nvmtl_bt_pool_on()) {
+        void *t = NULL;
+        os_unfair_lock_lock(&g_bt_pool_lock); if (g_bt_npool) t = g_bt_pool[--g_bt_npool]; os_unfair_lock_unlock(&g_bt_pool_lock);
+        if (t) return t;
+    }
+    return calloc(1, sizeof(nvmtl_bindtable));
+}
+static void nvmtl_bt_put(void *t)
+{
+    if (!t) return;
+    if (nvmtl_bt_pool_on() && __atomic_load_n(&g_bt_npool, __ATOMIC_RELAXED) < NVMTL_BT_POOL) {
+        memset(t, 0, sizeof(nvmtl_bindtable));
+        os_unfair_lock_lock(&g_bt_pool_lock);
+        if (g_bt_npool < NVMTL_BT_POOL) { g_bt_pool[g_bt_npool++] = t; t = NULL; }
+        os_unfair_lock_unlock(&g_bt_pool_lock);
+    }
+    free(t);
+}
 
 static VkDescriptorSetLayout g_setLayout;
 #define NVMTL_MAX_POOLS 64
@@ -4025,7 +4059,7 @@ static int nvmtl_bind_slot(nvk_cmdbuf *c, uint32_t set, uint32_t binding, uint8_
         kind = NVMTL_SLOT_NONE; h = NULL; off = 0;
     }
     if (!c->table) {
-        c->table = calloc(1, sizeof(nvmtl_bindtable));
+        c->table = nvmtl_bt_get();
         if (!c->table) { nvlog("vk: out of memory for the binding table"); return -1; }
     }
     nvmtl_bindtable *t = (nvmtl_bindtable *)c->table;
@@ -8000,7 +8034,7 @@ static void nvmtl_cmd_retire(nvk_cmdbuf *c)
     }
     free(c->sets); c->sets = NULL; c->nsets = c->capsets = 0; c->nobind = 0; c->skipped = 0; c->skip_oom = 0;
     c->fetch_last_set = NULL;   // freed with the sets above
-    free(c->table); c->table = NULL;
+    nvmtl_bt_put(c->table); c->table = NULL;
     nvmtl_address_page *page = c->address_pages;
     const int keep = nvmtl_keep_verdict(c->wseq);
     while (page) { nvmtl_address_page *next = page->next;

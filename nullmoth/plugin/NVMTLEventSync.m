@@ -63,7 +63,20 @@ enum { SC_CAP, SC_CLAIMED, SC_EVENT, SC_NOCMDS, SC_HOSTCOPY, SC_MARKING, SC_NOTC
 static const char *const sc_name[SC_N] = { "in-flight cap", "claimed by worker", "event wait not yet promised", "no commands", "host copies held", "commit marking", "not committed/done", "inflight alloc", "submit failed" };
 static _Atomic uint64_t sc_refuse[SC_N], sc_waits, sc_wait_ns, sc_wait_max, sc_by_worker, sc_by_commit, sc_w_fence_ns, sc_w_pub_ns, sc_w_parts;
 static __thread int sc_on_worker;
-static int nvmtl_sc_on(void) { return nvmtl_diag_flag("schedcensus"); }
+static int nvmtl_sc_on(void) {
+    // V2: the flag file's answer is kept for its 250 ms here, without nvmtl_diag_flag's lock and name search on every
+    // scheduled command buffer
+    if (nvmtl_lock_v2()) {
+        static _Atomic uint64_t next; static _Atomic int on;
+        const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        if (now >= atomic_load_explicit(&next, memory_order_relaxed)) {
+            atomic_store_explicit(&next, now + 250000000ull, memory_order_relaxed);
+            atomic_store_explicit(&on, nvmtl_diag_flag("schedcensus"), memory_order_relaxed);
+        }
+        return atomic_load_explicit(&on, memory_order_relaxed);
+    }
+    return nvmtl_diag_flag("schedcensus");
+}
 static void nvmtl_sc_refuse(int why) { if (nvmtl_sc_on()) atomic_fetch_add_explicit(&sc_refuse[why], 1, memory_order_relaxed); }
 static void nvmtl_sc_report(void) {
     static _Atomic uint64_t last; const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW), l = atomic_load(&last);
