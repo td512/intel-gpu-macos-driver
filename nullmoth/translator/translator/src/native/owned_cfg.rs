@@ -7734,22 +7734,35 @@ mod tests {
             Operand::IdRef(13),
         ];
 
+        // Each case breaks exactly one part of the contract, and the error names which one.
         let invalid = [
-            module_with_texel_access_instruction(fetch(17, 21, lod.clone()), 1, false),
-            module_with_texel_access_instruction(fetch(53, 21, lod.clone()), 2, false),
-            module_with_texel_access_instruction(fetch(53, 23, lod.clone()), 1, false),
-            module_with_texel_access_instruction(fetch(53, 21, sample.clone()), 1, false),
-            module_with_texel_access_instruction(fetch(53, 21, vec![]), 1, true),
-            module_with_texel_access_instruction(read(53), 1, false),
-            module_with_texel_access_instruction(read(16), 2, false),
-            module_with_texel_access_instruction(write(21), 2, false),
+            // a scalar texel from a fetch
+            (fetch(17, 21, lod.clone()), 1, false, [true, false, true, true]),
+            // a fetch from a storage image
+            (fetch(53, 21, lod.clone()), 2, false, [true, true, true, false]),
+            // a float coordinate
+            (fetch(53, 23, lod.clone()), 1, false, [false, true, true, true]),
+            // Sample on a single-sampled image
+            (fetch(53, 21, sample.clone()), 1, false, [true, true, false, true]),
+            // no Sample on a multisampled image
+            (fetch(53, 21, vec![]), 1, true, [true, true, false, true]),
+            // a read from a sampled image
+            (read(53), 1, false, [true, true, true, false]),
+            // a scalar texel from a read
+            (read(16), 2, false, [true, false, true, true]),
+            // an integer coordinate vector written as the texel
+            (write(21), 2, false, [true, false, true, true]),
         ];
-        for module in invalid {
+        for (instruction, sampled, multisampled, [coordinate, texel, operands, mode]) in invalid {
+            let module = module_with_texel_access_instruction(instruction, sampled, multisampled);
             let opcode = module.functions[0].blocks[0].instructions[1].class.opcode;
+            let coordinate_lanes = if coordinate { "(TypeInt, 32, 2)" } else { "(TypeFloat, 32, 1)" };
             assert_owned_invalid(
                 &module,
                 &format!(
-                    "native emitter: owned {opcode:?} violates its image, coordinate, texel, or image-operands contract"
+                    "native emitter: owned {opcode:?} violates its image, coordinate, texel, or image-operands contract \
+                     [coordinate {coordinate} texel {texel} operands {operands} mode {mode}; \
+                     image Some((Dim2D, false, {sampled}, {multisampled})), coordinate lanes Some({coordinate_lanes})]"
                 ),
             );
         }
@@ -7784,7 +7797,9 @@ mod tests {
         );
         assert_owned_invalid(
             &module,
-            "native emitter: owned ImageFetch violates its image, coordinate, texel, or image-operands contract",
+            "native emitter: owned ImageFetch violates its image, coordinate, texel, or image-operands contract \
+             [coordinate true texel false operands true mode true; image Some((Dim2D, false, 1, false)), \
+             coordinate lanes Some((TypeInt, 32, 2))]",
         );
         let bytes = module
             .assemble()
