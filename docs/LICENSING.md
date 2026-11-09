@@ -11,6 +11,7 @@
 | `kernel/IntelXeFB/IntelXeFB.cpp` | **PolyForm Noncommercial 1.0.0** | derived from nullmoth NMIntelFB/NVRMFB; Required Notice in the file and in `kernel/IntelXeFB/LICENSE` |
 | `kernel/IntelXeFB/IntelXeLink.cpp`, `IntelXeLink.h` | MIT | `IntelXeLink.cpp` contains i915 display material (intel_cx0_phy.c, intel_ddi_buf_trans.c; MIT, © Intel, full notice in the file) |
 | `kernel/IntelXeFB/scripts/` | MIT | |
+| `kernel/HybridPM/` | MIT | our code (the Lilu plugin and `hpmstat`). `LICENSE.Lilu` is Lilu's BSD-3-Clause notice: Lilu's `plugin_start.cpp` is compiled into the kext |
 | `user/` | MIT | xemac, vkshim, tests, tools, the Vulkan loader notes (`user/vulkan-loader/`: our notes, script and check program; the loader itself is not here) |
 | `nullmoth/` (except `translator/`, `build/`) | **PolyForm Noncommercial 1.0.0** | `nullmoth/LICENSE`, `nullmoth/NOTICE`; modifications listed in `nullmoth/CHANGES.md` |
 | `nullmoth/translator/` | **LGPL-3.0-or-later** | metal2vulkan-based; `translator/LICENSE` (LGPL-3.0) and `translator/COPYING` (GPL-3.0) |
@@ -33,6 +34,8 @@ The `SPDX-License-Identifier` header at the top of each file names its licence. 
 |---|---|---|
 | `IntelXe.kext` | our code, Intel xe material (MIT), **GuC and HuC firmware** (built into the binary) | Keep the MIT notices. The firmware may be redistributed only in binary form, unmodified, with `LICENSE.xe` (Intel's redistribution terms: no reverse engineering, notice kept). |
 | `IntelXeFB.kext` | IntelXeFB.cpp (PolyForm NC) + IntelXeLink (MIT, Intel material) | Noncommercial use only. Pass on the PolyForm terms or their URL and the Required Notice line. |
+| `HybridPM.kext` | our code (MIT) + Lilu's `plugin_start.cpp` (BSD-3-Clause, acidanthera) | Keep the MIT notice and Lilu's BSD-3-Clause notice (in the bundle's `Contents/Resources/LICENSE-Lilu.txt` and the package's `LICENSES/`). It needs Lilu.kext at run time, which is not shipped. |
+| `hpmstat` | our code (MIT) | Keep the MIT notice. |
 | `NMXAccel.kext`, `NMXAGDC.kext`, `NVMTLDriver` (plugin) | nullmoth code (PolyForm NC) | as above |
 | `libnvmtl_translate.dylib` | translator (LGPL-3.0-or-later) | Provide the source of the translator (including our changes) to anyone who gets the binary, and allow relinking. It is a separate dylib loaded by the plugin, which satisfies that. |
 | `air-runtime` (libLLVM, libzstd) | fetched from nullmoth's release package, not built here | LLVM is Apache-2.0 with LLVM exceptions; Zstandard is BSD-3-Clause. Their licence texts ship in the bundle's `Resources/air-runtime`. |
@@ -44,6 +47,7 @@ The `SPDX-License-Identifier` header at the top of each file names its licence. 
 ## Build dependencies (not in this repository)
 
 - **MacKernelSDK** (acidanthera, **APSL-2.0**): kernel headers and `libkmod.a`, used to build the kexts. Not vendored; `build.py --sdk`, `MACKERNELSDK`, or `external/MacKernelSDK`. The kexts link `libkmod.a` from it.
+- **Lilu** (acidanthera, **BSD-3-Clause**): headers and `plugin_start.cpp` for HybridPM. Not vendored; `kernel/HybridPM/build.py --lilu`, `LILU`, or `external/Lilu.kext`.
 - **Mesa source tree:** patched with `mesa/` (MIT and the licences above). It also provides the Vulkan headers for the plugin and the tests.
 - **FFmpeg 9.0.2 source:** for the VideoToolbox codecs' shared libraries (LGPL-2.1-or-later), patched by `videotoolbox/ffmpeg/apply-patches.sh` and configured by `videotoolbox/ffmpeg/configure-shared.sh`.
 - **Vulkan-Loader / Vulkan-Tools** (`vulkan-sdk-1.4.363.0`, Apache-2.0): optional, for ordinary Vulkan apps (`user/vulkan-loader/`).
