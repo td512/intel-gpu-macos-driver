@@ -11,7 +11,8 @@
 **Intel Arc ekran kartlarını macOS'ta çalıştıran bir Metal sürücüsü.** Kartı Linux'taki `xe` sürücüsünün yaptığı gibi
 ayağa kaldırıyor, üzerinde Mesa'nın Vulkan sürücüsünü (ANV) çalıştırıyor ve Metal'i Vulkan'ın üzerine kuruyor. Böylece
 masaüstü (WindowServer), Metal uygulamaları ve oyunlar, VideoToolbox video işleri Intel kartta çalışıyor. Bugün
-**Arc B580** ile **macOS 26 Tahoe**'da çalışıyor (x86_64, OpenCore).
+**Arc B580** ile **macOS 26 Tahoe**'da çalışıyor (x86_64, OpenCore); aynı yongayı taşıyan **Arc B570** de destekleniyor,
+ancak bizim tarafımızda test edilmedi.
 
 <p align="center">
   <img src="docs/images/about-this-mac.png" width="27%" alt="Bu Mac Hakkında: Intel Arc B580, 12 GB">
@@ -37,7 +38,7 @@ masaüstü (WindowServer), Metal uygulamaları ve oyunlar, VideoToolbox video i�
 | Ekran kartı | Intel Arc **B580** (8086:E20B); 0.1.4'ten beri Arc **B570** (8086:E20C) | B570 test edilmedi, raporlarınızı bekliyoruz. Diğer Intel kartları için [Projenin durumu](#projenin-durumu) bölümüne bakın; bir kart gerçekten çalışmadan onun için hiçbir şey iddia etmiyoruz. |
 | macOS | **26 Tahoe** (26.7.1'de test edildi); 15 Sequoia (aynı kaynaktan derlendi, Tahoe'ya geçtikten sonra yeniden denenmedi) | Yalnızca x86_64 |
 | Bilgisayar | OpenCore ile çalışan bir PC (test edilen: Z790, i7-14700K) | Above 4G Decoding ve Resizable BAR açık olmalı |
-| Monitör | B580'e DisplayPort ile bağlı tek monitör | İkinci monitör henüz desteklenmiyor |
+| Monitör | Karta DisplayPort ile bağlı tek monitör | İkinci monitör henüz desteklenmiyor |
 | Apple Silicon | Hayır | Apple Silicon Mac'lere PCIe ekran kartı takılamıyor |
 
 ## Kurulum
@@ -47,16 +48,20 @@ rehber [`release/README-INSTALL.tr.md`](release/README-INSTALL.tr.md)'de (her pa
 
 1. macOS'u sürücüsüz, düz bir OpenCore EFI'siyle kurun ([Dortania rehberi](https://dortania.github.io/OpenCore-Install-Guide/);
    test makinesinin seri numaraları çıkarılmış yapılandırması [`efi/sample-z790/`](efi/sample-z790/) klasöründe).
-   Kurulum ekranı B580'in kendi UEFI çıktısıyla, hızlandırmasız gelir; dahili GPU gerekmez.
+   Kurulum ekranı kartın kendi UEFI çıktısıyla, hızlandırmasız gelir; dahili GPU gerekmez.
 2. `config.plist`'te SIP'i, AMFI boot-arg'ını, iki quirk'ü ve `ReconnectGraphicsOnConnect = false` ayarını yapın
    (bu ayar açık kalırsa OpenCore'un RELEASE sürümü açılışta panik veriyor).
 3. macOS'ta [Releases](../../releases) sayfasındaki **IntelXe Manager** uygulaması sürümünüze uygun paketi indirip
    kurar; isterseniz paketteki `sudo ./install.sh --apply`'ı kendiniz çalıştırın. İkisi de önce sisteminizi kontrol
    eder, değiştirdiği her şeyin yedeğini alır ve kurulumu geri alabilir.
-4. EFI'ye `IntelXe.kext`'i ve anakartınızın yoluna göre uyarlanmış ACPI tablosunu ekleyin, sonra monitör B580'e
-   bağlıyken yeniden başlatın. Bunu bilgisayardaki macOS'tan uygulamanın EFI sayfası ya da `efi.sh`, Windows'tan
-   `-efi.zip`'teki `IntelXe-EFI.ps1` gösterdiğiniz EFI'de yapar; hepsi önce EFI'yi yedekler ve yalnızca sürücünün
-   ihtiyacı olanı değiştirir.
+4. EFI'ye `IntelXe.kext`'i ve kartınızın ACPI yoluna göre uyarlanmış ACPI tablosunu ekleyin, sonra monitör karta
+   bağlıyken yeniden başlatın. Bunu bilgisayardaki macOS'tan uygulamanın EFI sayfası ya da `efi.sh` (tabloyu kartınızın
+   ACPI yoluna kendisi uyarlar; 12.-14. nesil hibrit bir Intel işlemcide `HybridPM.kext`'i de Lilu'nun altına ekler),
+   Windows'tan `-efi.zip`'teki `IntelXe-EFI.ps1` (HybridPM'i henüz eklemiyor) gösterdiğiniz EFI'de yapar; hepsi önce
+   EFI'yi yedekler ve yalnızca sürücünün ihtiyacı olanı değiştirir.
+
+IntelXe Manager uygulamasının kurulum yardımcısı bu adımları, macOS'un temiz kurulumundan test edilmiş bir sürücüye
+kadar sırayla yaptırır.
 
 Sonraki sürümler uygulamanın Sürücü sayfasından eskisinin üzerine kurulur.
 
@@ -72,12 +77,18 @@ Her şeyi kendiniz derlemek isterseniz: [Kaynaktan derleme](#kaynaktan-derleme).
   güncellemesinde kaybolmuyor.
 - **OpenGL ve OpenCL:** varsayılan olarak Apple'ın Metal üzerinde çalışan GL ve OpenCL'i ile. OpenGL, bağlamını
   GLFW/EGL ile açan uygulamalarda (Minecraft gibi LWJGL 3 oyunları) Mesa'nın Zink'iyle de çalışıyor: isteğe bağlı
-  `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)).
+  `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)). Deneysel: CGL/NSOpenGL kullanan yerel uygulamalar da tek tek Zink'e
+  geçebiliyor (`cglzink-app.sh`; GZDoom MAP01 sınırsız ~1910 fps, Apple'ın OpenGL'inde ~1600).
 - **Safari** isteğe bağlı sistem diski kopyasıyla GPU'da çalışıyor (Safari'nin GPU süreci yalnızca oradan kod
   yükleyebiliyor); masaüstü widget'ları ve Dock simgeleri de GPU'da.
 - **Video:** VideoToolbox üzerinden H.264, HEVC, AV1 ve VP9 çözücüler; H.264, HEVC ve AV1 kodlayıcılar. Hepsi GPU'da;
   QuickTime, OBS, HandBrake ve ffmpeg'in `videotoolbox` kodlayıcıları bunları kullanıyor.
 - **Hatadan toparlanma:** Takılan bir iş yalnızca kendi motorunu sıfırlatıyor; masaüstü çalışmaya devam ediyor.
+- **Hibrit Intel işlemciler (12.-14. nesil):** isteğe bağlı `HybridPM.kext` (bir Lilu eklentisi,
+  [`kernel/HybridPM/`](kernel/HybridPM/README.md)) macOS'un P çekirdeklerini tam hızında çalıştırmasını sağlıyor;
+  sürücünün komut arabelleği başına yaptığı işlemci işi, dolayısıyla GPU da hızlanıyor.
+- **IntelXe Manager:** kurulum yardımcısı, kurma ve geri alma, EFI değişiklikleri, GPU'da Safari, Zink, HiDPI, GPU
+  testleri, menü çubuğu öğesiyle bir İzleme sayfası ve tanı raporları.
 
 ### Bilinen sorunlar
 
@@ -91,6 +102,14 @@ Her şeyi kendiniz derlemek isterseniz: [Kaynaktan derleme](#kaynaktan-derleme).
   ilk giriş onları bir kez derliyor.
 - Yeniden başlattıktan sonra giriş ekranında, "Your password is required to log in" yazısının arkasında açık gri bir
   şerit görünüyor.
+- GuC'nin düşük gecikme ipucu (bir uygulamanın işi sürerken GPU saatini yüksek tutar) 0.1.4'ten beri varsayılan olarak
+  kapalı: açıkken, uzun bir boşta kalmanın ardından gelen ilk ağır iş 6 testin 3'ünde bir GPU hatasıyla
+  (`MEMORY_CAT_ERROR`, nedeni henüz bilinmiyor) bitti. Kapalı olması biraz hıza mal oluyor: açıkken daha önceki bir test
+  derlemesi Metal 97,7k ve OpenCL 90,1k–92,5k aldı; Geekbench'in Background Blur ve Super Resolution testleri GPU
+  saatine duyarlı. Açmak için: uygulamanın *Güç ve uygulama* sayfasında *Uygulamalar için hızlı GPU yanıtı* ya da
+  `/Library/GPUBundles/NVMTLDriver.low-latency` dosyası.
+- Doğrudan gönderim (işler daha hızlı başlıyor; aşağıdaki 97,2k / 92,9k) uzun süre gözetimsiz çalışana kadar isteğe
+  bağlı: `sudo sysctl debug.intelxe.direct=1`, bir sonraki yeniden başlatmaya kadar geçerli.
 - Metal'i ilk kez bir VideoToolbox kodlamasıyla açan komut satırı araçları (ffmpeg gibi) ilk oturumda kodlayıcılarımızı
   göremiyor. Metal'i önce açan uygulamalarda (OBS, QuickTime, HandBrake) bu sorun yok.
 
@@ -124,7 +143,7 @@ Aynı makinede aynı kart; Intel'in Windows sürücüsü ve bu sürücü ([büt�
         │
  IntelXe.kext ── kartın kendisi: GuC/HuC, bellek ve sayfa tabloları, motorlar kernel/IntelXe
         ▼
- Intel GPU (bugün: Arc B580, BMG-G21: grafik 20.01, medya 13.01, ekran 14.01)
+ Intel GPU (bugün: Arc B580 / B570, BMG-G21: grafik 20.01, medya 13.01, ekran 14.01)
 ```
 
 Alttan yukarı doğru:
@@ -158,11 +177,16 @@ Linux `xe`'ye göre kod düzeyindeki ilerleme (tahmin değil, ölçüm): [docs/p
 |---|---|
 | `kernel/IntelXe/` | kartın kext'i ve iki kext'i birden derleyen `build.py`; arayüz başlıkları `uapi/`'de |
 | `kernel/IntelXeFB/` | ekran kext'i |
+| `kernel/HybridPM/` | hibrit Intel işlemciler için isteğe bağlı güç yönetimi düzeltmesi (Lilu eklentisi) ve `hpmstat` |
 | `nullmoth/` | Metal sürücüsü, çevirici, NMXAccel, NMXAGDC; `build/build-intelxe.sh` |
 | `mesa/` | Mesa değişiklikleri: upstream `f01e9b07a91`'e uygulanan `intelxe.diff` (`apply.sh`, `configure.sh`) ve aynı değişikliklerin yama serisi hâli |
 | `user/` | `xemac` (arayüzün kullanıcı tarafı), testler ve araçlar |
 | `videotoolbox/` | VideoToolbox çözücü ve kodlayıcıları; `ffmpeg/` (paylaşımlı FFmpeg kütüphanelerinin yamaları ve derleme ayarları) |
 | `release/` | sürüm paketlerinin kurulum betiği ve kurulum kılavuzu (şablonlar `templates/`'te, `package.sh` dolduruyor) |
+| `app/` | IntelXe Manager uygulaması |
+| `zink-gl/` | isteğe bağlı Zink OpenGL paketi; `cgl/`: yerel OpenGL uygulamaları Zink üzerinden (deneysel) |
+| `windows/` | Windows'taki EFI aracı `IntelXe-EFI.ps1` |
+| `tools/` | tanı raporları (`report/`), `clbench`, eşdeğerlik tabloları |
 | `firmware/` | GuC/HuC yazılımlarını indiren `fetch.sh` |
 | `efi/` | OpenCore notları ve `SSDT-ARCOFF.dsl` |
 | `docs/` | ölçümler (`devices/b580.md`), platform tablosu, yol haritası, lisans, tasarım notları |
@@ -178,7 +202,8 @@ biçimini izliyor. Yeni bir özellik, yeni bir macOS sürümü ya da yeni bir ka
 hata düzeltmeleri üçüncüyü (0.1.1). Güncellerken elle adım gerektiren değişiklikler (EFI'de bir değişiklik, adı değişen
 boot-arg'lar) sürüm notlarında yükseltme adımlarıyla birlikte geliyor. Paketler, GitHub etiketi ve `install.sh`
 sürüm numarasını taşıyor. Kext'ler ve Metal sürücüsü ise kendilerini en son yeniden derleyen sürümün numarasını taşıyor:
-0.1.1'de yalnızca rehber, dokümanlar ve paketleme değişti; 0.1.2 her şeyi yeniden derledi; 0.1.3 IntelXeFB ile NMXAGDC'yi.
+0.1.1'de yalnızca rehber, dokümanlar ve paketleme değişti; 0.1.2 her şeyi yeniden derledi; 0.1.3 IntelXeFB ile NMXAGDC'yi;
+0.1.4 IntelXe, IntelXeFB, NMXAccel ve Metal sürücüsünü.
 
 ## Yaklaşımımız
 
