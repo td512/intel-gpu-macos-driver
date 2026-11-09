@@ -113,7 +113,7 @@ SVG_TR = {
     'legend': [('ok', 'çalışıyor, adı geçen kartta doğrulandı'), ('warn', 'kod aynı, bu platformda denenmedi'),
                ('empty', 'henüz yok'), ('ns', 'Intel de bu platformda sunmuyor')],
     'video': 'Video: Intel satırı = 4:2:0\'da bit derinlikleri ve media-driver VA-API yeteneklerindeki en büyük görüntü; Gen12/DG2\'nin eski kodunda boyut tablosu yok',
-    'one': 'Şimdiye kadar doğrulanan tek kart: Arc B580 (8086:E20B); IntelXe.kext yalnızca ona bağlanıyor. Kanıt: docs/devices/b580.md',
+    'one': 'Şimdiye kadar doğrulanan tek kart: Arc B580 (8086:E20B); IntelXe.kext 0.1.4\'ten beri Arc B570\'e (8086:E20C) de bağlanıyor, B570 denenmedi. Kanıt: docs/devices/b580.md',
     'svgtitle': 'Intel GPU platformları',
 }
 
@@ -163,7 +163,7 @@ def svg_view(P, rows, caps, lang='en'):
         body.append(text(lx + 14, ly, name))
         lx += 34 + int(len(name) * 6.2)
     body.append(text(12, ly + 20, SVG_TR['video'] if TRL else 'video: Intel = bit depths (4:2:0) and largest picture in media-driver\'s VA-API caps; Gen12/DG2 legacy code gives no size table'))
-    body.append(text(12, ly + 36, SVG_TR['one'] if TRL else 'one device verified so far: the Arc B580 (8086:E20B); IntelXe.kext attaches to it only. Evidence: docs/devices/b580.md'))
+    body.append(text(12, ly + 36, SVG_TR['one'] if TRL else 'one device verified so far: the Arc B580 (8086:E20B); since 0.1.4 IntelXe.kext also attaches to the Arc B570 (8086:E20C), untested. Evidence: docs/devices/b580.md'))
     return svg(W, H, ''.join(body), SVG_TR['svgtitle'] if TRL else 'Intel GPU platforms')
 
 
