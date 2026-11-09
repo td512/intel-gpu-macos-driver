@@ -13,10 +13,17 @@ CGLZINK_LOG=1 CGLZINK_EGL="$O/libfakeegl.dylib" DYLD_INSERT_LIBRARIES="$O/libcgl
 CGLZINK_LOG=1 FAKEEGL_ZINK_NAMES=1 CGLZINK_EGL="$O/libfakeegl.dylib" DYLD_INSERT_LIBRARIES="$O/libcglzink.dylib" ./layertest > zinknames.txt 2> zinknames.err
 CGLZINK_LOG=1 FAKEEGL_ZINK_NAMES=1 FAKEEGL_ZINK_STRINGS=1 CGLZINK_EGL="$O/libfakeegl.dylib" DYLD_INSERT_LIBRARIES="$O/libcglzink.dylib" ./layertest > zinkstrings.txt 2> zinkstrings.err
 CGLZINK_OFF=1 DYLD_INSERT_LIBRARIES="$O/libcglzink.dylib" ./layertest > off.txt 2> off.err
+# the "every OpenGL application" switch: libcglzink-boot inserted, libcglzink loaded by it (layertest is no application
+# bundle: CGLZINK_GLOBAL_ANY lets the boot library take part anyway); then refused by the environment
+CGLZINK_LOG=1 CGLZINK_GLOBAL_ANY=1 CGLZINK_LIB="$O/libcglzink.dylib" CGLZINK_EGL="$O/libfakeegl.dylib" DYLD_INSERT_LIBRARIES="$O/libcglzink-boot.dylib" ./layertest > boot.txt 2> boot.err
+CGLZINK_LOG=1 CGLZINK_LIB="$O/libcglzink.dylib" CGLZINK_EGL="$O/libfakeegl.dylib" DYLD_INSERT_LIBRARIES="$O/libcglzink-boot.dylib" ./layertest > bootout.txt 2> bootout.err
 cat apple.txt
 r=0
-for f in layer zinknames zinkstrings off; do
+for f in layer zinknames zinkstrings off boot bootout; do
     if cmp -s apple.txt $f.txt; then echo "$f: same as Apple's GL"; else echo "$f: DIFFERENT"; diff apple.txt $f.txt; r=1; fi
 done
 grep -h -E "^(layertest|fakeegl)|EGL [0-9]|used on two|swap interval|layer scale|stays|went|is gone|extensions:|told" layer.err zinknames.err zinkstrings.err | sort | uniq -c
+# the boot library must have taken part (the layer adopted contexts) only in the first of its two runs
+if grep -q "taking part" boot.err && grep -q "adopted" boot.err; then echo "boot: took part, contexts adopted"; else echo "boot: did NOT take part"; r=1; fi
+if grep -q "taking part\|adopted" bootout.err; then echo "bootout: took part outside an application bundle"; r=1; else echo "bootout: stayed out (not an application)"; fi
 exit $r

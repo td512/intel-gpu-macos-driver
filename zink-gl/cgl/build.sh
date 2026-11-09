@@ -11,8 +11,11 @@ cp "$D/gen/backend_names.h" "$O/gen/"
 F=(-arch "$A" -mmacosx-version-min=15.0 -O2 -Wall -Wno-deprecated-declarations -Wno-unused-function -I"$O/gen" -I"$D")
 clang "${F[@]}" -dynamiclib "$D/cglzink.m" -framework OpenGL -framework AppKit -framework QuartzCore -framework IOSurface \
     -install_name /Library/IntelXe/GL/libcglzink.dylib -o "$O/libcglzink.dylib"
+# the "every OpenGL application" switch's boot library: C, CoreFoundation and OpenGL only (it is in every process)
+clang "${F[@]}" -dynamiclib "$D/boot.c" -framework CoreFoundation -framework OpenGL \
+    -install_name /Library/IntelXe/GL/libcglzink-boot.dylib -o "$O/libcglzink-boot.dylib"
 clang "${F[@]}" -w -dynamiclib "$D/test/fakeegl.c" -framework OpenGL -o "$O/libfakeegl.dylib"
 clang "${F[@]}" -w "$D/test/layertest.m" -framework OpenGL -framework AppKit -framework QuartzCore -framework IOSurface -o "$O/layertest"
 # ad-hoc signatures: the x86_64 linker does not sign by itself, and install.sh refuses unsigned libraries
-for f in "$O/libcglzink.dylib" "$O/libfakeegl.dylib" "$O/layertest"; do codesign -s - -f "$f" 2>/dev/null; done
-lipo -archs "$O/libcglzink.dylib"
+for f in "$O/libcglzink.dylib" "$O/libcglzink-boot.dylib" "$O/libfakeegl.dylib" "$O/layertest"; do codesign -s - -f "$f" 2>/dev/null; done
+for f in "$O/libcglzink.dylib" "$O/libcglzink-boot.dylib"; do lipo -archs "$f"; done

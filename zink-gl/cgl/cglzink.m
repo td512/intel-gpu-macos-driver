@@ -613,6 +613,15 @@ INTERPOSE(my_CGLSetPBuffer, CGLSetPBuffer);
 INTERPOSE(my_CGLSetOffScreen, CGLSetOffScreen);
 INTERPOSE(my_CGLCopyContext, CGLCopyContext);
 
+// The same entry points for libcglzink-boot.dylib, which loads this library with dlopen (cglzink_hooks.h)
+#include "cglzink_hooks.h"
+__attribute__((visibility("default"))) const struct cglzink_hooks cglzink_hooks = {
+    CGLZINK_HOOKS_VERSION, sizeof(struct cglzink_hooks),
+    my_CGLCreateContext, my_CGLDestroyContext, my_CGLReleaseContext, my_CGLSetCurrentContext, my_CGLLockContext,
+    my_CGLUnlockContext, my_CGLFlushDrawable, my_CGLSetParameter, my_CGLTexImageIOSurface2D, my_CGLClearDrawable,
+    my_CGLUpdateContext, my_CGLSetPBuffer, my_CGLSetOffScreen, my_CGLCopyContext,
+};
+
 // The layer's scale: an NSOpenGL view gets a Retina surface only when it asks for one (wantsBestResolutionOpenGLSurface,
 // default NO); otherwise Apple renders at the view's size in points and scales up, and the application's viewport is in
 // points. The backing scale is read from the view's own layer, which AppKit keeps right, also off the main thread.
