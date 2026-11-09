@@ -9,59 +9,17 @@
 Aranan ağaçlar / trees searched:
 
 - Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files)
-- Metal plugin / VideoToolbox (development repository @ 030bfaed7ca8, the same files as in this repository's `nullmoth/plugin` and `videotoolbox/`) (44 files)
+- Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files)
 - iris (Mesa) @ a3ad934832bb (57 files)
 - Mesa intel/perf @ a3ad934832bb (18 files)
 - Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)
 
-## 1. Şimdi gerekli, eksik / Needed now, missing (2)
+## 1. Şimdi gerekli, eksik / Needed now, missing (0)
 
 | # | Öge / item | Bizde / ours | Ne işe yarar / what it is (xe_drm.h) | Tüketici / consumer (file:line) |
 |---|---|---|---|---|
-| 1 | `DRM_XE_QUERY_CONFIG_FLAG_HAS_PURGING_SUPPORT` | rapor edilmiyor — kernel/IntelXe/xe_core.cpp:3431 | value of a field in struct drm_xe_query_config | Mesa ANV / intel common (as run on macOS): src/intel/dev/xe/intel_device_info.c:82 |
-| 2 | `DRM_XE_GEM_CREATE_EXTENSION_SET_PROPERTY` | doğrulanmadı | value of a field in struct drm_xe_gem_create | Mesa ANV / intel common (as run on macOS): src/intel/vulkan/xe/anv_kmd_backend.c:72 |
 
-## 2. Gelecek hedefler için / Needed for a future target (63)
-
-### OpenCL / oneAPI (Intel compute-runtime) (35)
-
-| Öge / item | Bizde / ours | Tüketici / consumer (file:line) |
-|---|---|---|
-| `DRM_IOCTL_XE_WAIT_USER_FENCE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2339 |
-| `DRM_IOCTL_XE_OBSERVATION` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:118 |
-| `DRM_IOCTL_XE_MADVISE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2327 |
-| `DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2329 |
-| `DRM_IOCTL_XE_EXEC_QUEUE_SET_PROPERTY` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2337 |
-| `DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR` | rapor edilmiyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:189 |
-| `DRM_XE_DEVICE_QUERY_EU_STALL` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:54 |
-| `DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:750 |
-| `DRM_XE_MMAP_OFFSET_FLAG_PCI_BARRIER` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2436 |
-| `DRM_XE_CONSULT_MEM_ADVISE_PREF_LOC` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1159 |
-| `DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2240 |
-| `DRM_XE_MULTI_GROUP_CREATE` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2277 |
-| `DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_QUEUE_PRIORITY` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2266 |
-| `DRM_XE_EXEC_QUEUE_BAN_REASON_PAGE_OFFLINE` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1407 |
-| `DRM_XE_SYNC_TYPE_USER_FENCE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1236, shared/source/os_interface/linux/xe/ioctl_helper_xe_debugger.cpp:267 |
-| `DRM_XE_UFENCE_WAIT_OP_EQ` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1927, shared/source/os_interface/linux/xe/ioctl_helper_xe_debugger.cpp:298 |
-| `DRM_XE_UFENCE_WAIT_OP_NEQ` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:873 |
-| `DRM_XE_UFENCE_WAIT_OP_GTE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:857 |
-| `DRM_XE_EU_STALL_EXTENSION_SET_PROPERTY` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:104 |
-| `DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:84 |
-| `DRM_XE_MEM_RANGE_ATTR_ATOMIC` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:86 |
-| `DRM_XE_MEM_RANGE_ATTR_PAT` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:88 |
-| `DRM_XE_PREFERRED_LOC_DEFAULT_DEVICE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1459 |
-| `DRM_XE_PREFERRED_LOC_DEFAULT_SYSTEM` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1461 |
-| `DRM_XE_MIGRATE_ALL_PAGES` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1463 |
-| `DRM_XE_MIGRATE_ONLY_SYSTEM_PAGES` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1465 |
-| `DRM_XE_ATOMIC_UNDEFINED` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1447 |
-| `DRM_XE_ATOMIC_DEVICE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1449 |
-| `DRM_XE_ATOMIC_GLOBAL` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1451 |
-| `DRM_XE_ATOMIC_CPU` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1453 |
-| `DRM_XE_OBSERVATION_TYPE_EU_STALL` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:96 |
-| `DRM_XE_OBSERVATION_OP_STREAM_OPEN` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:97 |
-| `DRM_XE_EU_STALL_PROP_GT_ID` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:88 |
-| `DRM_XE_EU_STALL_PROP_SAMPLE_RATE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:84 |
-| `DRM_XE_EU_STALL_PROP_WAIT_NUM_REPORTS` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:86 |
+## 2. Gelecek hedefler için / Needed for a future target (49)
 
 ### GPU profiler (OA metrics, VK_KHR_performance_query) (32)
 
@@ -100,14 +58,34 @@ Aranan ağaçlar / trees searched:
 | `DRM_XE_EU_STALL_PROP_SAMPLE_RATE` | reddediliyor | Mesa intel/perf: src/intel/perf/xe/intel_perf.c:512 |
 | `DRM_XE_EU_STALL_PROP_WAIT_NUM_REPORTS` | reddediliyor | Mesa intel/perf: src/intel/perf/xe/intel_perf.c:501 |
 
-### native OpenGL via iris (4)
+### OpenCL / oneAPI (Intel compute-runtime) (24)
 
 | Öge / item | Bizde / ours | Tüketici / consumer (file:line) |
 |---|---|---|
-| `DRM_IOCTL_XE_MADVISE` | reddediliyor | iris (Mesa): src/gallium/drivers/iris/xe/iris_kmd_backend.c:225 |
-| `DRM_XE_VMA_ATTR_PURGEABLE_STATE` | reddediliyor | iris (Mesa): src/gallium/drivers/iris/xe/iris_kmd_backend.c:218 |
-| `DRM_XE_VMA_PURGEABLE_STATE_WILLNEED` | reddediliyor | iris (Mesa): src/gallium/drivers/iris/xe/iris_kmd_backend.c:220 |
-| `DRM_XE_VMA_PURGEABLE_STATE_DONTNEED` | reddediliyor | iris (Mesa): src/gallium/drivers/iris/xe/iris_kmd_backend.c:221 |
+| `DRM_IOCTL_XE_OBSERVATION` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:118 |
+| `DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2329 |
+| `DRM_IOCTL_XE_EXEC_QUEUE_SET_PROPERTY` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2337 |
+| `DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR` | rapor edilmiyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:189 |
+| `DRM_XE_DEVICE_QUERY_EU_STALL` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:54 |
+| `DRM_XE_MMAP_OFFSET_FLAG_PCI_BARRIER` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2436 |
+| `DRM_XE_CONSULT_MEM_ADVISE_PREF_LOC` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1159 |
+| `DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2240 |
+| `DRM_XE_MULTI_GROUP_CREATE` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2277 |
+| `DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_QUEUE_PRIORITY` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:2266 |
+| `DRM_XE_EXEC_QUEUE_BAN_REASON_PAGE_OFFLINE` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1407 |
+| `DRM_XE_EU_STALL_EXTENSION_SET_PROPERTY` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:104 |
+| `DRM_XE_MEM_RANGE_ATTR_ATOMIC` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:86 |
+| `DRM_XE_MEM_RANGE_ATTR_PAT` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:88 |
+| `DRM_XE_MIGRATE_ALL_PAGES` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1463 |
+| `DRM_XE_ATOMIC_UNDEFINED` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1447 |
+| `DRM_XE_ATOMIC_DEVICE` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1449 |
+| `DRM_XE_ATOMIC_GLOBAL` | doğrulanmadı | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1451 |
+| `DRM_XE_ATOMIC_CPU` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe.cpp:1453 |
+| `DRM_XE_OBSERVATION_TYPE_EU_STALL` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:96 |
+| `DRM_XE_OBSERVATION_OP_STREAM_OPEN` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:97 |
+| `DRM_XE_EU_STALL_PROP_GT_ID` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:88 |
+| `DRM_XE_EU_STALL_PROP_SAMPLE_RATE` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:84 |
+| `DRM_XE_EU_STALL_PROP_WAIT_NUM_REPORTS` | reddediliyor | Intel compute-runtime (NEO): shared/source/os_interface/linux/xe/ioctl_helper_xe_perf.cpp:86 |
 
 ## 3. Diğer Intel GPU'ları (gelecek donanım hedefleri) / Other Intel GPUs (future hardware targets)
 
@@ -168,9 +146,9 @@ Linux xe / i915 display dosyaları; B580'de olmayan ama başka bir Intel ailesin
 
 Gerekmeyen eski platformlar / pre-Gen12 platforms, not needed: 81 dosya, 36912 satır (platforms before Gen12 (i915 only, outside the xe driver; our strategy covers xe-supported families)).
 
-## 4. macOS'ta gerekmiyor / Not needed on macOS (40)
+## 4. macOS'ta gerekmiyor / Not needed on macOS (34)
 
 Linux'a özgü kavramlar (PXP, RAS) ya da hiçbir tüketicide geçmeyen ögeler. / Linux-only concepts or no consumer found.
 
-`DRM_XE_TOPO_EU_PER_DSS`, `DRM_XE_DEVICE_QUERY_PXP_STATUS`, `DRM_XE_GEM_CREATE_SET_PROPERTY_PXP_TYPE`, `DRM_XE_EXEC_QUEUE_SET_HANG_REPLAY_STATE`, `DRM_XE_EXEC_QUEUE_BAN_REASON_GPU_HANG`, `DRM_XE_UFENCE_WAIT_OP_GT`, `DRM_XE_UFENCE_WAIT_OP_LT`, `DRM_XE_UFENCE_WAIT_OP_LTE`, `DRM_XE_UFENCE_WAIT_FLAG_ABSTIME`, `DRM_XE_OA_CAPS_BASE`, `DRM_XE_OA_CAPS_OA_BUFFER_SIZE`, `DRM_XE_OA_CAPS_WAIT_NUM_REPORTS`, `DRM_XE_OA_CAPS_OAM`, `DRM_XE_OA_CAPS_OA_UNIT_GT_ID`, `DRM_XE_OASTATUS_BUFFER_OVERFLOW`, `DRM_XE_PXP_HWDRM_DEFAULT_SESSION`, `DRM_XE_EU_STALL_CAPS_BASE`, `DRM_XE_RAS_ERROR_SEVERITY_NAMES`, `DRM_XE_RAS_ERROR_COMPONENT_NAMES`, `DRM_XE_OA_UNIT_TYPE_OAG`, `DRM_XE_OA_UNIT_TYPE_OAM`, `DRM_XE_OA_UNIT_TYPE_OAM_SAG`, `DRM_XE_OA_UNIT_TYPE_MERT`, `DRM_XE_OA_FMT_TYPE_OAR`, `DRM_XE_OA_FMT_TYPE_OAM`, `DRM_XE_OA_FMT_TYPE_OAC`, `DRM_XE_OA_FMT_TYPE_OAM_MPEC`, `DRM_XE_OA_PROPERTY_OA_UNIT_ID`, `DRM_XE_OA_PROPERTY_OA_ENGINE_INSTANCE`, `DRM_XE_OA_PROPERTY_WAIT_NUM_REPORTS`, `DRM_XE_PXP_TYPE_HWDRM`, `DRM_XE_RAS_ERR_SEV_CORRECTABLE`, `DRM_XE_RAS_ERR_SEV_UNCORRECTABLE`, `DRM_XE_RAS_ERR_SEV_MAX`, `DRM_XE_RAS_ERR_COMP_CORE_COMPUTE`, `DRM_XE_RAS_ERR_COMP_SOC_INTERNAL`, `DRM_XE_RAS_ERR_COMP_DEVICE_MEMORY`, `DRM_XE_RAS_ERR_COMP_PCIE`, `DRM_XE_RAS_ERR_COMP_FABRIC`, `DRM_XE_RAS_ERR_COMP_MAX`
+`DRM_XE_TOPO_EU_PER_DSS`, `DRM_XE_GEM_CREATE_SET_PROPERTY_PXP_TYPE`, `DRM_XE_EXEC_QUEUE_SET_HANG_REPLAY_STATE`, `DRM_XE_EXEC_QUEUE_BAN_REASON_GPU_HANG`, `DRM_XE_OA_CAPS_BASE`, `DRM_XE_OA_CAPS_OA_BUFFER_SIZE`, `DRM_XE_OA_CAPS_WAIT_NUM_REPORTS`, `DRM_XE_OA_CAPS_OAM`, `DRM_XE_OA_CAPS_OA_UNIT_GT_ID`, `DRM_XE_OASTATUS_BUFFER_OVERFLOW`, `DRM_XE_PXP_HWDRM_DEFAULT_SESSION`, `DRM_XE_EU_STALL_CAPS_BASE`, `DRM_XE_RAS_ERROR_SEVERITY_NAMES`, `DRM_XE_RAS_ERROR_COMPONENT_NAMES`, `DRM_XE_OA_UNIT_TYPE_OAG`, `DRM_XE_OA_UNIT_TYPE_OAM`, `DRM_XE_OA_UNIT_TYPE_OAM_SAG`, `DRM_XE_OA_UNIT_TYPE_MERT`, `DRM_XE_OA_FMT_TYPE_OAR`, `DRM_XE_OA_FMT_TYPE_OAM`, `DRM_XE_OA_FMT_TYPE_OAC`, `DRM_XE_OA_FMT_TYPE_OAM_MPEC`, `DRM_XE_OA_PROPERTY_OA_UNIT_ID`, `DRM_XE_OA_PROPERTY_OA_ENGINE_INSTANCE`, `DRM_XE_OA_PROPERTY_WAIT_NUM_REPORTS`, `DRM_XE_RAS_ERR_SEV_CORRECTABLE`, `DRM_XE_RAS_ERR_SEV_UNCORRECTABLE`, `DRM_XE_RAS_ERR_SEV_MAX`, `DRM_XE_RAS_ERR_COMP_CORE_COMPUTE`, `DRM_XE_RAS_ERR_COMP_SOC_INTERNAL`, `DRM_XE_RAS_ERR_COMP_DEVICE_MEMORY`, `DRM_XE_RAS_ERR_COMP_PCIE`, `DRM_XE_RAS_ERR_COMP_FABRIC`, `DRM_XE_RAS_ERR_COMP_MAX`
 

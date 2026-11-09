@@ -450,5 +450,26 @@
   "cts_pass_pct": 75.9,
   "video_decode_exact": 25,
   "video_decode_clips": 26
+ },
+ {
+  "date": "2026-11-10 02:12",
+  "commit": "5cce0f9",
+  "dirty": false,
+  "label": "kernel uapi-parity: user fences, GEM_CREATE ext test",
+  "kernel_commit": "065338a 2026-11-10",
+  "fb_commit": "b5c5ea3 2026-11-08",
+  "linux_rev": "abf8c33470f7",
+  "functions_matched": 613,
+  "functions_total": 8770,
+  "functions_pct": 7.0,
+  "uapi_implemented": 99,
+  "uapi_total": 182,
+  "uapi_pct": 54.4,
+  "cts_run": "2026-11-04-prod9t",
+  "cts_cases": 3145441,
+  "cts_pass": 1772948,
+  "cts_pass_pct": 56.4,
+  "video_decode_exact": 26,
+  "video_decode_clips": 26
  }
 ]

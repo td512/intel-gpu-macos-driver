@@ -9,6 +9,7 @@ Each run of `tools/parity/build.sh` appends one row; earlier rows were re-measur
 
 | Tarih / date | Commit | Etiket / label | xe uAPI | Linux fonksiyonları / functions | CTS (koşu / run) | Video çözme / decode |
 |---|---|---|---|---|---|---|
+| 2026-11-10 02:12 | 5cce0f9 | kernel uapi-parity: user fences, GEM_CREATE ext test | 99/182 (54.4%) | 613/8770 (7.0%) | 1772948/3145441 pass, 2026-11-04-prod9t | 26/26 bit-exact |
 | 2026-10-31 16:31 | 030bfae | kernel rb7j, Mesa 7bb41ff0, ssv20, codecs-enc1 + grey cells | 77/182 (42.3%) | 497/8770 (5.7%) | 22367/29456 pass, 2026-10-30-results3 | 25/26 bit-exact |
 | 2026-10-31 14:12 | 66b7038 | kernel rb7j, Mesa 7bb41ff0, ssv20, codecs-enc1 | 77/182 (42.3%) | 497/8770 (5.7%) | 22367/29456 pass, 2026-10-30-results3 | 16/16 bit-exact |
 | 2026-10-31 12:56 | f3440f6 | kernel rb7j, Mesa 1edb6def, ssv15 | 77/182 (42.3%) | 497/8770 (5.7%) | 22367/29456 pass, 2026-10-30-results3 | 16/16 bit-exact |

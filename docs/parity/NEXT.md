@@ -164,10 +164,7 @@ Test edilmedi / not tested yet: Level Zero / oneAPI.
 
 Bugün çalışan yazılımın kullandığı, çekirdeğimizde olmayan ögeler (ayrıntı ve tüketici satırları: [TODO.md](TODO.md)):
 
-| # | Öge / item | Neden / why |
-|---|---|---|
-| 141 | `DRM_XE_QUERY_CONFIG_FLAG_HAS_PURGING_SUPPORT` | used by Mesa ANV / intel common (as run on macOS); our kernel: absent |
-| 142 | `DRM_XE_GEM_CREATE_EXTENSION_SET_PROPERTY` | used by Mesa ANV / intel common (as run on macOS); our kernel: unverified |
+Yok / none.
 
 ## 6. Desteklenmeyen Vulkan özellikleri / Vulkan features reported as not supported
 
@@ -195,6 +192,5 @@ CTS koşusu / run 2026-11-04-prod9t: grup başına NotSupported sayısı (bir ö
 
 | Özellik / feature | Öge sayısı / items |
 |---|---|
-| OpenCL / oneAPI (Intel compute-runtime) | 35 |
 | GPU profiler (OA metrics, VK_KHR_performance_query) | 32 |
-| native OpenGL via iris | 4 |
+| OpenCL / oneAPI (Intel compute-runtime) | 24 |
