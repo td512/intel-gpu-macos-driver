@@ -5,6 +5,7 @@ pub(crate) mod air_static_init;
 pub mod as_shadow;
 mod b78_tcg;
 mod construction;
+mod disjoint_or;
 mod dominators;
 mod emission_order;
 mod emit_sidecar;
@@ -1184,6 +1185,8 @@ fn finish_module(
     let _ = b78_tcg::state_readonly_psb(&mut out, kern, options.descriptor_layout);
     native::decay_short_access_chains_module(&mut out);
     native::retype_punned_access_chains_module(&mut out);
+    // `or x, c` with disjoint bits (LLVM's spelling of x + c) as iadd, so Mesa's vectorizer sees the offsets
+    disjoint_or::disjoint_or_to_iadd_module(&mut out);
     if let Some(failure) = native::owned_module_failure(&out) {
         if let Some(path) = env_vars::retry_dump() {
             let _ = std::fs::write(path, assemble_finished_module(&out));
