@@ -72,12 +72,21 @@ func renderSnapshots(into folder: String) {
         monitor.fpsHistory.append(MonitorPoint(t: t, v: busy ? 160 + 18 * wave : (i % 40 < 6 ? 60 : 2)))
     }
     monitor.now = MonitorSample(fps: 171, actMHz: 2780, reqMHz: 2850, maxMHz: 2850, packageC: 67, vramC: 72, vramUsedMB: 3420, mode: "2560x1440, 180 Hz")
+    // the Tests page after a quick test with one result below expectations
+    let tested = Manager()
+    tested.testResults = [TestResult(title: "Compute (vector add)", value: "correct", state: .good),
+                          TestResult(title: "Drawing", value: "correct", state: .good),
+                          TestResult(title: "Memory bandwidth", value: "391 GB/s", state: .good),
+                          TestResult(title: "FP32 compute", value: "9.1 TFLOPS", state: .warning, help: "Below what the card should reach: close other GPU work and run it again."),
+                          TestResult(title: "HEVC decode", value: "correct", state: .good)]
     print("setup steps: driver page \(setupDriver.setupStep.number), last page \(setupDone.setupStep.number)")
     let pages: [(String, AnyView, CGFloat)] = [
         ("setup-driver", AnyView(SetupView(close: {}).environmentObject(setupDriver).background(Color(nsColor: .windowBackgroundColor))), 520), ("setup-done", AnyView(SetupView(close: {}).environmentObject(setupDone).background(Color(nsColor: .windowBackgroundColor))), 520),
         ("system", AnyView(SystemView().environmentObject(manager)), 640), ("system-working", AnyView(SystemView().environmentObject(working)), 640),
         ("system-update", AnyView(SystemView().environmentObject(outdated)), 640),
         ("monitor", AnyView(MonitorView(model: monitor).environmentObject(working)), 640),
+        ("tests", AnyView(TestsView().environmentObject(tested)), 520), ("report", AnyView(ReportView().environmentObject(tested)), 560),
+        ("settings", AnyView(SettingsView().environmentObject(tested)), 760),
         ("about", AnyView(AboutView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))), 760),
         ("install-running", AnyView(BusyBar().environmentObject(installing).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 330),
         ("install-done", AnyView(BusyBar().environmentObject(installed).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 360),

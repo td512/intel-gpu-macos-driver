@@ -544,7 +544,7 @@
 
 /* Look and feel: one short line per row, the rest behind (i) */
 "Checks the system and the package; changes nothing." = "Sistemi ve paketi denetler; hiçbir şeyi değiştirmez.";
-"Backs up, copies into /Library and rebuilds the kernel collection: a few minutes." = "Yedekler, /Library'ye kopyalar ve kernel collection'ı yeniden oluşturur: Birkaç dakika sürer.";
+"Backs up, copies into /Library and rebuilds the kernel collection: a few minutes." = "Yedek alır, /Library'ye kopyalar ve kernel collection'ı yeniden oluşturur: Birkaç dakika sürer.";
 "Puts back installed files that differ from this package." = "Kurulu dosyalardan bu paketle uyuşmayanları yeniden kopyalar.";
 "Puts the last backup back." = "Son yedeği geri koyar.";
 "Removes the driver from /Library; backups stay." = "Sürücüyü /Library'den siler; yedekler kalır.";
