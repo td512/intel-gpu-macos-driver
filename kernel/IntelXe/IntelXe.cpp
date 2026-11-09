@@ -560,8 +560,10 @@ bool IntelXe::start(IOService *provider) {
 	publishVram();   // VRAM size for System Information (again after the bring-up)
 	// The GPU's name in About This Mac / System Information comes from the PCI device's "model" (data, NUL included,
 	// as OpenCore DeviceProperties set it); without one the display section was titled "#display".
-	static const char kModel[] = "Intel Arc B580 Graphics";
-	if (OSData *d = OSData::withBytes(kModel, sizeof(kModel))) { pci->setProperty("model", d); d->release(); }
+	// The B570 (8086:e20c) is the same BMG-G21 with fewer Xe cores (#2).
+	static const char kB580[] = "Intel Arc B580 Graphics", kB570[] = "Intel Arc B570 Graphics";
+	const bool b570 = pci->configRead16(kIOPCIConfigDeviceID) == 0xe20c;
+	if (OSData *d = OSData::withBytes(b570 ? kB570 : kB580, b570 ? sizeof(kB570) : sizeof(kB580))) { pci->setProperty("model", d); d->release(); }
 	registerService();
 	// System sleep: two power states under the PCI device (xe_pm_suspend / xe_pm_resume in setPowerState), and the ReBAR
 	// state to restore on wake (pci_save_rebar_state).
