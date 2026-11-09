@@ -62,4 +62,5 @@ When EGL does not open, or a context cannot be made, that context stays on Apple
   (`../README.md`).
 
 Tested on the build Mac (macOS 27, arm64 and x86_64 under Rosetta) through the stand-in only: every hash equal to Apple's
-GL, with and without zink's missing names. On the B580 the prototype ran Chess.app (5 Nov); this version is not yet run there.
+GL, with and without zink's missing names. On the B580 the prototype ran Chess.app (5 Nov); this version ran GZDoom 4.14
+(MAP01, uncapped: ~1910 fps, against ~1600 on Apple's GL; 9-10 Nov).

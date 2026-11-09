@@ -14,8 +14,9 @@ For a bug, the macOS report is required. The Linux and Windows reports are optio
 
 ## macOS
 
-The easiest way: **IntelXe Manager > System > Create a diagnostics report**. It runs the same script, puts the file on
-your Desktop and shows it in the Finder; **Open the bug form** opens the issue form.
+The easiest way: **IntelXe Manager > Report > Create a diagnostics report**. It runs the same script, puts the file on
+your Desktop, lists the warnings it found with a fix where the app has one, and **Report a bug** (or **Ask for a new
+GPU**) opens the issue form with the report ID filled in.
 
 Or open Terminal in the folder that holds the script and run:
 

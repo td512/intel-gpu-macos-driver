@@ -1,4 +1,4 @@
-# zink-gl: OpenGL on the Intel Arc B580 through Mesa's zink
+# zink-gl: OpenGL on the Intel Arc card through Mesa's zink
 
 An optional component. Applications that open their OpenGL context through GLFW/EGL (LWJGL 3 Java games such as
 Minecraft Java 1.13 and later) render through Mesa's zink straight to Vulkan (the driver's ANV) instead of Apple's
@@ -19,7 +19,7 @@ screen, render distance 16): zink 741 fps, Apple's OpenGL 160 fps, Windows 450â€
 | `./zink-gl-version.sh 1.21.1 --write` | one Minecraft version only: a separate `1.21.1-zink` version |
 | `sudo ./install.sh --undo` | the state before the install |
 | `sudo ./install.sh --status` | what is installed and switched on |
-| `./cglzink-app.sh add /Applications/X.app` | experimental: a native CGL/NSOpenGL application through zink, as "X (zink).app" in `~/Applications` (below) |
+| `./cglzink-app.sh add /Applications/X.app` | experimental (0.1.4): a native CGL/NSOpenGL application through zink, as "X (zink).app" in `~/Applications` (below) |
 
 `--global on` affects applications started afterwards; running ones must be restarted. Java prints "Picked up
 JAVA_TOOL_OPTIONS" at each start; that is expected. To keep one application on Apple's OpenGL, start it with

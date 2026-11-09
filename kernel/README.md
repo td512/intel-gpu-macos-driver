@@ -30,8 +30,7 @@ A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e2
   readable by anyone); `debug.intelxe.jobtime` (each job's stages in GPU timestamps, off by default).
 
 **Version:** since 0.1.2 the kext carries the number of the release that last rebuilt it (0.1.4 here). 0.1.0 to 0.1.3
-shipped `rb7u` (renamed to IntelXe; tested on macOS 26.7.1); 0.1.4 adds the B570's ID, the 8.2 GB working set apps
-are told, the NVRAM settings, the sensors and job-timing sysctls, the engine dump and direct submission. `rb7u` is
+shipped `rb7u` (renamed to IntelXe; tested on macOS 26.7.1); 0.1.4 adds the B570's ID, the NVRAM settings, the sensors and job-timing sysctls, the engine dump and direct submission. `rb7u` is
 `rb7t` (VRAM-shared IOSurfaces fixed at boot, purgeable BOs, shared BOs, external fds behind `debug.intelxe.fds`)
 plus `rb7u` (macOS 26 starts drivers while the card is still leaving its reset: wait for config space, read the VRAM
 size again). The earlier steps, each a separate patch in the development tree:
