@@ -12,10 +12,13 @@
 #                                  right away for the logged-in user)
 #   sudo ./install.sh --global off back to Apple's OpenGL for them
 #   ./install.sh --status
+#   ./cglzink-app.sh ...           native CGL/NSOpenGL applications through zink, one at a time (experimental; see there)
 #
 # Installs:
 #   /Library/IntelXe/GL/                   libEGL (Mesa EGL, macOS platform), libgallium (zink), libGLzink (LWJGL's
-#                                          OpenGL library), libglfw.3 (GLFW 3.4 + the zink EGL patch)
+#                                          OpenGL library), libglfw.3 (GLFW 3.4 + the zink EGL patch), and when the
+#                                          package has it libcglzink (CGL/NSOpenGL applications, loaded only by
+#                                          cglzink-app.sh's launchers)
 #   /Library/IntelXe/GL/libvulkan.1.dylib, intel_icd.x86_64.json: the loader and manifest again, for sandboxed applications
 #   /usr/local/lib/libvulkan.1.4.363.dylib the Khronos Vulkan loader (+ libvulkan.1.dylib, libvulkan.dylib links),
 #                                          which zink and ordinary Vulkan applications use to find the B580
@@ -28,6 +31,7 @@ VL=/usr/local/lib VLIB=libvulkan.1.4.363.dylib
 ICDD=/usr/local/share/vulkan/icd.d ICD=intel_icd.x86_64.json
 LA=/Library/LaunchAgents/io.github.yusufklncc.intelxe.zink-gl.plist
 LIBS="libEGL.1.dylib libgallium-27.0.0-devel.dylib libGLzink.dylib libglfw.3.dylib"
+OPTLIBS="libcglzink.dylib"   # installed when the package has it
 JOPTS="-Dorg.lwjgl.glfw.libname=$GL/libglfw.3.dylib -Dorg.lwjgl.opengl.libname=$GL/libGLzink.dylib"
 
 root() { [ "$(id -u)" = 0 ] || { echo "needs root: sudo $0 $*"; exit 1; }; }
@@ -41,6 +45,7 @@ status() {
     [ -e $VL/$VLIB ] && echo "  Vulkan loader: $VL/$VLIB" || echo "  Vulkan loader: not installed"
     [ -e $ICDD/$ICD ] && echo "  ICD: $ICDD/$ICD -> $(sed -n 's/.*"library_path": *"\([^"]*\)".*/\1/p' $ICDD/$ICD)" || echo "  ICD: none"
     if [ -e $LA ]; then echo "  global: on ($LA)"; else echo "  global: off"; fi
+    if [ -e $GL/libcglzink.dylib ]; then echo "  cglzink: installed; per application with ./cglzink-app.sh"; fi
     local u; u=$(console_user)
     if [ -n "$u" ] && [ "$u" != root ]; then
         if [ "$(id -u)" = 0 ]; then echo "  JAVA_TOOL_OPTIONS for $u: $(launchctl asuser "$(id -u "$u")" launchctl getenv JAVA_TOOL_OPTIONS 2>/dev/null || true)"
@@ -89,6 +94,7 @@ install_all() {
     sums
     [ -f /Library/GPUBundles/nvmtl/libvulkan_intel.dylib ] || { echo "REFUSED: the driver is not installed (no /Library/GPUBundles/nvmtl/libvulkan_intel.dylib)"; exit 1; }
     local f; for f in $LIBS; do sig "$H/lib/$f"; done; sig "$H/vulkan/$VLIB"
+    for f in $OPTLIBS; do [ -f "$H/lib/$f" ] && sig "$H/lib/$f"; done
     if [ ! -d "$B" ]; then
         mkdir -p "$B"
         if [ -d $GL ]; then ditto $GL "$B/GL"; else touch "$B/no-GL"; fi
@@ -99,6 +105,7 @@ install_all() {
     mkdir -p /Library/IntelXe "$H/.stage"
     rm -rf "$H/.stage/GL"; mkdir "$H/.stage/GL"
     for f in $LIBS; do cp "$H/lib/$f" "$H/.stage/GL/"; done
+    for f in $OPTLIBS; do [ -f "$H/lib/$f" ] && cp "$H/lib/$f" "$H/.stage/GL/"; done
     ln -s libEGL.1.dylib "$H/.stage/GL/libEGL.dylib"
     # also beside zink: a sandboxed application cannot read /usr/local
     install -m 755 "$H/vulkan/$VLIB" "$H/.stage/GL/libvulkan.1.dylib"
