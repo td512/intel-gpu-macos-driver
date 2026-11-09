@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # efi.sh: the OpenCore part of intel-gpu-macos-driver, done on macOS: puts this package's IntelXe.kext and SSDT-ARCOFF.aml
-# into the EFI that OpenCore booted from, with their config.plist entries, and takes the change back.
+# (adapted to the card's ACPI path) into the EFI OpenCore booted from, with their config.plist entries, and undoes it.
 #
 #   ./efi.sh --status               the EFI compared with this package, one "key=value" per line. Changes nothing.
 #   ./efi.sh --plan                 what --apply would change (stage 4 of README-INSTALL.md). Changes nothing.
@@ -109,9 +109,9 @@ kext_state() { # same|different|absent|unknown: the executable and Info.plist co
     elif cmp -s "$k/Contents/MacOS/IntelXe" "$PK/Contents/MacOS/IntelXe" && cmp -s "$k/Contents/Info.plist" "$PK/Contents/Info.plist"; then echo same
     else echo different; fi
 }
-ssdt_state() {
+ssdt_state() { # against the table this card needs: the package's, or the package's adapted to the card's port (SSDTSRC)
     [ "$READABLE" = yes ] || { echo unknown; return; }
-    if [ ! -e "$E/ACPI/$SSDT" ]; then echo absent; elif cmp -s "$E/ACPI/$SSDT" "$PS"; then echo same; else echo different; fi
+    if [ ! -e "$E/ACPI/$SSDT" ]; then echo absent; elif cmp -s "$E/ACPI/$SSDT" "$SSDTSRC"; then echo same; else echo different; fi
 }
 kext_version() { pget "$1/Contents/Info.plist" CFBundleVersion; }
 
@@ -141,13 +141,109 @@ card_acpi_path() {
         }'
 }
 CARD=$(card_acpi_path)
-# an AML table names \_SB.PC00.PEG1.PEGP as the bytes "_SB_PC00PEG1PEGP": do the table's bytes name the card's port?
+# an AML table names \_SB.PC00.PEG1.PEGP as the bytes 2f 04 "_SB_PC00PEG1PEGP" (after "\" or not; namepath_hex below):
+# do the table's bytes name the card's port? The count keeps a shorter path inside a longer one from matching.
 aml_names_card() {
-    case "$CARD" in ""|none) return 1;; esac
-    local seg="" s
-    for s in $(printf '%s' "${CARD#\\}" | tr . ' '); do seg=$seg$(printf '%-4s' "$s" | tr ' ' _); done
-    LC_ALL=C grep -a -qF "$seg" "$1"
+    local np
+    np=$(namepath_hex "$CARD") || return 1
+    case $np in " 5c 2e"*|" 5c 2f"*) np=${np# 5c};; esac
+    [[ "$(hexof "$1")" == *"$np"* ]]
 }
+
+# ---- SSDT-ARCOFF adapted to the card's port -------------------------------------------------------------------------
+# The package's table (efi/SSDT-ARCOFF.dsl) names the port twice, both times as an absolute NamePath: "\" (5c), then for
+# one NameSeg nothing, for two DualNamePrefix (2e), for more MultiNamePrefix (2f) and the count, then the 4-byte NameSegs
+# padded with "_": 5c 2f 04 "_SB_PC00PEG1PEGP". The table is
+#   header (36 bytes; the length at 4, the checksum at 9)
+#   If (a0) PkgLength Zero (00)  External (15) NamePath ObjectType ArgCount      (iasl wraps External in If (Zero))
+#   If (a0) PkgLength  CondRefOf (\_OSI, Local0) && _OSI ("Darwin")
+#       Scope (10) PkgLength NamePath  Device (BRG1) { ... }
+# and ends with the Scope; nothing inside the Scope names the port. adapt_ssdt finds those parts, builds the table again
+# from them with the package's path and goes on only when that gives the package's table byte for byte; then it builds
+# the table with the card's path. With as many NameSegs that only swaps NameSegs and the checksum; a longer or shorter
+# path also changes the three PkgLengths (both Ifs, the Scope) and the header's length, which the build computes.
+PKGPATH='\_SB.PC00.PEG1.PEGP'
+hexof() { od -An -v -tx1 "$@" | tr -s ' \n' '  ' | sed 's/ $//'; }   # a file (or stdin) as " hh" bytes
+namepath_hex() { # the NamePath of an absolute ACPI path, " hh" bytes; fails for anything that is not one
+    local re='^\\[A-Z_][A-Z0-9_]{0,3}(\.[A-Z_][A-Z0-9_]{0,3})*$' s n=0 out=""
+    [[ "$1" =~ $re ]] || return 1
+    for s in $(printf '%s' "${1#\\}" | tr . ' '); do out=$out$(printf '%-4s' "$s" | tr ' ' _ | hexof); n=$((n + 1)); done
+    [ $n -le 255 ] || return 1
+    if [ $n = 1 ]; then printf ' 5c%s' "$out"; elif [ $n = 2 ]; then printf ' 5c 2e%s' "$out"; else printf ' 5c 2f %02x%s' $n "$out"; fi
+}
+pkglen_hex() { # the PkgLength for N bytes that follow it, in as few bytes as it fits (as iasl writes it)
+    local n=$1 k j v
+    [ $((n + 1)) -le 63 ] && { printf ' %02x' $((n + 1)); return 0; }
+    for k in 1 2 3; do
+        v=$((n + 1 + k))
+        if [ $v -lt $((1 << (4 + 8 * k))) ]; then
+            printf ' %02x' $(((k << 6) | (v & 15)))
+            for ((j = 0; j < k; j++)); do printf ' %02x' $(((v >> (4 + 8 * j)) & 255)); done
+            return 0
+        fi
+    done
+    return 1
+}
+pkglen_at() { # pkglen_at I: "VALUE SIZE" of the PkgLength at byte I of AB
+    local lead=$((16#${AB[$1]})) k j v
+    k=$((lead >> 6))
+    if [ $k = 0 ]; then v=$((lead & 63)); else v=$((lead & 15)); for ((j = 1; j <= k; j++)); do v=$((v | 16#${AB[$1 + j]} << (4 + 8 * (j - 1)))); done; fi
+    echo "$v $((k + 1))"
+}
+hex_sum() { local b s=0; for b in $1; do s=$((s + 16#$b)); done; echo $((s & 255)); }
+build_ssdt() { # build_ssdt NAMEPATH: the table from the parts adapt_ssdt found, naming NAMEPATH; " hh" bytes
+    local ext scope ifb body len hd="" i
+    ext=" 00 15$1$AXT"; ext=" a0$(pkglen_hex $((${#ext} / 3)))$ext"
+    scope="$1$ABODY"; scope=" 10$(pkglen_hex $((${#scope} / 3)))$scope"
+    ifb="$APRED$scope"; ifb=" a0$(pkglen_hex $((${#ifb} / 3)))$ifb"
+    body=$ext$ifb; len=$((36 + ${#body} / 3))
+    for ((i = 0; i < 36; i++)); do
+        case $i in 4|5|6|7) hd="$hd $(printf %02x $(((len >> (8 * (i - 4))) & 255)))";; 9) hd="$hd 00";; *) hd="$hd ${AB[$i]}";; esac
+    done
+    printf '%s %02x%s%s' "${hd:0:27}" $(((256 - $(hex_sum "$hd$body")) & 255)) "${hd:30}" "$body"
+}
+ADAPTWHY=""
+adapt_ssdt() { # adapt_ssdt OUT: the package's SSDT-ARCOFF naming the card's port, written to OUT and read back; ADAPTWHY when not
+    local ep ec h n i q k v s rest p1 sc=0 got
+    ec=$(namepath_hex "$CARD") || { ADAPTWHY="$CARD is not an ACPI path this script can write into the table"; return 1; }
+    ep=$(namepath_hex "$PKGPATH")
+    ADAPTWHY="the package's $SSDT is not laid out as SSDT-ARCOFF.dsl builds it"
+    h=$(hexof "$PS"); read -r -a AB <<< "$h"; n=${#AB[@]}
+    [ $n -gt 40 ] && [ "${AB[0]}${AB[1]}${AB[2]}${AB[3]}" = 53534454 ] || return 1
+    [ $((16#${AB[4]} | 16#${AB[5]} << 8 | 16#${AB[6]} << 16 | 16#${AB[7]} << 24)) = $n ] && [ "$(hex_sum "$h")" = 0 ] || return 1
+    # the port's NamePath twice: the External's right after the header, then the Scope's
+    [ "${AB[36]}" = a0 ] || return 1
+    read -r v k <<< "$(pkglen_at 37)"; i=$((37 + k))
+    [ "${AB[$i]}${AB[$i + 1]}" = 0015 ] && [ "${h:$(((i + 2) * 3)):${#ep}}" = "$ep" ] || return 1
+    i=$((i + 2 + ${#ep} / 3)); AXT=" ${AB[$i]} ${AB[$i + 1]}"   # the External's ObjectType and ArgCount
+    i=$((i + 2)); [ $((37 + v)) = $i ] || return 1               # the If (Zero) holds the External only
+    rest=${h#*"$ep"}; s=${rest#*"$ep"}
+    [ "${h%"$rest"}" = "${h:0:$(((i - 2) * 3))}" ] && [ "$s" != "$rest" ] && [ "${s#*"$ep"}" = "$s" ] || return 1
+    q=$(((${#h} - ${#s} - ${#ep}) / 3))                       # the byte where the Scope's NamePath starts
+    [ "${AB[$i]}" = a0 ] || return 1
+    read -r v k <<< "$(pkglen_at $((i + 1)))"; [ $((i + 1 + v)) = $n ] || return 1   # the If ends with the table
+    p1=$((i + 1 + k))                                         # the If's predicate starts here
+    for k in 1 2 3 4; do                                      # the Scope opcode and its PkgLength before the NamePath
+        [ $((q - 1 - k)) -ge $p1 ] && [ "${AB[$q - 1 - k]}" = 10 ] && [ $((16#${AB[$q - k]} >> 6)) = $((k - 1)) ] || continue
+        read -r v got <<< "$(pkglen_at $((q - k)))"
+        [ "$got" = $k ] && [ $((q - k + v)) = $n ] && { sc=$k; break; }   # the Scope ends with the table too
+    done
+    [ $sc -gt 0 ] || return 1
+    APRED=""; for ((i = p1; i < q - 1 - sc; i++)); do APRED="$APRED ${AB[$i]}"; done
+    ABODY=${s}
+    [ "$(build_ssdt "$ep")" = "$h" ] || return 1             # the parts make the package's table again
+    ADAPTWHY="the table built for $CARD did not read back as built"
+    s=$(build_ssdt "$ec")
+    printf "$(printf '%s' "$s" | sed 's/ /\\x/g')" > "$1"
+    got=$(hexof "$1")
+    [ "$got" = "$s" ] && [ "$(hex_sum "$got")" = 0 ] && aml_names_card "$1" || return 1
+    ADAPTWHY=""
+}
+# SSDTSRC: the table this card needs, the package's or one adapted from it. ADAPT: yes (the package's names the card's
+# port), adapted, or no
+SSDTSRC=$PS ADAPT=no
+if aml_names_card "$PS"; then ADAPT=yes
+elif [ -n "$CARD" ] && [ "$CARD" != none ] && adapt_ssdt "$T/$SSDT"; then ADAPT=adapted SSDTSRC=$T/$SSDT; fi
 
 # ---- config.plist ---------------------------------------------------------------------------------------------------
 count() { local n; n=$(pget "$1" "$2"); [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo 0; }
@@ -199,23 +295,28 @@ plan_files() {
         op set Kernel.Add.$i.Enabled bool false
     fi
 
-    # SSDT-ARCOFF only when a table names the card's upstream port: the shipped one names \_SB.PC00.PEG1.PEGP
+    # SSDT-ARCOFF only when a table names the card's upstream port: the shipped one names \_SB.PC00.PEG1.PEGP; for
+    # another port, the shipped one adapted to it (adapt_ssdt)
     ss=$(ssdt_state)
-    pkgok=no; aml_names_card "$PS" && pkgok=yes
     efiok=no; [ "$ss" = absent ] || ! aml_names_card "$E/ACPI/$SSDT" || efiok=yes
     if [ -z "$CARD" ]; then
         NOTES+=("not added: $SSDT. No Arc B580 found on this machine, so its ACPI path cannot be checked (stage 4, step 2 of README-INSTALL.md)")
     elif [ "$CARD" = none ]; then
         NOTES+=("not added: $SSDT. The B580's upstream port has no ACPI name on this board; the table needs one more bridge level (stage 4, step 2 of README-INSTALL.md; please open an issue)")
-    elif [ $efiok = no ] && [ $pkgok = no ]; then
-        NOTES+=("not added: $SSDT. The package's table is for \\_SB.PC00.PEG1.PEGP; the card's port here is $CARD. Put that path into SSDT-ARCOFF.dsl, compile it with iasl and copy it to EFI/OC/ACPI (stage 4, step 2 of README-INSTALL.md); then this adds its entry")
+    elif [ $efiok = no ] && [ $ADAPT = no ]; then
+        NOTES+=("not added: $SSDT. The package's table is for \\_SB.PC00.PEG1.PEGP; the card's port here is $CARD, and $ADAPTWHY. Put that path into SSDT-ARCOFF.dsl, compile it with iasl and copy it to EFI/OC/ACPI (stage 4, step 2 of README-INSTALL.md); then this adds its entry")
     else
         if [ $efiok = yes ] && [ "$ss" = different ]; then
-            NOTES+=("kept: EFI/OC/ACPI/$SSDT differs from the package's but names this card's port ($CARD): yours stays")
+            if [ $ADAPT = adapted ]; then cur="the package's adapted to this card's port"; else cur="the package's"; fi
+            NOTES+=("kept: EFI/OC/ACPI/$SSDT differs from $cur but names this card's port ($CARD): yours stays")
         elif [ "$ss" != same ]; then
             if [ "$ss" = absent ]; then cur=copy; else cur=replace; fi
-            PLAN+=("$(printf '%-8s' $cur) EFI/OC/ACPI/$SSDT (names $CARD, this card's port)")
-            op copy "$PS" "ACPI/$SSDT"
+            if [ $ADAPT = adapted ]; then
+                PLAN+=("$(printf '%-8s' $cur) EFI/OC/ACPI/$SSDT (the package's table adapted to this card's port: names $CARD instead of $PKGPATH)")
+            else
+                PLAN+=("$(printf '%-8s' $cur) EFI/OC/ACPI/$SSDT (names $CARD, this card's port)")
+            fi
+            op copy "$SSDTSRC" "ACPI/$SSDT"
         fi
         i=$(find_entry "$CFG" ACPI.Add Path "$SSDT")
         if [ -z "$i" ]; then
@@ -394,7 +495,7 @@ status() {
     echo "ssdt_file=$(ssdt_state)"
     echo "ssdt_entry=$(entry_state ACPI.Add Path "$SSDT")"
     echo "card_acpi_path=$CARD"
-    aml_names_card "$PS" && echo "ssdt_package_names_card=yes" || echo "ssdt_package_names_card=no"
+    case $ADAPT in yes) echo "ssdt_package_names_card=yes";; adapted) echo "ssdt_package_names_card=adaptable";; *) echo "ssdt_package_names_card=no";; esac
     if [ "$READABLE" = yes ]; then
         PLAN=() OPS=() NOTES=(); plan_files; echo "plan_changes=${#PLAN[@]}"
         PLAN=() OPS=() NOTES=(); plan_settings; echo "settings_changes=${#PLAN[@]}"

@@ -215,7 +215,9 @@ Dosyaları `intel-gpu-macos-driver-@VER@-efi.zip`'ten alın (macOS paketinde de 
 
 Kurulacak bilgisayarın kendisinde, macOS paketindeki `efi.sh` 1-3. maddeleri (ve 2. aşamanın ayarlarını) sizin yerinize
 yapar: OpenCore'un açıldığı EFI'yi bulur, EFI klasörünün tamamını yedekler, dosyaları kopyalar, `config.plist` kayıtlarını
-açar; `SSDT-ARCOFF.aml`'ı yalnızca ACPI yolu kartınızınkiyle aynıysa ekler. `./efi.sh --plan` değişiklikleri gösterir,
+açar. Kartınızın ACPI yolunu (2. madde) I/O Registry'den okur; yol paketteki tablonunkinden farklıysa `SSDT-ARCOFF.aml`'ın
+bir kopyasına sizin yolunuzu yazıp onu ekler (plan bunu "adapted to this card's port" diye belirtir); düzenlenecek ya da
+derlenecek bir tablo kalmaz. `./efi.sh --plan` değişiklikleri gösterir,
 `sudo ./efi.sh --apply` yapar, `sudo ./efi.sh --undo` geri alır; `--settings-plan` / `--settings-apply` 2. aşamayı yapar.
 Bütün seçenekler için yalnızca `./efi.sh`. IntelXe Manager uygulamasının EFI sayfası da aynısını yapar.
 
@@ -238,9 +240,10 @@ takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur)
    | Linux | `lspci -nn \| grep e20b` GPU'yu verir (ör. `03:00.0`); `lspci -tv` kartın iki seviye üstündeki portu gösterir (ör. `01:00.0`); `cat /sys/bus/pci/devices/0000:01:00.0/firmware_node/path` ACPI yolunu yazar, ör. `\_SB_.PC00.PEG1.PEGP` |
    | macOS | [gfxutil](https://github.com/acidanthera/gfxutil/releases) bütün PCI aygıtlarını ACPI yollarıyla listeler: `8086:e20b` satırına bakın. IORegistryExplorer aynı adları IOService düzleminde gösterir (`PC00@0` → `PEG1@1` → `PEGP@0` → ...) |
 
-   Yolunuz paketteki gibiyse (`\_SB.PC00.PEG1.PEGP`) `SSDT-ARCOFF.aml`'yi olduğu gibi kullanın. Değilse `SSDT-ARCOFF.dsl`'de yolun
-   geçtiği iki yere (`External` ve `Scope` satırları) kendi yolunuzu yazıp `iasl SSDT-ARCOFF.dsl` ile derleyin. `iasl`, ACPICA'nın
-   parçası: Windows'ta ACPICA'nın Windows araçları (acpica.org, Downloads), Linux'ta `acpica-tools` (ya da `iasl`) paketi, macOS'ta
+   Yolunuz paketteki gibiyse (`\_SB.PC00.PEG1.PEGP`) `SSDT-ARCOFF.aml`'yi olduğu gibi kullanın. Değilse macOS'ta tabloyu
+   `efi.sh` ya da uygulamanın EFI sayfası uyarlasın (yukarıda); yolun uzunluğu ne olursa olsun bunu yapar. Elle yapmak için
+   `SSDT-ARCOFF.dsl`'de yolun geçtiği iki yere (`External` ve `Scope` satırları) kendi yolunuzu yazıp `iasl SSDT-ARCOFF.dsl`
+   ile derleyin. `iasl`, ACPICA'nın parçası: Windows'ta ACPICA'nın Windows araçları (acpica.org, Downloads), Linux'ta `acpica-tools` (ya da `iasl`) paketi, macOS'ta
    `brew install acpica` ya da [MaciASL](https://github.com/acidanthera/MaciASL/releases)'in içindeki `iasl`. Hiçbir `ACPI(...)`
    parçası kartın üst portunu adlandırmıyorsa (son `ACPI(...)` parçasından sonra iki değil üç `PCI(...)` geliyorsa) tabloya bir köprü
    seviyesi daha gerekiyor: Konum yolları satırınızla bir issue açın.
