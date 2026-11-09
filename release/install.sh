@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# install.sh: the /Library part of intel-gpu-macos-driver 0.1.3 for macOS 26 Tahoe (Intel Arc B580, 8086:e20b).
+# install.sh: the /Library part of intel-gpu-macos-driver 0.1.4 for macOS 26 Tahoe (Intel Arc B580, 8086:e20b).
 #
 #   ./install.sh               check only (the default): macOS version, SIP, AMFI boot-arg, the card, IntelXe.kext,
 #                              the package's checksums and code signatures. Changes nothing.
@@ -21,7 +21,7 @@
 # Kernel Collection), and --undo puts it back. Swap B580.kext for IntelXe.kext in your EFI before you reboot.
 set -euo pipefail
 H=$(cd "$(dirname "$0")" && pwd)
-VER=0.1.3
+VER=0.1.4
 MACOS_MAJOR=26   # the macOS this package is built for (NMXAccel differs: 26 Tahoe, 15 Sequoia)
 BK="/Library/Application Support/intel-gpu-macos-driver"
 KEXTS=(IntelXeFB NMXAccel NMXAGDC)
@@ -62,7 +62,7 @@ check() {
     [ -n "$old" ] && warn "boot-args with their earlier names: ${old}- they still work in this release; rename them (README-INSTALL.md, Upgrading)"
     local pci loaded; pci=$(ioreg -r -c IOPCIDevice -l 2>/dev/null || true)
     if [[ "$pci" == *'"device-id" = <0be20000>'* ]]; then ok "Arc B580 (8086:e20b) on the PCI bus"
-    elif [[ "$pci" == *'"device-id" = <0ce20000>'* ]]; then warn "Arc B570 (8086:e20c) on the PCI bus: unverified, see the B570 patch"
+    elif [[ "$pci" == *'"device-id" = <0ce20000>'* ]]; then ok "Arc B570 (8086:e20c) on the PCI bus (supported; not yet tested by the project)"
     else bad "no Arc B580/B570 (8086:e20b/e20c) found"; fi
     loaded=$(kmutil showloaded 2>/dev/null || true)
     if [[ "$loaded" == *"io.github.yusufklncc.IntelXe ("* ]]; then
