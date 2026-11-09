@@ -541,8 +541,8 @@ impl Emitter {
         }
         let scope_kind = self.atomic_i32_scope_for_arg(&call.args[0])?;
         let scope = self.const_uint(scope_kind as u32)?;
-        let semantics_kind =
-            Self::atomic_i32_memory_semantics(scope_kind, MemorySemantics::ACQUIRE_RELEASE);
+        let order = air_i32_literal(&call.args[2].value);
+        let semantics_kind = Self::atomic_rmw_memory_semantics(op, scope_kind, order);
         let semantics = self.const_uint(semantics_kind.bits())?;
         instructions.push(Self::inst(
             op,

@@ -2543,6 +2543,103 @@ declare i32 @air.atomic.local.or.u.i32(ptr addrspace(3), i32, i32, i32, i1)
     }
 }
 
+// A relaxed threadgroup add/max (AIR order operand 0) carries no ordering, so it must not make Mesa fence SLM
+// around it; exchange and any non-zero order keep AcquireRelease | WorkgroupMemory.
+#[test]
+fn native_threadgroup_relaxed_atomic_rmw_is_relaxed_exchange_keeps_acquire_release() {
+    let ll = r#"
+target triple = "spirv-unknown-vulkan1.2"
+%"struct.metal::_atomic" = type { i32 }
+@local_counts = internal addrspace(3) global [1 x %"struct.metal::_atomic"] zeroinitializer, align 4
+
+define void @k() {
+entry:
+  %p = getelementptr inbounds [1 x %"struct.metal::_atomic"], ptr addrspace(3) @local_counts, i64 0, i64 0, i32 0
+  %a = tail call i32 @air.atomic.local.add.u.i32(ptr addrspace(3) %p, i32 1, i32 0, i32 1, i1 true)
+  %b = tail call i32 @air.atomic.local.max.s.i32(ptr addrspace(3) %p, i32 -3, i32 0, i32 1, i1 true)
+  %c = tail call i32 @air.atomic.local.xchg.i32(ptr addrspace(3) %p, i32 7, i32 0, i32 1, i1 true)
+  %d = tail call i32 @air.atomic.local.add.u.i32(ptr addrspace(3) %p, i32 2, i32 5, i32 1, i1 true)
+  ret void
+}
+
+declare i32 @air.atomic.local.add.u.i32(ptr addrspace(3), i32, i32, i32, i1)
+declare i32 @air.atomic.local.max.s.i32(ptr addrspace(3), i32, i32, i32, i1)
+declare i32 @air.atomic.local.xchg.i32(ptr addrspace(3), i32, i32, i32, i1)
+
+!air.kernel = !{!0}
+!0 = !{ptr @k, !1, !1}
+!1 = !{}
+"#;
+    let tmp = std::env::temp_dir().join(format!(
+        "metal2vulkan_threadgroup_relaxed_atomic_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::create_dir_all(&tmp);
+    let spv = crate::translate_sanitized_native_with_options(
+        ll,
+        Stage::Kernel,
+        &tmp,
+        whole_workgroup_options(),
+    )
+    .expect("translate");
+    if std::process::Command::new("spirv-val")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        tools::spirv_val_bytes(&spv, &tmp).expect("spirv-val");
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    let module = load_bytes(&spv).expect("load spv");
+    let constants: HashMap<Word, u32> = module
+        .types_global_values
+        .iter()
+        .filter(|inst| inst.class.opcode == Op::Constant)
+        .filter_map(|inst| match (inst.result_id, inst.operands.first()) {
+            (Some(id), Some(Operand::LiteralBit32(value))) => Some((id, *value)),
+            _ => None,
+        })
+        .collect();
+    let constant = |operand: &Operand| match operand {
+        Operand::IdScope(id) | Operand::IdMemorySemantics(id) => {
+            *constants.get(id).expect("atomic operand is a constant")
+        }
+        other => panic!("unexpected atomic operand {other:?}"),
+    };
+    let atomics: Vec<(Op, u32, u32)> = module
+        .functions
+        .iter()
+        .flat_map(|function| &function.blocks)
+        .flat_map(|block| &block.instructions)
+        .filter(|inst| {
+            matches!(
+                inst.class.opcode,
+                Op::AtomicIAdd | Op::AtomicSMax | Op::AtomicExchange
+            )
+        })
+        .map(|inst| {
+            (
+                inst.class.opcode,
+                constant(&inst.operands[1]),
+                constant(&inst.operands[2]),
+            )
+        })
+        .collect();
+    let workgroup = Scope::Workgroup as u32;
+    let acquire_release = (spirv::MemorySemantics::ACQUIRE_RELEASE
+        | spirv::MemorySemantics::WORKGROUP_MEMORY)
+        .bits();
+    assert_eq!(
+        atomics,
+        vec![
+            (Op::AtomicIAdd, workgroup, 0),
+            (Op::AtomicSMax, workgroup, 0),
+            (Op::AtomicExchange, workgroup, acquire_release),
+            (Op::AtomicIAdd, workgroup, acquire_release),
+        ]
+    );
+}
+
 #[test]
 fn native_threadgroup_atomic_fixed_loop_is_flattened_and_unrolled() {
     let ll = r#"
