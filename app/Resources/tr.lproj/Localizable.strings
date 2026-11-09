@@ -39,7 +39,7 @@
 /* Checks */
 "Processor" = "İşlemci";
 "Graphics card" = "Ekran kartı";
-"No Arc B580 found" = "Arc B580 bulunamadı";
+"No Arc B580 or B570 found" = "Arc B580 veya B570 bulunamadı";
 "System Integrity Protection" = "Sistem Bütünlük Koruması";
 "AMFI boot-arg" = "AMFI boot-arg";
 "Relaxed" = "Gevşetilmiş";
@@ -359,7 +359,7 @@
 "Close, continue later" = "Kapat, sonra devam et";
 "This Mac is not an x86_64 machine: the driver is for Intel-based hackintoshes." = "Bu Mac x86_64 değil: sürücü Intel tabanlı hackintoshlar içindir.";
 "The driver has packages for macOS 26 Tahoe and macOS 15 Sequoia; this is macOS %@." = "Sürücünün macOS 26 Tahoe ve macOS 15 Sequoia paketleri var; bu macOS %@.";
-"No Arc B580 was found on the PCI bus. Check that the card is seated, has its power cables, and that the BIOS has Above 4G decoding and Resizable BAR on." = "PCI veri yolunda Arc B580 bulunamadı. Kartın yerine oturduğunu, güç kablolarının takılı olduğunu ve BIOS'ta Above 4G decoding ile Resizable BAR'ın açık olduğunu denetleyin.";
+"No Arc B580 or B570 was found on the PCI bus. Check that the card is seated, has its power cables, and that the BIOS has Above 4G decoding and Resizable BAR on." = "PCI veri yolunda Arc B580 veya B570 bulunamadı. Kartın yerine oturduğunu, güç kablolarının takılı olduğunu ve BIOS'ta Above 4G decoding ile Resizable BAR'ın açık olduğunu denetleyin.";
 "The assistant continues once this is solved. The install guide covers the BIOS and OpenCore preparation." = "Bu çözülünce yardımcı devam eder. BIOS ve OpenCore hazırlığı kurulum kılavuzunda.";
 "Open the install guide" = "Kurulum kılavuzunu aç";
 "1. Prepare OpenCore" = "1. OpenCore'u hazırla";
@@ -611,3 +611,23 @@
 "The Xe2 VDEnc work." = "Xe2 VDEnc çalışması.";
 "The Vulkan video code the VideoToolbox codecs use." = "VideoToolbox kodeklerinin kullandığı Vulkan video kodu.";
 "Intel, Arc, Apple, macOS and Metal are trademarks of their owners." = "Intel, Arc, Apple, macOS ve Metal, sahiplerinin ticari markalarıdır.";
+
+/* setup assistant: Safari with step 1, extras on the last page, EFI choice; B570 */
+"Also prepare Safari on the GPU" = "Safari'yi de GPU için hazırla";
+"Turns OpenCore's Apple Secure Boot off in the same change: no extra restart later." = "OpenCore'un Apple Güvenli Önyükleme'sini aynı değişiklikle kapatır: sonra ayrıca yeniden başlatma gerekmez.";
+"Safari draws on the GPU only with a second copy of the Metal driver on the system volume, which the last page can install. Apple Secure Boot refuses to boot such a system volume, so it has to be off. It is a macOS security feature; leave this off if you do not want Safari on the GPU. The EFI page can change it later." = "Safari ancak Metal sürücüsünün sistem birimindeki ikinci bir kopyasıyla GPU'da çizer; son sayfa onu kurabilir. Apple Güvenli Önyükleme böyle bir sistem birimiyle açılmaz, bu yüzden kapalı olmalıdır. Bu bir macOS güvenlik özelliğidir; Safari'yi GPU'da istemiyorsanız bunu kapalı bırakın. EFI sayfası daha sonra da değiştirebilir.";
+"Optional extras:" = "İsteğe bağlı ekler:";
+"OpenCore did not record which EFI it booted from (it does from step 3 on): choose it below." = "OpenCore hangi EFI'den açıldığını kaydetmemiş (3. adımdan sonra kaydeder): aşağıdan seçin.";
+"No EFI partition was found. Choose the EFI folder instead, for example on a USB stick." = "EFI bölümü bulunamadı. Bunun yerine EFI klasörünü seçin, örneğin bir USB bellekte.";
+"Choose a folder…" = "Klasör seç…";
+"First Apple Secure Boot goes off in the EFI, then a restart." = "Önce EFI'de Apple Güvenli Önyükleme kapatılır, ardından yeniden başlatılır.";
+"Then a second copy of the Metal driver goes on the system volume (a few minutes), and a restart. A macOS update removes it again." = "Sonra Metal sürücüsünün ikinci bir kopyası sistem birimine kurulur (birkaç dakika) ve yeniden başlatılır. Bir macOS güncellemesi onu yeniden kaldırır.";
+"Without it Safari works, drawing in software. Apple Secure Boot is a macOS security feature that refuses a system volume with a changed seal." = "Bu olmadan Safari çalışır, ama yazılımla çizer. Apple Güvenli Önyükleme, mührü değişmiş bir sistem birimini reddeden bir macOS güvenlik özelliğidir.";
+"Mount the EFI" = "EFI'yi bağla";
+"Driver page" = "Sürücü sayfası";
+"Zink for Java games" = "Java oyunları için Zink";
+"Minecraft and other LWJGL games draw through Vulkan: much faster. Native Mac apps and OpenCL are not affected." = "Minecraft ve diğer LWJGL oyunları Vulkan üzerinden çizer: çok daha hızlı. Doğal Mac uygulamaları ve OpenCL etkilenmez.";
+"Zink is Mesa's OpenGL on Vulkan. The switch sets it for every LWJGL 3 Java application started afterwards; the OpenGL page has the test and the per-version option." = "Zink, Mesa'nın Vulkan üzerinde çalışan OpenGL'idir. Anahtar, bundan sonra başlatılan her LWJGL 3 Java uygulaması için onu seçer; test ve sürüme özel seçenek OpenGL sayfasındadır.";
+"Download Zink" = "Zink'i indir";
+"Use by default" = "Varsayılan olarak kullan";
+"1 check this session." = "Bu oturumda 1 denetim.";

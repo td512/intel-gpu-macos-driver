@@ -108,7 +108,7 @@ struct SystemFacts {
                   help: macOSMajor == 26 || macOSMajor == 15 ? "" : "There are packages for macOS 26 and macOS 15."),
             Check(id: "cpu", title: "Processor", value: architecture, state: architecture == "x86_64" ? .good : .bad,
                   help: architecture == "x86_64" ? "" : "The driver is for x86_64 Macs. This app can run here, but it cannot install on this machine."),
-            Check(id: "card", title: "Graphics card", value: hasCard ? cardName : "No Arc B580 found", state: hasCard ? .good : .bad),
+            Check(id: "card", title: "Graphics card", value: hasCard ? cardName : String(localized: "No Arc B580 or B570 found"), state: hasCard ? .good : .bad),
             Check(id: "sip", title: "System Integrity Protection", value: sipText, state: sipRelaxed ? .good : .bad,
                   help: sipRelaxed ? "" : "The driver needs csr-active-config in your EFI: see the install guide."),
             Check(id: "amfi", title: "AMFI boot-arg", value: amfiRelaxed ? "Relaxed" : "Not set", state: amfiRelaxed ? .good : .bad,

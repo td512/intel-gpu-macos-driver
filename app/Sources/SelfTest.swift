@@ -17,7 +17,7 @@ func renderSnapshots(into folder: String) {
     if let folder = selfTestEFIFolder, let package = manager.package, let script = efiScript(for: package) {
         manager.efiTarget = .folder(folder)
         manager.efi = efiStatus(script: script, package: package, target: manager.efiTarget)
-        for action in [EFIAction.apply, .settings, .safari, .undo] {
+        for action in [EFIAction.apply, .settings, .safari, .settingsSafari, .undo] {
             manager.efiPlans[action] = efiPlan(script: script, package: package, target: manager.efiTarget, action.planArgument!)
         }
         manager.efiNotice = EFINotice.after(.install, status: manager.efi)
@@ -43,6 +43,13 @@ func renderSnapshots(into folder: String) {
         m.package = manager.package ?? Package(directory: URL(fileURLWithPath: "/tmp/intel-gpu-macos-driver-0.1.4-tahoe"))
     }
     setupDone.facts.installedVersion = "0.1.4"; setupDone.facts.kextLoaded = true
+    // its first page: with the EFI found (the self-test's fake EFI and its plans), and when OpenCore recorded none
+    let setupEFI = Manager(), setupChoose = Manager()
+    for m in [setupEFI, setupChoose] {
+        m.facts.architecture = "x86_64"; m.facts.macOSMajor = 26; m.facts.hasCard = true; m.package = setupDone.package
+    }
+    setupEFI.efi = manager.efi; setupEFI.efiPlans = manager.efiPlans; setupEFI.efiTarget = manager.efiTarget
+    setupChoose.efi = choosing.efi
     setupDone.testResults = [TestResult(title: "Metal", value: "ok", state: .good)]
     // the Overview page on a working B580 machine, and on one with a newer release out
     let working = Manager(), outdated = Manager()
@@ -82,6 +89,8 @@ func renderSnapshots(into folder: String) {
     print("setup steps: driver page \(setupDriver.setupStep.number), last page \(setupDone.setupStep.number)")
     let pages: [(String, AnyView, CGFloat)] = [
         ("setup-driver", AnyView(SetupView(close: {}).environmentObject(setupDriver).background(Color(nsColor: .windowBackgroundColor))), 520), ("setup-done", AnyView(SetupView(close: {}).environmentObject(setupDone).background(Color(nsColor: .windowBackgroundColor))), 520),
+        ("setup-opencore", AnyView(SetupView(close: {}).environmentObject(setupEFI).background(Color(nsColor: .windowBackgroundColor))), 520),
+        ("setup-choose", AnyView(SetupView(close: {}).environmentObject(setupChoose).background(Color(nsColor: .windowBackgroundColor))), 520),
         ("system", AnyView(SystemView().environmentObject(manager)), 640), ("system-working", AnyView(SystemView().environmentObject(working)), 640),
         ("system-update", AnyView(SystemView().environmentObject(outdated)), 640),
         ("monitor", AnyView(MonitorView(model: monitor).environmentObject(working)), 640),

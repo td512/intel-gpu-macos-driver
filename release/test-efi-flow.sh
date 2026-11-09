@@ -233,5 +233,16 @@ efi --safari-plan > "$ROOT/out" 2>&1; hasnt "nothing left for Safari" "$ROOT/out
 efi --undo > "$ROOT/out" 2>&1 || { bad "--undo of the Safari setting exited with an error"; cat "$ROOT/out"; }
 cmp -s "$C" "$ROOT/config.sbm" && ok "--undo of the Safari setting: config.plist back" || bad "--undo of the Safari setting"
 
+# stage 2 and the Safari setting as one change (the setup assistant's first step with Safari chosen): one backup, one undo
+cp "$ROOT/config.stage1" "$C"; plutil -replace Misc.Security.SecureBootModel -string Default "$C"; cp "$C" "$ROOT/config.both"
+efi --settings-safari-plan > "$ROOT/bplan" 2>&1 || bad "--settings-safari-plan exited with an error"
+has "settings+safari plan: SIP" "$ROOT/bplan" "csr-active-config: 0x0 -> 0x803"
+has "settings+safari plan: SecureBootModel" "$ROOT/bplan" "SecureBootModel: Default -> Disabled"
+efi --settings-safari-apply --expect "$(hash "$ROOT/bplan")" > "$ROOT/out" 2>&1 || { bad "--settings-safari-apply exited with an error"; cat "$ROOT/out"; }
+expect "after --settings-safari-apply: settings" settings_changes 0
+expect "after --settings-safari-apply: SecureBootModel" secure_boot_model Disabled
+efi --undo > "$ROOT/out" 2>&1 || { bad "--undo of settings+Safari exited with an error"; cat "$ROOT/out"; }
+cmp -s "$C" "$ROOT/config.both" && ok "--undo of settings+Safari: config.plist back in one step" || bad "--undo of settings+Safari"
+
 echo "== $fails failure(s)"
 exit $fails

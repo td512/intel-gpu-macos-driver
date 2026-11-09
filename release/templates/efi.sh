@@ -11,6 +11,8 @@
 #   ./efi.sh --safari-plan          what --safari-apply would change: Misc > Security > SecureBootModel = Disabled, which
 #                                   the optional system-volume copy (Safari on the GPU) needs. Changes nothing.
 #   sudo ./efi.sh --safari-apply    back up the whole EFI folder, then make that change
+#   ./efi.sh --settings-safari-plan / sudo ./efi.sh --settings-safari-apply   both of the above as one change (one backup,
+#                                   one restart: the setup assistant's first step with Safari chosen)
 #   ./efi.sh --undo-plan            what --undo would put back
 #   sudo ./efi.sh --undo            put back, from the last backup, the files the last change replaced
 #   sudo ./efi.sh --mount           mount the EFI partition (macOS mounts it read-write; it stays mounted until restart)
@@ -32,15 +34,15 @@ KEXT=IntelXe.kext OLDKEXT=B580.kext SSDT=SSDT-ARCOFF.aml   # intelxe-rename: kee
 CMD="" EFIDIR="" PART="" EXPECT=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --status|--plan|--apply|--settings-plan|--settings-apply|--safari-plan|--safari-apply|--undo-plan|--undo|--mount) CMD=$1; shift;;
+        --status|--plan|--apply|--settings-plan|--settings-apply|--safari-plan|--safari-apply|--settings-safari-plan|--settings-safari-apply|--undo-plan|--undo|--mount) CMD=$1; shift;;
         --package) PKG=$(cd "$2" && pwd); shift 2;;
         --efi) EFIDIR=$(cd "$2" && pwd); shift 2;;
         --part) PART=$(printf '%s' "$2" | tr a-f A-F); shift 2;;
         --expect) EXPECT=$2; shift 2;;
-        *) sed -n '3,24p' "$0"; exit 2;;
+        *) sed -n '3,26p' "$0"; exit 2;;
     esac
 done
-[ -n "$CMD" ] || { sed -n '3,24p' "$0"; exit 2; }
+[ -n "$CMD" ] || { sed -n '3,26p' "$0"; exit 2; }
 if [ -n "$PART" ] && ! [[ "$PART" =~ ^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$ ]]; then
     echo "--part takes a partition UUID (see --status, candidate=), not a disk name"; exit 2
 fi
@@ -424,17 +426,20 @@ candidates() { # every EFI partition, "candidate=UUID|device|disk|size|mount poi
 
 case $CMD in
     --status) status;;
-    --plan|--settings-plan|--safari-plan|--undo-plan)
+    --plan|--settings-plan|--safari-plan|--settings-safari-plan|--undo-plan)
         need_efi
-        case $CMD in --plan) plan_files;; --settings-plan) plan_settings;; --safari-plan) plan_safari;; --undo-plan) plan_undo;; esac
+        case $CMD in --plan) plan_files;; --settings-plan) plan_settings;; --safari-plan) plan_safari;;
+            --settings-safari-plan) plan_settings; plan_safari;; --undo-plan) plan_undo;; esac
         print_plan;;
-    --apply|--settings-apply|--safari-apply)
+    --apply|--settings-apply|--safari-apply|--settings-safari-apply)
         need_root; need_efi
-        case $CMD in --apply) plan_files; verify_package;; --settings-apply) plan_settings;; --safari-apply) plan_safari;; esac
+        case $CMD in --apply) plan_files; verify_package;; --settings-apply) plan_settings;; --safari-apply) plan_safari;;
+            --settings-safari-apply) plan_settings; plan_safari;; esac
         check_expect
         print_plan
         [ ${#OPS[@]} -gt 0 ] || { echo "== nothing to change"; exit 0; }
-        B=""; case $CMD in --apply) backup "IntelXe files";; --settings-apply) backup settings;; --safari-apply) backup "Safari setting";; esac
+        B=""; case $CMD in --apply) backup "IntelXe files";; --settings-apply) backup settings;; --safari-apply) backup "Safari setting";;
+            --settings-safari-apply) backup "settings and Safari setting";; esac
         run_ops
         echo "== done. Restart to use it. To go back: sudo $0 --undo${PART:+ --part $PART}"
         ;;

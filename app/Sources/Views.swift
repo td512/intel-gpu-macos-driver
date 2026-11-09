@@ -97,7 +97,7 @@ final class Manager: ObservableObject {
             }
             var plans: [EFIAction: EFIPlan] = [:]
             if status.readable && status.isOpenCore {
-                for action in [EFIAction.apply, .settings, .safari, .undo] {
+                for action in [EFIAction.apply, .settings, .safari, .settingsSafari, .undo] {
                     if let argument = action.planArgument, let plan = efiPlan(script: script, package: package, target: target, argument) {
                         plans[action] = plan
                     }
@@ -636,7 +636,7 @@ struct StatusHeader: View {
                 .frame(width: 58, height: 58)
                 .background(state.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
-                Text(f.hasCard ? "Intel Arc B580" : f.metalDevice.isEmpty ? String(localized: "No Arc B580 found") : f.metalDevice)
+                Text(f.hasCard ? f.cardName.components(separatedBy: " (").first ?? f.cardName : f.metalDevice.isEmpty ? String(localized: "No Arc B580 or B570 found") : f.metalDevice)
                     .font(.title2.weight(.semibold)).lineLimit(1)
                 Text(line(state)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(line(state))
             }
@@ -721,7 +721,7 @@ struct SystemView: View {
                     let bad = manager.testResults.filter { $0.state == .bad }.count, warn = manager.testResults.filter { $0.state == .warning }.count
                     OverviewCard(title: "Last test", symbol: "checkmark.seal", tint: manager.testResults.isEmpty ? neutralTint : bad > 0 ? .red : warn > 0 ? .orange : .green,
                                  value: manager.testResults.isEmpty ? String(localized: "Not run yet") : bad > 0 ? String(localized: "\(bad) failed") : warn > 0 ? String(localized: "\(warn) below expected") : String(localized: "All passed"),
-                                 detail: manager.testResults.isEmpty ? String(localized: "About 25 seconds, on the Tests page.") : String(localized: "\(manager.testResults.count) checks this session.")) {
+                                 detail: manager.testResults.isEmpty ? String(localized: "About 25 seconds, on the Tests page.") : (manager.testResults.count == 1 ? String(localized: "1 check this session.") : String(localized: "\(manager.testResults.count) checks this session."))) {
                         Button(manager.testResults.isEmpty ? "Run the GPU test" : "Open the Tests page") { manager.requestedSection = .tests }.controlSize(.small)
                     }
                 }

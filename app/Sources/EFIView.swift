@@ -22,13 +22,14 @@ extension EFIAction {
         case .apply: return String(localized: "Make these changes")
         case .settings: return String(localized: "Change these settings")
         case .safari: return String(localized: "Turn Apple Secure Boot off")
+        case .settingsSafari: return String(localized: "Change these settings")
         case .undo: return String(localized: "Undo the last EFI change")
         }
     }
     var explanation: String {
         switch self {
         case .mount: return String(localized: "Mounts the partition so that its files can be read and changed. Nothing is written to it.")
-        case .apply, .settings, .safari: return String(localized: "Backs up the whole EFI folder first, then makes exactly these changes. If the EFI changed since this list was made, nothing is written. Restart afterwards.")
+        case .apply, .settings, .safari, .settingsSafari: return String(localized: "Backs up the whole EFI folder first, then makes exactly these changes. If the EFI changed since this list was made, nothing is written. Restart afterwards.")
         case .undo: return String(localized: "Puts back, from the last backup, the files that change replaced. The backup stays. Restart afterwards.")
         }
     }
@@ -269,7 +270,7 @@ struct EFIView: View {
 
     var cardText: String {
         switch efi["card_acpi_path"] {
-        case "": return String(localized: "No Arc B580 found")
+        case "": return String(localized: "No Arc B580 or B570 found")
         case "none": return String(localized: "The card's port has no ACPI name")
         case let path:
             return efi["ssdt_package_names_card"] == "yes" ? String(localized: "\(path) (the package's table is for it)")

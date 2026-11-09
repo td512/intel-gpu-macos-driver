@@ -22,7 +22,7 @@ extension Manager {
         let f = facts
         if f.architecture != "x86_64" { return .blocked(String(localized: "This Mac is not an x86_64 machine: the driver is for Intel-based hackintoshes.")) }
         if f.macOSMajor != 26 && f.macOSMajor != 15 { return .blocked(String(localized: "The driver has packages for macOS 26 Tahoe and macOS 15 Sequoia; this is macOS \(f.macOS).")) }
-        if !f.hasCard { return .blocked(String(localized: "No Arc B580 was found on the PCI bus. Check that the card is seated, has its power cables, and that the BIOS has Above 4G decoding and Resizable BAR on.")) }
+        if !f.hasCard { return .blocked(String(localized: "No Arc B580 or B570 was found on the PCI bus. Check that the card is seated, has its power cables, and that the BIOS has Above 4G decoding and Resizable BAR on.")) }
         if !(f.sipRelaxed && f.amfiRelaxed) { return .efiSettings }
         if f.installedVersion == nil && !f.driverFilesPresent { return .driver }
         if !f.kextLoaded { return .efiKext }
@@ -39,6 +39,11 @@ final class SetupState: ObservableObject {
     @Published var downloading = false
     @Published var confirmInstall = false
     @Published var loginCheck = loginCheckEnabled()
+    /// step 1 with the Safari setting (SecureBootModel) in the same EFI change: one backup, one restart
+    @Published var withSafari = false
+    @Published var confirmSafariEFI = false
+    @Published var confirmSSV: SSVAction?
+    @Published var downloadingZink = false
 }
 
 struct SetupView: View {
@@ -92,7 +97,10 @@ struct SetupView: View {
         case .efiSettings:
             Text("1. Prepare OpenCore").font(.headline)
             Text("The driver needs System Integrity Protection relaxed and AMFI's boot-arg in your OpenCore config, plus a few quirks. The assistant writes them into the EFI you booted from, after a backup, and shows every change before it makes it.")
-            efiStep(.settings)
+            CaptionedToggle(title: "Also prepare Safari on the GPU", caption: "Turns OpenCore's Apple Secure Boot off in the same change: no extra restart later.",
+                            detail: "Safari draws on the GPU only with a second copy of the Metal driver on the system volume, which the last page can install. Apple Secure Boot refuses to boot such a system volume, so it has to be off. It is a macOS security feature; leave this off if you do not want Safari on the GPU. The EFI page can change it later.",
+                            isOn: $st.withSafari)
+            efiStep(st.withSafari ? .settingsSafari : .settings)
         case .driver:
             Text("2. Install the driver").font(.headline)
             Text("The package puts the framebuffer, the accelerator and the Metal driver into /Library and rebuilds the kernel collection (a few minutes). It backs up what it replaces.")
@@ -135,17 +143,19 @@ struct SetupView: View {
             } else {
                 Label(String(localized: "\(bad) test(s) failed. The Report page shows which, and makes a diagnostics report for a bug report."), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
             }
-            Text("Optional next steps:").padding(.top, 6)
-            let safariDone = manager.ssv.state == .inUse || manager.ssv.state == .notPackage
+            Text("Optional extras:").padding(.top, 6)
+            safariExtra
+            zinkExtra
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                 NextStepCard(symbol: "display", title: "HiDPI sizes and Variable refresh", caption: Text("Display page")) { manager.requestedSection = .display; close() }
-                NextStepCard(symbol: "safari", title: "Safari on the GPU",
-                             caption: safariDone ? Text("Installed.") : Text("Driver page. Needs Apple Secure Boot off first."),
-                             detail: safariDone ? nil : Text("Without it Safari draws in software. It needs OpenCore's Apple Secure Boot off first (EFI page); a macOS update removes it again.")) {
-                    manager.requestedSection = .driver; close()
-                }
-                NextStepCard(symbol: "gamecontroller", title: "Minecraft and other LWJGL games through Zink", caption: Text("OpenGL page")) { manager.requestedSection = .zink; close() }
                 NextStepCard(symbol: "gauge.medium", title: "GPU clock and temperature in the menu bar", caption: Text("Monitor page")) { manager.requestedSection = .monitor; close() }
+            }
+            if manager.rebootNeeded {
+                HStack {
+                    Label("Restart to use the change.", systemImage: "arrow.clockwise.circle").foregroundStyle(.orange)
+                    Spacer()
+                    Button("Restart now") { manager.restartNow() }.buttonStyle(.borderedProminent)
+                }
             }
             CaptionedToggle(title: "Check the driver at login", caption: "A dialog after login only when something needs attention, such as a macOS update that removed the system-volume copy.",
                             isOn: Binding(get: { st.loginCheck }, set: { setLoginCheck($0); st.loginCheck = loginCheckEnabled() }))
@@ -194,7 +204,7 @@ struct SetupView: View {
             } else if e.found {
                 Text("Reading the EFI…").foregroundStyle(.secondary)
             } else {
-                Button("Open the EFI page to choose it") { manager.requestedSection = .efi; close() }
+                efiChooser
             }
             Text("Then restart and open this assistant again: it continues from there.").font(.callout).foregroundStyle(.secondary)
             if manager.rebootNeeded { Button("Restart now") { manager.restartNow() }.buttonStyle(.borderedProminent) }
@@ -209,8 +219,106 @@ struct SetupView: View {
             Label(String(localized: "OpenCore EFI: \(e["efi_description"].isEmpty ? e["efi_partition"] : e["efi_description"])") + (usb ? String(localized: " (USB stick: that is fine)") : ""),
                   systemImage: usb ? "externaldrive" : "internaldrive")
         } else {
-            Label("The EFI you booted from was not found yet: choose it on the EFI page.", systemImage: "questionmark.circle").foregroundStyle(.orange)
+            Label("OpenCore did not record which EFI it booted from (it does from step 3 on): choose it below.", systemImage: "questionmark.circle").foregroundStyle(.orange)
         }
+    }
+
+    /// The EFI partitions efi.sh found, to choose from here when OpenCore's boot-path is missing (a fresh EFI has
+    /// ExposeSensitiveData without it), or a folder such as a USB stick's.
+    @ViewBuilder var efiChooser: some View {
+        let candidates = manager.efi.candidates
+        if candidates.isEmpty {
+            Text("No EFI partition was found. Choose the EFI folder instead, for example on a USB stick.").font(.callout)
+        } else {
+            ForEach(candidates) { c in
+                Button { manager.chooseEFIPartition(c.uuid) } label: {
+                    Label(c.label + (c.openCore == "yes" ? " · OpenCore" : ""), systemImage: "internaldrive")
+                }
+            }
+        }
+        Button("Choose a folder…") { manager.pickEFIFolder() }
+    }
+
+    /// Safari on the GPU, from the last page: Apple Secure Boot off in the EFI (a restart), then the system-volume copy
+    /// (a restart). The same scripts and confirmations as the EFI and Driver pages.
+    @ViewBuilder var safariExtra: some View {
+        let s = manager.ssv, e = manager.efi
+        let done = s.state == .inUse || s.state == .notPackage
+        let secureBootOff = e["secure_boot_model"] == "Disabled"
+        ExtraRow(symbol: "safari", title: "Safari on the GPU",
+                 caption: done ? Text("Installed.")
+                     : !secureBootOff ? Text("First Apple Secure Boot goes off in the EFI, then a restart.")
+                     : Text("Then a second copy of the Metal driver goes on the system volume (a few minutes), and a restart. A macOS update removes it again."),
+                 detail: Text("Without it Safari works, drawing in software. Apple Secure Boot is a macOS security feature that refuses a system volume with a changed seal.")) {
+            if done {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            } else if !secureBootOff {
+                if !e.found {
+                    Button("Open the EFI page") { manager.requestedSection = .efi; close() }
+                } else if !e.mounted && e["efi_source"] != "folder" {
+                    Button("Mount the EFI") { manager.performEFI(.mount) }
+                } else {
+                    Button(EFIAction.safari.title) { st.confirmSafariEFI = true }.disabled(manager.efiPlans[.safari]?.changes != true)
+                }
+            } else if s.packageScript == nil {
+                Button("Driver page") { manager.requestedSection = .driver; close() }
+            } else {
+                let action: SSVAction = s.state == .notUsed ? .use : .install
+                Button(action.title) { st.confirmSSV = action }
+            }
+        }
+        .sheet(isPresented: $st.confirmSafariEFI) {
+            EFIConfirmSheet(action: .safari, plan: manager.efiPlans[.safari], disk: e["efi_description"]) { manager.performEFI(.safari) }
+        }
+        .alert(st.confirmSSV?.title ?? "", isPresented: Binding(get: { st.confirmSSV != nil }, set: { if !$0 { st.confirmSSV = nil } }), presenting: st.confirmSSV) { action in
+            Button(action.title) { manager.performSSV(action) }
+            Button("Cancel", role: .cancel) {}
+        } message: { action in Text(action.explanation) }
+    }
+
+    /// Zink for Java games, from the last page: download and install it, then the switch that makes LWJGL 3 games use it.
+    @ViewBuilder var zinkExtra: some View {
+        let f = manager.facts
+        ExtraRow(symbol: "gamecontroller", title: "Zink for Java games",
+                 caption: Text("Minecraft and other LWJGL games draw through Vulkan: much faster. Native Mac apps and OpenCL are not affected."),
+                 detail: Text("Zink is Mesa's OpenGL on Vulkan. The switch sets it for every LWJGL 3 Java application started afterwards; the OpenGL page has the test and the per-version option.")) {
+            if !f.zinkInstalled {
+                if manager.zinkPackage == nil {
+                    Button("Download Zink") {
+                        st.downloadingZink = true
+                        Task { await manager.downloadLatest(zink: true); st.downloadingZink = false }
+                    }.disabled(st.downloadingZink || manager.release == nil)
+                } else {
+                    Button("Install Zink") { manager.performZink(.install) }
+                }
+            } else {
+                Toggle("Use by default", isOn: Binding(get: { f.zinkGlobal }, set: { manager.performZink($0 ? .globalOn : .globalOff) }))
+                    .toggleStyle(.switch).fixedSize()
+            }
+        }
+    }
+}
+
+/// An optional extra on the assistant's last page: icon, what it is and where it stands, and its action on the right.
+struct ExtraRow<Trailing: View>: View {
+    let symbol: String
+    let title: LocalizedStringKey
+    let caption: Text
+    var detail: Text?
+    @ViewBuilder let trailing: () -> Trailing
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: symbol).font(.title2).foregroundStyle(Color.accentColor).frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.callout.weight(.medium))
+                caption.font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .help(detail ?? caption)
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tintedCard(neutralTint)
     }
 }
 
