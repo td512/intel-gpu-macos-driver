@@ -288,6 +288,9 @@ extern int gGucRc, gRc6Ctl, gFwHold, gMmioAddr, gRangeInval, gHugePages, gCtxPol
 // rb7o: debug.intelxe.vcs_single (boot-arg -intelxe_vcssingle): 1 = new video queues on their first placement only (before rb7o)
 extern int gVcsSingle;
 extern int gTlbEveryBatch;   // rb7k
+extern int gJobTime;         // debug.intelxe.jobtime (xe_core.cpp)
+int xeJobTimeSet(int on);
+int xeJobTimeString(char *b, size_t len, int fwHold);
 // rb7p: boot-arg -intelxe_nowhitelist: 0 = no RING_FORCE_TO_NONPRIV programming (as rb7o); 1 = xe_reg_whitelist.c (default)
 extern int gNonpriv;
 

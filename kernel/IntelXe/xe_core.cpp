@@ -2429,11 +2429,87 @@ static uint32_t pipeControl(uint32_t *dw, uint32_t n, uint32_t f0, uint32_t f1, 
 // render/compute interrupts were handled before the seqno (system memory, as Linux master keeps it since 3954313b39e4)
 // was visible, and those waiters slept a whole 2 ms safety slice (Phase 1 gate, 2026-10-29); copy and video, whose
 // seqno MI_FLUSH_DW writes from the command streamer, never did.
+// ─── job timing (debug.intelxe.jobtime, off by default) ──────────────────────────────────────────────────────────
+// Where a job's round trip goes, in the engine's own RING_TIMESTAMP clock: the ring stores the timestamp at the job's
+// start, after the cache invalidation, when the batch returns and after the end-of-job flush (MI_STORE_REGISTER_MEM into
+// a 16-byte slot per queue), and the CPU reads the same register at the exec ioctl, just before the GuC is told, when
+// the interrupt is handled and when a syncobj waiter wakes. A job is measured at the queue's next submit when it has
+// completed by then (one job at a time, as mtl_lat split runs them). The CPU reads need the GT awake: run with
+// debug.intelxe.fw_hold=1 (RC6 changes nothing measurable here, 2026-11-09). Writing jobtime restarts the statistics.
+int gJobTime = 0;
+static IOBufferMemoryDescriptor *gJtMem;
+static uint32_t gJtG;
+struct JtSlot { uint32_t seq, gen, execTs, subTs; bool armed; };
+static JtSlot *gJtSlots;
+static volatile uint32_t gJtEngBase, gJtExecTs, gJtIrqTs, gJtWakeTs;
+static uint64_t gJtN, gJtSkipped, gJtSum[7], gJtMax[7];
+static uint32_t jtNow(uint32_t base) { return gDev->mmio(base + 0x358); }   // RING_TIMESTAMP (low dword)
+static uint32_t jtTicksToNs(uint32_t t) { return gRefClock ? (uint32_t)((uint64_t)t * 1000000000ull / gRefClock) : 0; }   // gRefClock: Hz
+static void jtSrm(uint32_t *dw, uint32_t &n, uint32_t addr) {
+	dw[n++] = MI_INSTR(0x24) | 1u << 22 | 1u << 19 | 2;   // MI_STORE_REGISTER_MEM | USE_GGTT | ADD_CS_OFFSET
+	dw[n++] = 0x358;                                      // RING_TIMESTAMP(0)
+	dw[n++] = addr;
+	dw[n++] = 0;
+}
+// at the queue's next submit (gSchedLock): the previous job's timestamps, if it has completed
+static void jtCollect(XeQueue *q) {
+	JtSlot &s = gJtSlots[q->slot];
+	if (!s.armed) return;
+	s.armed = false;
+	if (s.gen != gSlotGen[q->slot] || (int32_t)(seqnoOf(q->slot) - s.seq) < 0) { gJtSkipped++; return; }
+	auto *t = static_cast<volatile uint32_t *>(gJtMem->getBytesNoCopy()) + q->slot * 4;
+	flushRange(const_cast<uint32_t *>(t), 16);
+	const uint32_t a = t[0], b = t[1], c = t[2], d = t[3], irq = gJtIrqTs, wake = gJtWakeTs;
+	// exec ioctl -> GuC told, -> ring start, invalidation, batch, end flush, -> interrupt handled, -> waiter awake
+	const uint32_t v[7] = { s.subTs - s.execTs, a - s.subTs, b - a, c - b, d - c, irq - d, wake - irq };
+	for (uint32_t i = 0; i < 7; i++) if (v[i] > 0x7fffffff) { gJtSkipped++; return; }   // out of order: not this job's
+	gJtN++;
+	for (uint32_t i = 0; i < 7; i++) { gJtSum[i] += v[i]; if (v[i] > gJtMax[i]) gJtMax[i] = v[i]; }
+}
+int xeJobTimeSet(int on) {
+	if (!gDev || !gDev->up) return ENXIO;
+	if (on && !gJtMem) {
+		IOBufferMemoryDescriptor *m = gDev->allocSys(kSlots * 16, false);
+		uint32_t g = 0;
+		IOLockLock(gResLock);
+		int err = m ? ggttRangeAlloc(kSlots * 16, 0x1000, false, &g) : ENOMEM;
+		IOLockUnlock(gResLock);
+		if (!err) err = gDev->ggttMapMem(m, g);
+		JtSlot *sl = err ? nullptr : static_cast<JtSlot *>(IOMalloc(kSlots * sizeof(JtSlot)));
+		if (sl) bzero(sl, kSlots * sizeof(JtSlot));
+		if (err || !sl) { OSSafeReleaseNULL(m); return err ? err : ENOMEM; }
+		gJtSlots = sl; gJtG = g;
+		__asm__ volatile("" : : : "memory");
+		gJtMem = m;
+	}
+	IOLockLock(gSchedLock);
+	gJobTime = on ? 1 : 0;
+	gJtN = gJtSkipped = 0;
+	bzero(gJtSum, sizeof gJtSum); bzero(gJtMax, sizeof gJtMax);
+	if (gJtSlots) for (uint32_t i = 0; i < kSlots; i++) gJtSlots[i].armed = false;
+	IOLockUnlock(gSchedLock);
+	return 0;
+}
+int xeJobTimeString(char *b, size_t len, int fwHold) {
+	static const char *const nm[7] = { "exec->guc", "guc->ring start", "invalidate", "batch", "end flush", "->irq handled", "irq->waiter" };
+	IOLockLock(gSchedLock);
+	int k = snprintf(b, len, "jobtime %d, refclk %u Hz, jobs %llu, skipped %llu%s; average (max) us:", gJobTime, gRefClock,
+		gJtN, gJtSkipped, fwHold ? "" : " (fw_hold is 0: CPU-side reads may be wrong)");
+	for (uint32_t i = 0; i < 7 && k > 0 && (size_t)k < len; i++) {
+		const uint64_t avg = gJtN ? jtTicksToNs((uint32_t)(gJtSum[i] / gJtN)) : 0, mx = jtTicksToNs((uint32_t)gJtMax[i]);
+		k += snprintf(b + k, len - (size_t)k, " %s %llu.%llu (%llu.%llu)", nm[i], avg / 1000, avg % 1000 / 100, mx / 1000, mx % 1000 / 100);
+	}
+	IOLockUnlock(gSchedLock);
+	return k;
+}
+
 static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl, uint32_t nInl, uint32_t seq, bool flush,
 	uint32_t *dw) {
 	uint32_t n = 0;
 	const uint32_t seqAddr = seqnoG + q->slot * kSlotBytes;
 	const bool rc = q->eng->drmClass == 0 || q->eng->drmClass == 4, compute = q->eng->drmClass == 4;
+	const uint32_t jt = gJobTime && gJtMem && !q->eng->gt ? gJtG + q->slot * 16 : 0;   // job timing: render GT only
+	if (jt) jtSrm(dw, n, jt);
 	if (rc) {
 		dw[n++] = MI_INSTR(0x5) | 1u << 8 | 1;   // preparser disable
 		uint32_t f1 = PC_CMD_INV | PC_INSTR_INV | PC_TEX_INV | PC_VF_INV | PC_CONST_INV | PC_STATE_INV | PC_QW_WRITE |
@@ -2449,6 +2525,7 @@ static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl,
 		dw[n++] = seq;
 		dw[n++] = MI_INSTR(0x5) | 1u << 8;
 	}
+	if (jt) jtSrm(dw, n, jt + 4);
 	// rb7o: a media queue may run on any engine of its logical mask: the engine this job starts on, as xe's
 	// setup_utilization_wa stores it (ENGINE_ID read relative to the executing engine, MI_SRM_ADD_CS_OFFSET), before the
 	// start seqno so a reader that sees the seqno sees this job's engine or a later one's
@@ -2474,6 +2551,7 @@ static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl,
 		dw[n++] = (uint32_t)(batch >> 32);
 	}
 	for (uint32_t i = 0; i < nInl; i++) dw[n++] = inl[i];   // kernel commands in the ring itself (VRAM clears)
+	if (jt) jtSrm(dw, n, jt + 8);
 	dw[n++] = MI_ARB_ON_OFF;                   // MI_ARB_DISABLE
 	if (rc) {
 		// emit_render_cache_flush: on Xe2 also the untyped dataport (LSC) flush, which HDC_PIPELINE_FLUSH no longer
@@ -2481,6 +2559,7 @@ static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl,
 		uint32_t f1 = PC_TILE_FLUSH | PC_RT_FLUSH | PC_DEPTH_FLUSH | PC_DC_FLUSH | PC_FLUSH_EN | PC_CS_STALL;
 		if (compute) f1 &= ~PC_3D_ENGINE;
 		n = pipeControl(dw, n, PC0_HDC_FLUSH | PC0_UNTYPED_DP_FLUSH, f1, 0, 0);
+		if (jt) jtSrm(dw, n, jt + 12);
 		dw[n++] = MI_STORE_DATA_IMM | MI_SDI_GGTT | MI_SDI_NUM_DW(1);   // emit_store_imm_ggtt
 		dw[n++] = seqAddr;
 		dw[n++] = 0;
@@ -2538,6 +2617,12 @@ static void ringWrite(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq) 
 	lrcSync(q, regs + CTX_RING_TAIL, 4);
 	if (gResetting && !q->eng->gt) return;   // the context is scheduled when it is registered again
 	uint32_t act[2] = {0x1000, q->gucId};
+	if (gJobTime && gJtMem && !q->eng->gt) {
+		jtCollect(q);
+		JtSlot &s = gJtSlots[q->slot];
+		gJtEngBase = q->eng->base;
+		s.seq = seq; s.gen = gSlotGen[q->slot]; s.execTs = gJtExecTs; s.subTs = jtNow(q->eng->base); s.armed = true;
+	}
 	gDev->guc(act, 2, q->eng->gt);
 }
 
@@ -2999,6 +3084,7 @@ void xeShutdown() {
 // Called by the interrupt handler after GT interrupts: runs the worker if jobs wait or frees wait for a TLB completion.
 void xeIrqEvent(bool gtEvent) {
 	if (!gtEvent) return;
+	if (gJobTime && gJtEngBase) gJtIrqTs = jtNow(gJtEngBase);
 	wakeAll();
 	if (gSchedHead || gNDef) schedKick();
 }
@@ -6763,6 +6849,7 @@ static int syncobjWait(XeClientState *c, uint64_t handles, uint64_t points, uint
 		*first = 0;
 		return all && ok == count;
 	});
+	if (!err && gJobTime && gJtEngBase) gJtWakeTs = jtNow(gJtEngBase);
 	if (err != ETIME || gone || timeout == end) break;
 	clientQueueReport(c, round);
 	}
@@ -7642,6 +7729,7 @@ static int xeIoctlLocked(XeClientState *c, uint32_t request, uint8_t *buf) {
 			break;
 		}
 		case DRM_IOCTL_XE_EXEC: {
+			if (gJobTime && gJtEngBase) gJtExecTs = jtNow(gJtEngBase);
 			auto *x = reinterpret_cast<drm_xe_exec *>(buf);
 			// xe_exec_ioctl: extensions, pad and reserved zero (WAS: not checked)
 			if (x->extensions || x->pad[0] || x->pad[1] || x->pad[2] || x->reserved[0] || x->reserved[1]) return EINVAL;

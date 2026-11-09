@@ -371,6 +371,20 @@ static int fwHoldHandler SYSCTL_HANDLER_ARGS {
 	return err;
 }
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, fw_hold, CTLTYPE_INT | CTLFLAG_RW, nullptr, 0, fwHoldHandler, "I", "1 holds GT and render forcewake (no RC6)");
+// debug.intelxe.jobtime / jobtime_stats: where a job's round trip goes, in GPU timestamps (xe_core.cpp, job timing).
+// Write 1 to start (or restart) the statistics, 0 to stop; run with fw_hold=1.
+static int jobTimeHandler SYSCTL_HANDLER_ARGS {
+	int v = gJobTime, err = sysctl_handle_int(oidp, &v, 0, req);
+	if (err || !req->newptr) return err;
+	return xeJobTimeSet(v);
+}
+SYSCTL_PROC(_debug_intelxe, OID_AUTO, jobtime, CTLTYPE_INT | CTLFLAG_RW, nullptr, 0, jobTimeHandler, "I", "1 = time each render-GT job in GPU timestamps (restarts the statistics)");
+static int jobTimeStatsHandler SYSCTL_HANDLER_ARGS {
+	char buf[640];
+	const int n = gDev ? xeJobTimeString(buf, sizeof buf, gFwHold) : snprintf(buf, sizeof buf, "no device");
+	return SYSCTL_OUT(req, buf, (size_t)(n > 0 && n < (int)sizeof buf - 1 ? n : (int)sizeof buf - 1) + 1);
+}
+SYSCTL_PROC(_debug_intelxe, OID_AUTO, jobtime_stats, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_ANYBODY, nullptr, 0, jobTimeStatsHandler, "A", "job timing averages");
 // debug.intelxe.dump: every value a report needs, read-only, in one call (tools/report/collect-macos.sh reads it first).
 // Format: "intelxe-dump 1", then "[section]" blocks: the integer tunables as name = value, the bring-up report
 // (debug.intelxe.state), interrupt/scheduler/TLB counters (stats), VRAM and BAR window use (vram) and the VRAM-shared
@@ -527,6 +541,8 @@ bool IntelXe::start(IOService *provider) {
 	sysctl_register_oid(&sysctl__debug_intelxe_stats);
 	sysctl_register_oid(&sysctl__debug_intelxe_vram);
 	sysctl_register_oid(&sysctl__debug_intelxe_sensors);
+	sysctl_register_oid(&sysctl__debug_intelxe_jobtime);
+	sysctl_register_oid(&sysctl__debug_intelxe_jobtime_stats);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram_mb);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram_stats);
@@ -629,6 +645,8 @@ void IntelXe::stop(IOService *provider) {
 	sysctl_unregister_oid(&sysctl__debug_intelxe_surfvram);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_vram);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_sensors);
+	sysctl_unregister_oid(&sysctl__debug_intelxe_jobtime_stats);
+	sysctl_unregister_oid(&sysctl__debug_intelxe_jobtime);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_stats);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_unbind_async);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_tlb_every_batch);
