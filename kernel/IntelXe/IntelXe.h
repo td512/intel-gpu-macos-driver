@@ -183,6 +183,7 @@ public:
 	IOMemoryMap *vramMap() { return bar2; }
 	uint32_t mmio(uint32_t off) { return rd(off); }
 	void mmioWrite(uint32_t off, uint32_t v) { wr(off, v); }
+	uint32_t mmioRead(uint32_t off) { return rd(off); }
 	int guc(const uint32_t *action, uint32_t len, uint32_t gt = 0) { return ctSend(action, len, gt); }
 	void gucPoll();
 	// GT power management (xe_core.cpp): SLPC parameters, GuC RC mode, host RC6 control, a GT forcewake hold

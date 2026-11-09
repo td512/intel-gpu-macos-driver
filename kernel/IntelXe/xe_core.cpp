@@ -2768,6 +2768,47 @@ static uint32_t jobKarma(XeQueue *q, uint32_t seq) {
 	return q->karma;
 }
 
+// rb8a: what the render and compute engines (one reset domain) were doing, written to the G2H log when the GuC resets a
+// context (CAT error, CONTEXT_RESET) and when a job the GuC never started is about to reset the GT: the GT fault
+// register (XEHP_RING_FAULT_REG: valid, type, source, engine; the address in XEHP_FAULT_TLB_DATA0/1), then per engine
+// ring head and tail, ACTHD, the context on it (RING_CURRENT_LRCA, matched to the queue whose LRC holds it), the
+// execlist status, MI_MODE, ESR and EIR, IPEHR and INSTDONE; then every primary-GT queue with work pending: completed,
+// started and submitted seqno and the GuC state the driver knows. gSchedLock.
+static void engineDump(const char *why) {
+	if (!gDev || !gDev->fwOn(true)) {
+		g2hLog("  dump (%s): no forcewake\n", why);
+		return;
+	}
+	const uint32_t f = gDev->mmioRead(0xcec4), d0 = gDev->mmioRead(0xceb8), d1 = gDev->mmioRead(0xcebc);
+	g2hLog("  dump (%s): fault 0x%08x va 0x%llx\n", why, f, (uint64_t)(d1 & 0xf) << 44 | (uint64_t)d0 << 12);
+	for (uint32_t i = 0; i < gNumEngines; i++) {
+		const XeEngine &e = gEngines[i];
+		if (e.gt || (e.drmClass != 0 && e.drmClass != 4)) continue;
+		const uint32_t b = e.base, lrca = gDev->mmioRead(b + 0x240);
+		const XeQueue *on = nullptr;
+		for (uint32_t k = 0; k < kMaxGucIds && !on; k++) {
+			const XeQueue *q = gQueueByGuc[0][k];
+			if (q && q != kBindQueue && (lrca & ~0xfffu) - q->lrcGgtt < q->lrcLen) on = q;
+		}
+		g2hLog("  %s%u h %x t %x acthd %x lrca %x (%s %d) el %x:%x mi %x esr %x eir %x ipehr %x idone %x\n",
+			e.drmClass ? "ccs" : "rcs", e.phys, gDev->mmioRead(b + 0x34), gDev->mmioRead(b + 0x30), gDev->mmioRead(b + 0x74), lrca,
+			on ? (on->kernel ? "kernel" : on->name) : "-", on ? (int)on->gucId : -1, gDev->mmioRead(b + 0x238), gDev->mmioRead(b + 0x234),
+			gDev->mmioRead(b + 0x9c), gDev->mmioRead(b + 0xb8), gDev->mmioRead(b + 0xb0), gDev->mmioRead(b + 0x68), gDev->mmioRead(b + 0x6c));
+	}
+	gDev->fwOn(false);
+	uint32_t n = 0;
+	for (uint32_t k = 0; k < kMaxGucIds && n < 6; k++) {
+		const XeQueue *q = gQueueByGuc[0][k];
+		if (!q || q == kBindQueue || q->closed) continue;
+		const uint32_t done = seqnoOf(q->slot);
+		if ((int32_t)(done - q->submitted) >= 0 && !q->tdr) continue;
+		n++;
+		g2hLog("  q %u %s class %u: done %u started %u submitted %u guc 0x%x tdr %u%s%s\n", q->gucId,
+			q->kernel ? "kernel" : q->name, q->cls, done, slotWord(q->slot, 1), q->submitted, gGucState[0][q->gucId], q->tdr,
+			q->banned ? " banned" : "", q->schedOffSent ? " off-sent" : "");
+	}
+}
+
 // ─── the submit worker (drm_sched's run_job work): ban requests from G2H, then every queue's FIFO in order ─────────
 static void workRun(thread_call_param_t, thread_call_param_t) {
 	gStats.workerRuns++;
@@ -2789,6 +2830,7 @@ static void workRun(thread_call_param_t, thread_call_param_t) {
 					g2hLog("  guc_id %u%s reset by the GuC: %s (pid %d), class %u, seqno %u done %u%s\n", q->gucId,
 						g ? " media" : "", q->kernel ? "kernel" : q->name, q->pid, q->cls, q->submitted, seqnoOf(q->slot),
 						queueWhere(q, wh, sizeof(wh)));
+					if (!g) engineDump("GuC reset");
 					if (q->kernel && !g) requestReset("kernel queue reset by the GuC");
 					else queueKickOff(q);
 				}
@@ -2956,6 +2998,7 @@ static void watchRun(thread_call_param_t, thread_call_param_t) {
 				if (!g && jobKarma(q, done + 1) <= 2) {
 					g2hLog("job timeout: queue guc_id %u (class %u) seqno %u never started in %llu ms: GT reset\n", q->gucId,
 						q->cls, done + 1, (now - q->wdSince) / 1000000);
+					engineDump("never started");
 					reset = "a job the GuC never started";
 					continue;
 				}
