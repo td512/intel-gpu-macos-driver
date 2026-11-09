@@ -26,6 +26,14 @@ LANG=C
 export LC_ALL LANG
 COPYFILE_DISABLE=1   # no AppleDouble ._ files in the tar
 export COPYFILE_DISABLE
+# Started through AppleScript's "with administrator privileges" (IntelXe Manager's administrator mode) the shell gets
+# SIGTERM (and others) ignored, and a non-interactive shell cannot trap a signal it got ignored: run_to's watchdog then
+# never stopped, so every command waited its full time limit (a report took minutes, 10 Nov). Start again once with the
+# signals back to their defaults; perl is part of macOS.
+if [ -z "${XE_SIGRESET:-}" ] && [ -x /usr/bin/perl ]; then
+	XE_SIGRESET=1; export XE_SIGRESET
+	exec /usr/bin/perl -e '$SIG{$_} = "DEFAULT" for qw(TERM INT HUP QUIT CHLD PIPE ALRM USR1 USR2); exec @ARGV or exit 127' /bin/sh "$0" "$@"
+fi
 umask 077
 
 DAYS=7
@@ -119,7 +127,8 @@ run_to() {
 	_w=$!
 	wait $_p
 	_rc=$?
-	kill -TERM $_w 2>/dev/null
+	# the watchdog and its sleep with KILL, which cannot be ignored (TERM can be, see the top)
+	pkill -KILL -P $_w 2>/dev/null; kill -KILL $_w 2>/dev/null
 	wait $_w 2>/dev/null
 	if [ -e "$_mark" ]; then rm -f "$_mark"; _rc=124; fi
 	return $_rc
