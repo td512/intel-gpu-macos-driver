@@ -57,11 +57,24 @@ func renderSnapshots(into folder: String) {
     installed.log = output + "== rebuilding the Auxiliary Kernel Collection (log: /tmp/auxkc)\n  ok    /Library/KernelCollections/AuxiliaryKernelExtensions.kc\n== done. Reboot.\n"
     var finishedRun = DriverRun(action: .install, logStart: 0); finishedRun.finished = true; finishedRun.succeeded = true; finishedRun.end = finishedRun.start.addingTimeInterval(207)
     installed.driverRun = finishedRun
+    // the Monitor page with five minutes of made-up readings: a game started half way
+    let monitor = MonitorModel()
+    monitor.live = false
+    let now = Date()
+    for i in 0..<300 {
+        let t = now.addingTimeInterval(Double(i - 299)), busy = i > 150
+        let wave = sin(Double(i) / 9)
+        monitor.clockHistory.append(MonitorPoint(t: t, v: busy ? 2650 + 150 * wave : (i % 40 < 6 ? 1900 : 0)))
+        monitor.tempHistory.append(MonitorPoint(t: t, v: busy ? 58 + Double(i - 150) / 15 + 1.5 * wave : 44 + 0.8 * wave))
+        monitor.fpsHistory.append(MonitorPoint(t: t, v: busy ? 160 + 18 * wave : (i % 40 < 6 ? 60 : 2)))
+    }
+    monitor.now = MonitorSample(fps: 171, actMHz: 2780, reqMHz: 2850, maxMHz: 2850, packageC: 67, vramC: 72, vramUsedMB: 3420, mode: "2560x1440, 180 Hz")
     print("setup steps: driver page \(setupDriver.setupStep.number), last page \(setupDone.setupStep.number)")
     let pages: [(String, AnyView, CGFloat)] = [
         ("setup-driver", AnyView(SetupView(close: {}).environmentObject(setupDriver).background(Color(nsColor: .windowBackgroundColor))), 520), ("setup-done", AnyView(SetupView(close: {}).environmentObject(setupDone).background(Color(nsColor: .windowBackgroundColor))), 520),
         ("system", AnyView(SystemView().environmentObject(manager)), 640), ("system-working", AnyView(SystemView().environmentObject(working)), 640),
         ("system-update", AnyView(SystemView().environmentObject(outdated)), 640),
+        ("monitor", AnyView(MonitorView(model: monitor).environmentObject(working)), 640),
         ("install-running", AnyView(BusyBar().environmentObject(installing).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 330),
         ("install-done", AnyView(BusyBar().environmentObject(installed).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 360),
         ("setup-installing", AnyView(SetupView(close: {}).environmentObject(installing.copySetup(from: setupDriver)).background(Color(nsColor: .windowBackgroundColor))), 520), ("driver", AnyView(DriverView().environmentObject(manager)), 640),

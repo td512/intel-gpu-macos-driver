@@ -577,3 +577,8 @@
 "Close" = "Kapat";
 "Nothing yet." = "Henüz bir şey yok.";
 "Full log" = "Günlüğün tamamı";
+
+/* Look and feel: the Monitor page's charts */
+"No readings yet" = "Henüz ölçüm yok";
+"The last five minutes" = "Son beş dakika";
+"Rises with motion on screen, a few when nothing moves." = "Ekranda hareket olunca yükselir, hiçbir şey kıpırdamazken birkaça düşer.";
