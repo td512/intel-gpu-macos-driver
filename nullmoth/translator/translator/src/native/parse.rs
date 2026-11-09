@@ -1056,8 +1056,14 @@ fn split_trailing_addrspace(s: &str) -> Result<(&str, u32), String> {
         return Ok((s, 0));
     };
     let digits = &s[open + " addrspace(".len()..s.len() - 1];
-    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+    if digits.contains(['(', ')']) {
+        // The closing parenthesis ends a function type's parameter list (`void (i32 addrspace(1)*)*`), not this
+        // pointer's address space.
         return Ok((s, 0));
+    }
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        // `i32 addrspace(x)*` is a malformed address space, not a generic pointer.
+        return Err(format!("native emitter: bad addrspace in `{s}*`"));
     }
     let space = digits
         .parse()
@@ -1230,6 +1236,11 @@ mod parse_tests {
         assert_eq!(parse_type("i32 addrspace(1)**").unwrap(), LlType::Ptr(0));
         assert!(parse_type("notatype*").is_err());
         assert!(parse_type("i32 addrspace(x)*").is_err());
+        assert!(parse_type("i32 addrspace()*").is_err());
+        assert_eq!(
+            parse_type("void (i32 addrspace(1)*)*").unwrap(),
+            LlType::Ptr(0)
+        );
     }
 
     #[test]
