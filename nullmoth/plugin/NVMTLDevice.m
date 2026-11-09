@@ -681,7 +681,29 @@ static const char *nvmtl_apple_hw_decoder(void)
     IOObjectRelease(it);
     return r;
 }
-static void nvmtl_intelxedec_register(void)
+// The GPU's marketing name, the "model" property of the PCI device above a registry entry ("Intel Arc B580 Graphics",
+// "Intel Arc B570 Graphics" from IntelXe), or nil.
+static NSString *nvmtl_registry_model(io_registry_entry_t e) {
+    if (!e) return nil;
+    CFTypeRef m = IORegistryEntrySearchCFProperty(e, kIOServicePlane, CFSTR("model"), kCFAllocatorDefault,
+                                                  kIORegistryIterateRecursively | kIORegistryIterateParents);
+    NSString *s = nil;
+    if (m && CFGetTypeID(m) == CFDataGetTypeID()) {
+        const char *b = (const char *)CFDataGetBytePtr(m); const CFIndex n = CFDataGetLength(m);
+        CFIndex len = 0; while (len < n && b[len]) len++;
+        s = [[NSString alloc] initWithBytes:b length:(NSUInteger)len encoding:NSUTF8StringEncoding];
+    } else if (m && CFGetTypeID(m) == CFStringGetTypeID()) s = [(__bridge NSString *)m copy];
+    if (m) CFRelease(m);
+    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return s.length && ![s.lowercaseString containsString:@"unknown"] ? s : nil;
+}
+// A codec's name as VideoToolbox lists it: the GPU's marketing name without " Graphics", then the codec
+// ("Intel Arc B570 AV1"); "Intel Arc <codec>" when the registry has no model.
+static NSString *nvmtl_codec_name(NSString *gpu, NSString *codec) {
+    NSString *g = [gpu hasSuffix:@" Graphics"] ? [gpu substringToIndex:gpu.length - 9] : gpu;
+    return [NSString stringWithFormat:@"%@ %@", g.length ? g : @"Intel Arc", codec];
+}
+static void nvmtl_intelxedec_register(NSString *gpu)
 {
     const char *me = getprogname();
     if (nvmtl_codec_opted_out("NVMTL_NO_INTELXEDEC", "intelxedec")) return;
@@ -705,7 +727,7 @@ static void nvmtl_intelxedec_register(void)
     RegFn reg = (RegFn)dlsym(RTLD_DEFAULT, "VTRegisterVideoDecoderWithInfo");
     if (!reg || !nvmtl_loadable_root_only(NVMTL_INTELXE_AV1DEC)) return;   // the stub checks again before it loads
     NSDictionary *info = @{ @"CMClassImplementationID": @"io.github.yusufklncc.intelxe.videodecoder.av1",
-                            @"CMClassImplementationName": @"Intel Arc B580 AV1",
+                            @"CMClassImplementationName": nvmtl_codec_name(gpu, @"AV1"),
                             @"VTRating": @1000, @"VTIsHardwareAccelerated": @YES };
     int32_t st = reg('av01', (__bridge CFDictionaryRef)info, (void *)nvmtl_intelxedec_av1_create);
     nvlog("intelxedec: AV1 decoder %s in %s (VTRegisterVideoDecoderWithInfo -> %d, rating 1000, loads on first use)",
@@ -718,7 +740,7 @@ static void nvmtl_intelxedec_register(void)
     SupFn sup = (SupFn)dlsym(RTLD_DEFAULT, "VTRegisterSupplementalVideoDecoderIfAvailable");
     if (sup) sup('vp09');
     NSDictionary *vp9 = @{ @"CMClassImplementationID": @"io.github.yusufklncc.intelxe.videodecoder.vp9",
-                           @"CMClassImplementationName": @"Intel Arc B580 VP9",
+                           @"CMClassImplementationName": nvmtl_codec_name(gpu, @"VP9"),
                            @"VTRating": @1000, @"VTIsHardwareAccelerated": @YES };
     int32_t sv = reg('vp09', (__bridge CFDictionaryRef)vp9, (void *)nvmtl_intelxedec_vp9_create);
     nvlog("intelxedec: VP9 decoder %s in %s (VTRegisterVideoDecoderWithInfo -> %d, rating 1000, loads on first use)",
@@ -741,17 +763,17 @@ static void nvmtl_intelxedec_register(void)
     // with "AVDGetGPUAccelerators, no plugin".
     { const char *hw = nvmtl_apple_hw_decoder(); if (hw) { nvlog("intelxedec: H.264/HEVC not registered in %s - %s can decode them", me, hw); return; } }
     NSDictionary *h264 = @{ @"CMClassImplementationID": @"io.github.yusufklncc.intelxe.videodecoder.h264",
-                            @"CMClassImplementationName": @"Intel Arc B580 H.264",
+                            @"CMClassImplementationName": nvmtl_codec_name(gpu, @"H.264"),
                             @"VTRating": @1000, @"VTIsHardwareAccelerated": @YES };
     NSDictionary *hevc = @{ @"CMClassImplementationID": @"io.github.yusufklncc.intelxe.videodecoder.hevc",
-                            @"CMClassImplementationName": @"Intel Arc B580 HEVC",
+                            @"CMClassImplementationName": nvmtl_codec_name(gpu, @"HEVC"),
                             @"VTRating": @300, @"VTIsHardwareAccelerated": @YES };
     int32_t s1 = reg('avc1', (__bridge CFDictionaryRef)h264, (void *)nvmtl_intelxedec_h264_create);
     int32_t s2 = reg('hvc1', (__bridge CFDictionaryRef)hevc, (void *)nvmtl_intelxedec_hevc_create);
     int32_t s3 = reg('hev1', (__bridge CFDictionaryRef)hevc, (void *)nvmtl_intelxedec_hevc_create);
     nvlog("intelxedec: H.264 %d (rating 1000), HEVC %d/%d (rating 300) decoders in %s (no Apple hardware decoder can run)", (int)s1, (int)s2, (int)s3, me);
 }
-static void nvmtl_intelxevenc_register(void)
+static void nvmtl_intelxevenc_register(NSString *gpu)
 {
     const char *me = getprogname();
     if (nvmtl_codec_opted_out("NVMTL_NO_INTELXEVENC", "intelxevenc")) return;
@@ -764,13 +786,13 @@ static void nvmtl_intelxevenc_register(void)
     // VideoToolbox lists a dynamically registered encoder as "Dynamically Registered <codec> Video Encoder" whatever name
     // it is given; clients select it by EncoderID, or get it by rating for its codec type.
     NSDictionary *hevc = @{ @"CMClassImplementationID": @"io.github.yusufklncc.intelxe.videoencoder.hevc",
-                            @"CMClassImplementationName": @"Intel Arc B580 HEVC",
+                            @"CMClassImplementationName": nvmtl_codec_name(gpu, @"HEVC"),
                             @"VTRating": @1000, @"VTIsHardwareAccelerated": @YES };
     NSDictionary *h264 = @{ @"CMClassImplementationID": @"io.github.yusufklncc.intelxe.videoencoder.h264",
-                            @"CMClassImplementationName": @"Intel Arc B580 H.264",
+                            @"CMClassImplementationName": nvmtl_codec_name(gpu, @"H.264"),
                             @"VTRating": @1000, @"VTIsHardwareAccelerated": @YES };
     NSDictionary *av1 = @{ @"CMClassImplementationID": @"io.github.yusufklncc.intelxe.videoencoder.av1",
-                           @"CMClassImplementationName": @"Intel Arc B580 AV1",
+                           @"CMClassImplementationName": nvmtl_codec_name(gpu, @"AV1"),
                            @"VTRating": @1000, @"VTIsHardwareAccelerated": @YES };
     int32_t s1 = reg('hvc1', (__bridge CFDictionaryRef)hevc, (void *)nvmtl_intelxevenc_hevc_create);
     int32_t s2 = reg('avc1', (__bridge CFDictionaryRef)h264, (void *)nvmtl_intelxevenc_h264_create);
@@ -787,15 +809,17 @@ __attribute__((constructor)) static void nvmtl_intelxecodecs_at_load(void)
     if (!strcmp(getprogname(), "WindowServer")) return;   // the codec registrars all stay out of it
     io_service_t s = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("NMXAccel"));
     if (!s) return;
-    IOObjectRelease(s);
     if (!dlsym(RTLD_DEFAULT, "VTRegisterVideoEncoderWithInfo") &&
         !dlopen("/System/Library/Frameworks/VideoToolbox.framework/VideoToolbox", RTLD_NOW | RTLD_GLOBAL)) {
         nvlog("intelxe codecs: VideoToolbox did not load in %s: %s", getprogname(), dlerror());
+        IOObjectRelease(s);
         return;
     }
     @autoreleasepool {
-        nvmtl_intelxedec_register();
-        nvmtl_intelxevenc_register();
+        NSString *gpu = nvmtl_registry_model(s);   // the codecs carry the card's name (B580 or B570)
+        IOObjectRelease(s);
+        nvmtl_intelxedec_register(gpu);
+        nvmtl_intelxevenc_register(gpu);
     }
 }
 static void nvmtl_nvenc_hevc_register(void)
@@ -1017,17 +1041,7 @@ static void nvmtl_install_hw_resource_pools(id dev)
 static NSString *gNVMTLModel;
 static void nvmtl_device_model_from(mach_port_t acc) {
     if (gNVMTLModel || !acc) return;
-    CFTypeRef m = IORegistryEntrySearchCFProperty(acc, kIOServicePlane, CFSTR("model"), kCFAllocatorDefault,
-                                                  kIORegistryIterateRecursively | kIORegistryIterateParents);
-    NSString *s = nil;
-    if (m && CFGetTypeID(m) == CFDataGetTypeID()) {
-        const char *b = (const char *)CFDataGetBytePtr(m); const CFIndex n = CFDataGetLength(m);
-        CFIndex len = 0; while (len < n && b[len]) len++;
-        s = [[NSString alloc] initWithBytes:b length:(NSUInteger)len encoding:NSUTF8StringEncoding];
-    } else if (m && CFGetTypeID(m) == CFStringGetTypeID()) s = [(__bridge NSString *)m copy];
-    if (m) CFRelease(m);
-    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (s.length && ![s.lowercaseString containsString:@"unknown"]) gNVMTLModel = s;
+    gNVMTLModel = nvmtl_registry_model(acc);
 }
 static NSString *nvmtl_device_marketing_name(void) {
     if (gNVMTLModel) return gNVMTLModel;
