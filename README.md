@@ -21,12 +21,12 @@ OpenCore).
 | | On the Arc B580 (macOS 26.7.1) |
 |---|---|
 | Desktop | composited on the GPU, 165 fps window dragging on a 180 Hz monitor, VRR, optional HiDPI modes |
-| Geekbench 7 | Metal **92 898** · OpenCL **86 920** (80–84% of the same card's Vulkan / OpenCL scores on Windows) |
+| Geekbench 7 | Metal **95.7k** · OpenCL **85.5k** (0.1.4; 86% / 79% of the same card's Vulkan / OpenCL scores on Windows) |
 | Video | H.264 / HEVC / AV1 / VP9 decode bit-exact and faster than Windows up to 4K; H.264 / HEVC / AV1 encode |
 | Vulkan CTS | 3.15 M cases, no hangs: 1.77 M pass, 84 fail |
 
 > [!WARNING]
-> **Experimental.** One card is supported and it is tested on one machine. Installing needs relaxed system security
+> **Experimental.** Two cards are supported (B580, B570), and only the B580 is tested, on one machine. Installing needs relaxed system security
 > (SIP and AMFI settings, unsigned kexts), and a bad build can stop the Mac at boot. Keep a USB stick with a working
 > OpenCore EFI before you try it. Releases are unsigned and come without support.
 
@@ -34,7 +34,7 @@ OpenCore).
 
 | | Supported | Notes |
 |---|---|---|
-| GPU | Intel Arc **B580** (8086:E20B) | other Intel GPUs: see [Project status](#project-status); nothing is claimed before it runs |
+| GPU | Intel Arc **B580** (8086:E20B); Arc **B570** (8086:E20C) from 0.1.4 | the B570 is untested: reports welcome; other Intel GPUs: see [Project status](#project-status); nothing is claimed before it runs |
 | macOS | **26 Tahoe** (tested on 26.7.1); 15 Sequoia (built from the same sources, not re-tested since the move to Tahoe) | x86_64 only |
 | Machine | a PC with OpenCore (tested: Z790, i7-14700K) | Above 4G decoding and Resizable BAR on |
 | Monitor | one DisplayPort monitor on the B580 | a second monitor is not supported yet |
@@ -97,7 +97,7 @@ The same card in the same machine, Intel's Windows driver against this driver
 
 | | Windows | macOS (this driver) |
 |---|---|---|
-| Geekbench 7 GPU | Vulkan 111 056 · OpenCL 108 544 | Metal 92 898 · OpenCL 86 920 |
+| Geekbench 7 GPU | Vulkan 111 056 · OpenCL 108 544 | Metal 95.7k · OpenCL 85.5k (97.2k / 92.9k with the opt-in direct submission) |
 | Video decode up to 4K | reference | bit-exact and faster |
 | Encode quality against Intel QSV (BD-rate) | reference | better for HEVC and AV1; H.264 within 1.5% |
 | Minecraft Java 1.21.1, Sodium + Iris + BSL (HIGH), windowed, same spot | 214–218 fps (Intel's OpenGL) | 197–205 fps (Zink) |
@@ -192,8 +192,9 @@ packaging; 0.1.2 rebuilt everything; 0.1.3 rebuilt IntelXeFB and NMXAGDC).
 **Is this an official Intel or Apple driver?** No. It is an independent project, not affiliated with Intel, Apple or
 NullMoth Systems.
 
-**Will my Arc A-series card, another B-series card or integrated graphics work?** Not yet. Only the B580 is supported;
-the [status table](#project-status) shows how much of the code they share with it.
+**Will my Arc A-series card, another B-series card or integrated graphics work?** Not yet, except the Arc B570
+(supported from 0.1.4, not tested by us). Only the B580 and the B570 are supported; the
+[status table](#project-status) shows how much of the code the others share with them.
 
 **Is it safe?** It changes how your Mac boots and runs with relaxed security. Keep a bootable USB EFI, and use
 `./install.sh --undo` to go back.

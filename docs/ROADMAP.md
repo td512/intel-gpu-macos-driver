@@ -21,6 +21,28 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Done:** on at boot with `intelxe_surfvram=2` (applications and WindowServer), as the 0.1.x install guide sets it; frames stay in VRAM from render to scan-out instead of crossing PCIe twice per frame (90 % of a game frame's GPU time). The kernel's own default is still 0 (off) without the boot-arg.
 - Open: make it the kernel's default once more machines have run it.
 
+### Submission cost and latency
+- **Done (0.1.4):** the Metal driver's commit and its execution worker no longer share one class-wide lock (lock V2, on
+  by default for applications; WindowServer and the system's interface keep the class lock): 18.2 -> 11.1 us per
+  command buffer back to back, Geekbench 7 Metal 89.0k -> 95.4-95.7k, OpenCL ~81.7k -> 84.1-85.5k on the B580.
+- **Done (0.1.4, prototype, off by default):** direct submission in `IntelXe.kext` (`debug.intelxe.direct`): an
+  application's render or compute queue keeps an armed slot on its ring (`MI_SEMAPHORE_WAIT` on a mailbox, then a jump
+  to the job), so a job starts without a GuC round trip; WindowServer and the system's interface never arm. A tiny
+  job's exec -> signal 46-52 -> 15-17 us; Geekbench 7 Metal 97.2k, OpenCL 92.9k. Design:
+  [`design/DESIGN-direct-submission.md`](design/DESIGN-direct-submission.md).
+- **Next:** direct submission on by default, after unattended tests (long idle, power, sleep and wake, repeated
+  Geekbench runs).
+- **Open:** the GuC `MEMORY_CAT_ERROR` after a long idle (3 of 6 cold runs with the GuC low-latency hint on, 0 of 4
+  without; the replacement queue never starts and a GT reset follows). The hint is opt-in until the root cause is
+  known; the engine dump in the G2H log (0.1.4) is there to catch the next one.
+
+### Compute (OpenCL and Metal compute)
+- **Done (0.1.4):** the translator turns an `or` of disjoint bits back into an add, so Mesa vectorizes the loads it
+  indexes: clbench `sgemm_reg` 3778 -> 7130 GFLOP/s (Windows 5456). Apps see an 8.2 GB working set, not 5.1.
+- **Next, Geekbench gaps against Windows:** Background Blur (the kernels compile well: SIMD32, no spills; the gap is
+  thought to be per-dispatch cost and the MPS path, to be measured on the B580) and Super Resolution (measure it with
+  and without the GuC low-latency hint, now off by default). clbench `blur_h` is still at 64% of Windows.
+
 ### Descriptor model
 - Stage 1 (front end without per-draw atomics or retain/release, address table, bind cache): done. Stage 2, the descriptor-buffer model, is in the plugin behind `NVMTL_DESC_MODEL=buffer` and off by default until it has been soaked (`docs/design/DESCRIPTOR-MODEL.md`).
 - Pools: done (see the BAR window). A full pool set now waits for in-flight work and then fails the command buffer with a Metal error, never silently.
@@ -37,6 +59,7 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - Open: sizes for monitors other than 2560×1440 are computed but untested.
 
 ### GPU resets
+- **Open:** the root cause of the GuC `MEMORY_CAT_ERROR` after a long idle (see Submission cost and latency).
 - **Done (2026-10-30):** register save/restore lists for engine resets, queue replacement on the same VM in Mesa and the plugin; WindowServer survives a GT reset.
 - The full Vulkan CTS run of 2026-11-04 (3.15 M cases) finished without a hang, a GT reset or a lost device; the three cases that used to hang (a timeline blit, an R8G8B8 sRGB multi-layer clear, a transform-feedback teardown) pass or fail cleanly.
 - Open: deliberate hang tests on the released kernel (the last ones ran on rb5/rb6b).
@@ -44,6 +67,12 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 ### Browsers
 - **Done (2026-10-30):** Chrome/Electron in their GPU sandbox; Safari WebGL through the optional system-volume plugin copy.
 - Open: the system-volume install breaks the sealed snapshot (as OpenCore Legacy Patcher's root patches do); a macOS update removes it (`ssv-install.sh --check`).
+
+### Hybrid Intel CPUs (HybridPM)
+- **Done (0.1.4):** `HybridPM.kext` published (`kernel/HybridPM/`, a Lilu plugin): it corrects XCPM's HWP requests on
+  Alder Lake / Raptor Lake hybrid CPUs, which held the P-cores low and busy cores at 800 MHz (i7-14700K: one thread
+  ~55 -> 128 M it/s; Geekbench GPU scores about a third higher). It leaves Core Ultra, CPUs without E-cores and other
+  CPUs alone. Optional, added to the EFI by hand below Lilu.
 
 ### Integrated GPU
 - Out of scope for this stack: the test machine runs with the CPU's integrated GPU off. A headless iGPU next to the B580
@@ -64,6 +93,9 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - Next: the remaining ~5–7% with shaders is GPU work per frame (Windows' GPU is not fully busy, ours is): measure per
   draw (`INTEL_MEASURE=draw`), Zink's multi-draw path, the generated ISA. Then native CGL/NSOpenGL applications (a CGL
   front end for Zink), which is what "Zink by default for every OpenGL application" needs.
+- **Next (cglzink, not in 0.1.4):** Zink for native CGL/NSOpenGL applications, per application first (a wrapper
+  that starts the app with Zink), then globally; a global `DYLD_` injection is not possible, so global needs another
+  way in.
 - The LaunchAgent sets `JAVA_TOOL_OPTIONS` at login, after apps that macOS reopens at login may already have started.
 
 ### IntelXe Manager (the app)
@@ -71,8 +103,11 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   release, runs `install.sh` (check, install, repair, undo, uninstall), Zink's script, and `efi.sh` for stages 2 and 4
   in the EFI OpenCore booted from or a folder the user picks. The Windows counterpart for the EFI is
   `windows/IntelXe-EFI.ps1`.
-- Next: release signatures that are independent of GitHub; the system-volume copy for Safari; diagnostics for a bug
-  report; a check that the EFI page's state is current after changes made outside the app.
+- **Done (0.1.4):** a setup assistant from a fresh macOS install to a verified driver; the system-volume copy for
+  Safari (and OpenCore's `SecureBootModel`); diagnostics for a bug report (Report page); GPU tests; Monitor; a check
+  at login.
+- Next: release signatures that are independent of GitHub; a check that the EFI page's state is current after changes
+  made outside the app.
 
 ## Other Xe2 (Battlemage) cards
 
@@ -80,7 +115,7 @@ The kext is organized around the graphics IP version (Xe2 / graphics 20.01, medi
 
 | Card | Device | What is expected to differ |
 |---|---|---|
-| Arc B570 | BMG-G21, fewer Xe-cores | device ID; fuse-driven topology (already read from fuses) |
+| Arc B570 | BMG-G21, fewer Xe-cores | **Done (0.1.4):** device ID 8086:E20C in the kexts, `install.sh`, the app, `efi.sh` and the Windows EFI tool (PR #2 by `@1964356263`); topology read from fuses. Not run on hardware yet: needs a tester |
 | Arc Pro B50 | BMG-G21 workstation | device ID; VRAM size and BAR layout |
 | Arc Pro B60 | BMG-G21 workstation, 24 GB | device ID; larger VRAM (allocator and BAR window are already sized from the hardware) |
 | Arc Pro B70 | larger Battlemage configuration | device ID, topology; possibly display/PHY tables |
