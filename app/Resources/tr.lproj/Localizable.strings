@@ -582,3 +582,16 @@
 "No readings yet" = "Henüz ölçüm yok";
 "The last five minutes" = "Son beş dakika";
 "Rises with motion on screen, a few when nothing moves." = "Ekranda hareket olunca yükselir, hiçbir şey kıpırdamazken birkaça düşer.";
+
+/* Look and feel: the setup assistant */
+"EFI kext" = "EFI kext'i";
+"Test" = "Test";
+"Ready" = "Hazır";
+"HiDPI sizes and Variable refresh" = "HiDPI boyutları ve Değişken yenileme";
+"Display page" = "Ekran sayfası";
+"Safari on the GPU" = "Safari GPU'da";
+"Driver page. Needs Apple Secure Boot off first." = "Sürücü sayfası. Önce Apple Güvenli Önyükleme kapatılmalı.";
+"Minecraft and other LWJGL games through Zink" = "Minecraft ve diğer LWJGL oyunları Zink ile";
+"OpenGL page" = "OpenGL sayfası";
+"GPU clock and temperature in the menu bar" = "Menü çubuğunda GPU saat hızı ve sıcaklığı";
+"Monitor page" = "İzleme sayfası";

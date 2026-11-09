@@ -55,7 +55,7 @@ struct SetupView: View {
                 // the page headings carry the same numbers (1. Prepare OpenCore ... 5. Done)
                 Text(step.number == 0 ? String(localized: "Before you start") : String(localized: "Step \(step.number) of 5")).foregroundStyle(.secondary)
             }
-            ProgressView(value: Double(step.number), total: 5)
+            StepIndicator(current: step.number)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 12) { page(step) }.frame(maxWidth: .infinity, alignment: .leading) }
                 .disabled(manager.busy != nil)
@@ -70,11 +70,13 @@ struct SetupView: View {
             HStack {
                 Button("Check again") { Task { await manager.refresh() } }.disabled(manager.probing || manager.busy != nil)
                 Spacer()
-                Button(step == .done ? "Finish" : "Close, continue later") {
-                    if step == .done { UserDefaults.standard.set(true, forKey: "setupDone") }
-                    close()
+                if step == .done {
+                    Button("Finish") { UserDefaults.standard.set(true, forKey: "setupDone"); close() }
+                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                        .disabled(manager.busy != nil)
+                } else {
+                    Button("Close, continue later") { close() }.disabled(manager.busy != nil)
                 }
-                .disabled(manager.busy != nil)
             }
         }
         .padding(22)
@@ -134,13 +136,17 @@ struct SetupView: View {
                 Label(String(localized: "\(bad) test(s) failed. The Report page shows which, and makes a diagnostics report for a bug report."), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
             }
             Text("Optional next steps:").padding(.top, 6)
-            Button("HiDPI sizes and Variable refresh (Display page)") { manager.requestedSection = .display; close() }
-            Button("Safari on the GPU: the system-volume copy (Driver page)") { manager.requestedSection = .driver; close() }
-            Text(manager.ssv.state == .inUse || manager.ssv.state == .notPackage ? String(localized: "Installed.")
-                 : String(localized: "Without it Safari draws in software. It needs OpenCore's Apple Secure Boot off first (EFI page); a macOS update removes it again."))
-                .font(.callout).foregroundStyle(.secondary).padding(.leading, 4)
-            Button("Minecraft and other LWJGL games through Zink (OpenGL page)") { manager.requestedSection = .zink; close() }
-            Button("GPU clock and temperature in the menu bar (Monitor page)") { manager.requestedSection = .monitor; close() }
+            let safariDone = manager.ssv.state == .inUse || manager.ssv.state == .notPackage
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                NextStepCard(symbol: "display", title: "HiDPI sizes and Variable refresh", caption: Text("Display page")) { manager.requestedSection = .display; close() }
+                NextStepCard(symbol: "safari", title: "Safari on the GPU",
+                             caption: safariDone ? Text("Installed.") : Text("Driver page. Needs Apple Secure Boot off first."),
+                             detail: safariDone ? nil : Text("Without it Safari draws in software. It needs OpenCore's Apple Secure Boot off first (EFI page); a macOS update removes it again.")) {
+                    manager.requestedSection = .driver; close()
+                }
+                NextStepCard(symbol: "gamecontroller", title: "Minecraft and other LWJGL games through Zink", caption: Text("OpenGL page")) { manager.requestedSection = .zink; close() }
+                NextStepCard(symbol: "gauge.medium", title: "GPU clock and temperature in the menu bar", caption: Text("Monitor page")) { manager.requestedSection = .monitor; close() }
+            }
             CaptionedToggle(title: "Check the driver at login", caption: "A dialog after login only when something needs attention, such as a macOS update that removed the system-volume copy.",
                             isOn: Binding(get: { st.loginCheck }, set: { setLoginCheck($0); st.loginCheck = loginCheckEnabled() }))
                 .padding(.top, 4)
@@ -205,5 +211,74 @@ struct SetupView: View {
         } else {
             Label("The EFI you booted from was not found yet: choose it on the EFI page.", systemImage: "questionmark.circle").foregroundStyle(.orange)
         }
+    }
+}
+
+/// The assistant's five steps as numbered dots on a line: done ones filled with a check, the current one ringed, in the
+/// accent colour; before the first step (something blocks it) all are grey.
+struct StepIndicator: View {
+    let current: Int
+    static let labels: [LocalizedStringKey] = ["OpenCore", "Driver", "EFI kext", "Test", "Ready"]
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(1...5, id: \.self) { n in
+                let done = n < current || (n == 5 && current == 5)
+                VStack(spacing: 5) {
+                    ZStack {
+                        Circle().fill(Color(nsColor: .windowBackgroundColor))
+                        Circle().fill(done ? Color.accentColor : n == current ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.12))
+                        Circle().strokeBorder(n <= current ? Color.accentColor : Color.secondary.opacity(0.4), lineWidth: 1.5)
+                        if done {
+                            Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white)
+                        } else {
+                            Text(verbatim: "\(n)").font(.caption.weight(.semibold)).foregroundStyle(n == current ? Color.accentColor : .secondary)
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                    Text(Self.labels[n - 1]).font(.caption).foregroundStyle(n == current ? .primary : .secondary)
+                        .fontWeight(n == current ? .semibold : .regular).lineLimit(1).fixedSize()
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .background(alignment: .topLeading) {
+            // the line from the first dot's centre to the last one's, accent up to the current step
+            GeometryReader { g in
+                let column = g.size.width / 5
+                Rectangle().fill(Color.secondary.opacity(0.3))
+                    .frame(width: column * 4, height: 2).offset(x: column / 2, y: 11)
+                Rectangle().fill(Color.accentColor)
+                    .frame(width: column * CGFloat(max(0, min(current, 5) - 1)), height: 2).offset(x: column / 2, y: 11)
+            }
+        }
+        .animation(.easeInOut(duration: 0.35), value: current)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(current == 0 ? Text("Before you start") : Text("Step \(current) of 5"))
+    }
+}
+
+/// An optional next step on the assistant's last page: a small card with an icon, what it is and where, as a button.
+struct NextStepCard: View {
+    let symbol: String
+    let title: LocalizedStringKey
+    let caption: Text
+    var detail: Text?
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: symbol).font(.title2).foregroundStyle(Color.accentColor).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.callout.weight(.medium)).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
+                    caption.font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .tintedCard(neutralTint)
+        }
+        .buttonStyle(.plain)
+        .help(detail ?? caption)
     }
 }
