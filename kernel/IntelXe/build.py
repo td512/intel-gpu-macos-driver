@@ -59,7 +59,8 @@ def main():
    fw=src.read_bytes()
    assert hashlib.sha256(fw).hexdigest()==sha, f'{src}: unexpected sha256'
    (objdir/inc).write_text(f'static const uint8_t {name}[] __attribute__((aligned(16))) = {{\n'+
-    '\n'.join(','.join(str(b) for b in fw[i:i+64])+',' for i in range(0,len(fw),64))+f'\n}};\nstatic const uint32_t {name}Size = {len(fw)};\n')
+    '\n'.join(','.join(str(b) for b in fw[i:i+64])+',' for i in range(0,len(fw),64))+f'\n}};\nstatic const uint32_t {name}Size = {len(fw)};\n'+
+    f'static const char {name}Name[] = "{fwname}";\n')   # IntelXe::start: the platform descriptor must name this file
   # XeProbe: whatever other GuC images are in the firmware directory (sha256 printed, not checked: any linux-firmware
   # release will do)
   probe=[]
@@ -109,7 +110,8 @@ def main():
   # XeProbe: offered every Intel PCI device, in its own match category (beside any other driver); XeProbe::probe declines
   # all but the display function the boot-arg xeprobe=0xDEVICE names, so without that boot-arg it attaches nowhere.
   xeprobe=dict(IOClass='XeProbe',IOProviderClass='IOPCIDevice',IOPCIMatch='0x00008086&0x0000ffff',IOMatchCategory='XeProbe',IOProbeScore=0)
-  kext('IntelXe','io.github.yusufklncc.IntelXe',['IntelXe.cpp','xe_core.cpp','xe_vram.cpp','IntelXeClient.cpp','xe_probe.cpp','xe_fd.cpp'],libs,intelxepers,
+  kext('IntelXe','io.github.yusufklncc.IntelXe',['IntelXe.cpp','xe_core.cpp','xe_vram.cpp','IntelXeClient.cpp','xe_probe.cpp','xe_fd.cpp',
+   'xe_platform.cpp'],libs,intelxepers,
    dict(OSBundleRequired='Root'),opt=intelxeopt,more={'XeProbe':xeprobe})
  # IntelXeFB links IOGraphicsFamily, so it goes into the AuxKC (/Library/Extensions + kmutil), not OpenCore.
  # IOMatchCategory IOFramebuffer lets it sit on the GPU beside IntelXe and NMXAccel. It matches at boot from the AuxKC

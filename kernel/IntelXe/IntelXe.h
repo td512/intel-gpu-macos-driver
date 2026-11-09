@@ -10,6 +10,7 @@
 #include <IOKit/IOWorkLoop.h>
 #include <kern/thread_call.h>
 #include <IOKit/pci/IOPCIDevice.h>
+#include "xe_platform.h"
 
 #define LOG(fmt, ...) IOLog("IntelXe: " fmt "\n", ##__VA_ARGS__)
 
@@ -236,6 +237,10 @@ public:
 };
 
 extern IntelXe *gDev;
+// The platform descriptor of the device IntelXe started on (xe_platform.h; xe->info as xe_pci_probe fills it), and that
+// device's id. Set once in IntelXe::start before anything else runs, never cleared: only supported entries get here.
+extern const XePlatformDesc *gXePlat;
+extern uint16_t gXePlatId;
 static inline IOMemoryMap *gDevVram() { return gDev->vramMap(); }
 
 

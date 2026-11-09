@@ -76,6 +76,8 @@ const uint8_t *intelxeGucImage(uint32_t *size) {
 OSDefineMetaClassAndStructors(IntelXe, IOService)
 
 IntelXe *gDev;
+const XePlatformDesc *gXePlat;
+uint16_t gXePlatId;
 IOLock *gDevLock, *gH2gLock[2], *gG2hLock[2], *gFwLock, *gSayLock, *gDispLock;
 XeEngine gEngines[8];
 uint32_t gNumEngines;
@@ -470,6 +472,30 @@ SYSCTL_PROC(_debug_intelxe, OID_AUTO, dump, CTLTYPE_STRING | CTLFLAG_RD | CTLFLA
 #define INTELXE_REG_OID(n) sysctl_register_oid(&sysctl__debug_intelxe_##n);
 #define INTELXE_UNREG_OID(n) sysctl_unregister_oid(&sysctl__debug_intelxe_##n);
 
+// xe_pci_probe: the device's descriptor (xe_platform.cpp), looked up once. The id comes from config space; a card that
+// does not answer yet (rb7u: 0xffff in the first seconds of a macOS 26 boot) is looked up by the PCI family's
+// "device-id", read at enumeration as Linux's pdev->device is. nullptr: no entry for either.
+static const XePlatformDesc *platformOf(IOPCIDevice *pci, uint16_t *id) {
+	*id = pci->configRead16(kIOPCIConfigDeviceID);
+	const XePlatformDesc *d = xePlatformFind(*id);
+	if (!d) {
+		OSData *p = OSDynamicCast(OSData, pci->getProperty("device-id"));
+		if (p && p->getLength() >= 2) {
+			*id = *static_cast<const uint16_t *>(p->getBytesNoCopy());
+			d = xePlatformFind(*id);
+		}
+	}
+	return d;
+}
+
+// xe_uc_fw.c picks the file per platform; here the GuC and HuC images are built in (build.py): the descriptor must name
+// those files ("xe/bmg_guc_70.bin" ends in kGucFwName).
+static bool fwIs(const char *path, const char *builtIn) {
+	if (!path) return false;
+	const size_t n = strlen(path), m = strlen(builtIn);
+	return n > m && path[n - m - 1] == '/' && !strcmp(path + n - m, builtIn);
+}
+
 bool IntelXe::start(IOService *provider) {
 	char dummy[8];
 	if (intelxeBootArg("IntelXe", "-intelxe_off", dummy, sizeof(dummy))) return false;
@@ -517,6 +543,32 @@ bool IntelXe::start(IOService *provider) {
 	if (intelxeBootArg("IntelXe", "intelxe_fds", &fds, sizeof(fds)) && fds == 1) gFdsBoot = 1;
 	pci = OSDynamicCast(IOPCIDevice, provider);
 	if (!pci) return false;
+	// Only a supported platform starts (IOPCIMatch lists the ids too); the others are refused with what they lack.
+	uint16_t id = 0;
+	const XePlatformDesc *plat = platformOf(pci, &id);
+	const char *sub = plat && plat->subplatform ? plat->subplatform : "";
+	if (!plat) {
+		LOG("8086:%04x: no platform descriptor, not starting", id);
+		return false;
+	}
+	if (!plat->supported) {
+		LOG("8086:%04x is %s%s%s: not supported yet (%s)", id, plat->name, *sub ? "-" : "", sub, plat->missing);
+		return false;
+	}
+	if (!fwIs(plat->gucFw, kGucFwName) || !fwIs(plat->hucFw, kHucFwName)) {
+		LOG("8086:%04x (%s): built-in firmware %s, %s; the platform needs %s, %s", id, plat->name, kGucFwName, kHucFwName,
+			plat->gucFw ? plat->gucFw : "none", plat->hucFw ? plat->hucFw : "none");
+		return false;
+	}
+	gXePlat = plat;
+	gXePlatId = id;
+	LOG("8086:%04x: %s%s%s, graphics %u.%02u, media %u.%02u, %s", id, plat->name, *sub ? "-" : "", sub,
+		plat->graphicsVerx100 / 100, plat->graphicsVerx100 % 100, plat->mediaVerx100 / 100, plat->mediaVerx100 % 100,
+		plat->isDgfx ? "discrete" : "integrated");
+	// xe->info.has_usm (the graphics IP's) and a standalone media GT (max_gt_per_tile 2): off where the platform has none.
+	// The UM queues sit in VRAM here, so has_usm needs a discrete part too.
+	if (!plat->hasUsm || !plat->isDgfx) gUsm = 0;
+	if (plat->maxGtPerTile < 2) gVideoWanted = 0;
 	pci->retain();
 	gDev = this;
 	sysctl_register_oid(&sysctl__debug_intelxe);
@@ -924,7 +976,7 @@ int IntelXe::waitDeviceReady() {
 	uint32_t id = 0;
 	for (;;) {
 		id = pci->configRead32(kIOPCIConfigVendorID);
-		if (id == 0xe20b8086u || id == 0xe20c8086u) break;
+		if (id == ((uint32_t)gXePlatId << 16 | 0x8086u)) break;   // the device IntelXe started on
 		if (elapsedMs() >= limitMs) { say("device not ready: config space reads 0x%08x after %llu ms\n", id, elapsedMs()); return ENXIO; }
 		IOSleep(20);
 	}
@@ -1133,7 +1185,7 @@ int IntelXe::ggttMap(IOBufferMemoryDescriptor *mem, uint32_t ggtt, uint32_t gt) 
 	volatile uint64_t *gsm = reinterpret_cast<volatile uint64_t *>(bar0->getVirtualAddress() + 0x800000);
 	for (IOByteCount off = 0; off < mem->getLength() && !err; off += 4096) {
 		uint64_t pa = 0, run = 0;
-		if (!rec.dma.lookup(off, &pa, &run) || (pa & 0xfff) || pa >= (1ull << 46)) {
+		if (!rec.dma.lookup(off, &pa, &run) || (pa & 0xfff) || pa >= xePlatformDmaLimit(gXePlat)) {
 			say("bad device address 0x%llx at +0x%llx\n", pa, (uint64_t)off);
 			err = EFAULT;
 			break;
@@ -1224,7 +1276,7 @@ void IntelXe::ggttClear(uint32_t ggtt, uint32_t len, uint32_t gt) {
 
 IOBufferMemoryDescriptor *IntelXe::alloc(size_t len, bool contiguous) {
 	auto *m = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
-		kIODirectionInOut | (contiguous ? kIOMemoryPhysicallyContiguous : 0), round_page(len), 0x00003ffffffff000ull);
+		kIODirectionInOut | (contiguous ? kIOMemoryPhysicallyContiguous : 0), round_page(len), xePlatformPhysMask(gXePlat));
 	if (m) bzero(m->getBytesNoCopy(), m->getLength());
 	return m;
 }
@@ -1237,7 +1289,8 @@ IOMapper *gDmaMapper;
 bool DmaMap::map(IOMemoryDescriptor *md) {
 	unmap();
 	if (!md) return false;
-	cmd = IODMACommand::withSpecification(kIODMACommandOutputHost64, 46, 0, IODMACommand::kMapped, 0, 0x1000, gDmaMapper);
+	cmd = IODMACommand::withSpecification(kIODMACommandOutputHost64, gXePlat->dmaMaskBits, 0, IODMACommand::kMapped, 0, 0x1000,
+		gDmaMapper);   // dma_mask_size
 	if (!cmd) return false;
 	if (cmd->setMemoryDescriptor(md, true) != kIOReturnSuccess) {   // and prepare(): the IOVA mapping is made here
 		OSSafeReleaseNULL(cmd);
@@ -1721,8 +1774,8 @@ int IntelXe::loadGuc(bool full, uint32_t gt) {
 
 	programPatMocs(gt);
 
-	// xe_wopcm.c: dGFX from Lunar Lake on has 8 MB WOPCM; no HuC, so GuC starts at ALIGN(16K, 16K).
-	const uint32_t wopcmSize = 8u << 20, ctxRsvd = 36u << 10;
+	// xe_wopcm.c xe_wopcm_size (8 MB from Lunar Lake on); no HuC, so GuC starts at ALIGN(16K, 16K).
+	const uint32_t wopcmSize = gXePlat->wopcmBytes, ctxRsvd = 36u << 10;
 	uint32_t base, size, rs = rd(gt + GUC_WOPCM_SIZE), ro = rd(gt + DMA_GUC_WOPCM_OFFSET);
 	if ((rs & 1) && (ro & 1)) {
 		base = ro & 0xffffc000;
@@ -1858,9 +1911,9 @@ int IntelXe::loadGuc(bool full, uint32_t gt) {
 	wr(gt + SOFT_SCRATCH0, 0);
 	for (int i = 0; i < GUC_CTL_MAX_DWORDS; i++) wr(gt + SOFT_SCRATCH0 + 4 * (1 + i), params[i]);
 
-	// guc_prepare_xfer (graphics 20: no SRAM-init/MIA-caching bits, MOCS uc_index 3); GT_PM_CONFIG is above 0x40000,
-	// so the media GuC writes the same register.
-	wr(gt + GUC_SHIM_CONTROL, 1u << 1 | 1u << 9 | 1u << 10 | 1u << 15 | 3u << 24);
+	// guc_prepare_xfer (graphics 20: no SRAM-init/MIA-caching bits, GUC_MOCS_INDEX = the MOCS uc_index); GT_PM_CONFIG is
+	// above 0x40000, so the media GuC writes the same register.
+	wr(gt + GUC_SHIM_CONTROL, 1u << 1 | 1u << 9 | 1u << 10 | 1u << 15 | (uint32_t)gXePlat->mocsUcIndex << 24);
 	wr(GT_PM_CONFIG, 1);
 	wr(gt + PMINTRMSK, rd(gt + PMINTRMSK) & ~(1u << 9));
 
@@ -2338,10 +2391,10 @@ int IntelXe::firstBatchSetupOnly() {
 		return err;
 	}
 
-	// Engines: RCS0, BCS0 (BCS8 is Linux's USM reserve) and the CCS instances XEHP_FUSE4 CCS_EN_MASK leaves on
-	// (read_compute_fuses_from_reg), then hw_engine_setup_default_state + xe_hw_engine_enable_ring for each, before
-	// the GuC load as in xe_gt_init.
-	uint32_t ccs = (rd(0x9114) >> 16) & 0xf;
+	// Engines: RCS0, BCS0 (BCS8 is Linux's USM reserve) and the CCS instances XEHP_FUSE4 CCS_EN_MASK leaves on of those
+	// the platform's engine mask has (read_compute_fuses_from_reg), then hw_engine_setup_default_state +
+	// xe_hw_engine_enable_ring for each, before the GuC load as in xe_gt_init.
+	uint32_t ccs = (rd(0x9114) >> 16) & 0xf & xePlatformEngines(gXePlat, XE_HW_ENGINE_CCS0, 4);
 	gNumEngines = 0;
 	gEngines[gNumEngines++] = {0, 0, 0, 0, 0x2000, 0x4000, 0x2000};       // RENDER: PPHWSP + 3 pages
 	gEngines[gNumEngines++] = {1, 0, 0, 3, 0x22000, 0x2000, hwspOff};      // COPY: PPHWSP + 1 page
@@ -2708,8 +2761,8 @@ int IntelXe::mediaGucLoad() {
 	mCtOn = false;
 	if (!forcewake(true, M)) return ETIMEDOUT;
 	uint32_t g = rd(M + GMD_ID), fuse = rd(M + GT_VEBOX_VDBOX_DISABLE);   // Xe_HP+: enable bits, VDBOX 7:0, VEBOX 19:16
-	mVdbox = fuse & 0xff;
-	mVebox = (fuse >> 16) & 0xf;
+	mVdbox = fuse & 0xff & xePlatformEngines(gXePlat, XE_HW_ENGINE_VCS0, 8);     // read_media_fuses: of the engine mask
+	mVebox = (fuse >> 16) & 0xf & xePlatformEngines(gXePlat, XE_HW_ENGINE_VECS0, 4);
 	say("media GT %u.%02u rev %u: VDBOX 0x%02x VEBOX 0x%x, GuC status 0x%08x, POWERGATE_ENABLE 0x%08x\n", g >> 22,
 		(g >> 14) & 0xff, g & 0x3f, mVdbox, mVebox, rd(M + GUC_STATUS), rd(M + 0xa210));
 	if (!mVdbox || __builtin_popcount(mVdbox) + __builtin_popcount(mVebox) > 4) {
