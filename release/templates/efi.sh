@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 # efi.sh: the OpenCore part of intel-gpu-macos-driver, done on macOS: puts this package's IntelXe.kext and SSDT-ARCOFF.aml
 # (adapted to the card's ACPI path) into the EFI OpenCore booted from, with their config.plist entries, and undoes it.
+# On a 12th-14th gen Intel CPU with efficiency cores it adds HybridPM.kext too, below Lilu.kext.
 #
 #   ./efi.sh --status               the EFI compared with this package, one "key=value" per line. Changes nothing.
 #   ./efi.sh --plan                 what --apply would change (stage 4 of README-INSTALL.md). Changes nothing.
@@ -31,6 +32,7 @@ STATE=${INTELXE_STATE_DIR:-/Library/Application Support/intel-gpu-macos-driver} 
 OCGUID=4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102
 APPLE=7C436110-AB2A-4BBB-A880-FE41995C9F82
 KEXT=IntelXe.kext OLDKEXT=B580.kext SSDT=SSDT-ARCOFF.aml   # intelxe-rename: keep
+HPM=HybridPM.kext LILU=Lilu.kext
 CMD="" EFIDIR="" PART="" EXPECT=""
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -114,6 +116,25 @@ ssdt_state() { # against the table this card needs: the package's, or the packag
     if [ ! -e "$E/ACPI/$SSDT" ]; then echo absent; elif cmp -s "$E/ACPI/$SSDT" "$SSDTSRC"; then echo same; else echo different; fi
 }
 kext_version() { pget "$1/Contents/Info.plist" CFBundleVersion; }
+
+# ---- HybridPM.kext (kernel/HybridPM): only for Alder Lake / Raptor Lake CPUs with efficiency cores ------------------
+# By the CPU's name: machdep.cpu.model is what OpenCore's Cpuid1Data makes it (Comet Lake on the test machine). Core
+# Ultra is left out (HybridPM leaves it alone), as are the desktop models with P-cores only. INTELXE_CPU_BRAND: tests.
+HPK=$PKG/EFI/OC/Kexts/$HPM
+BRAND=${INTELXE_CPU_BRAND-$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)}
+case "$BRAND" in
+    *Ultra*|*i3-1[234]100*|*i3-12300*|*i5-12400*|*i5-12490*|*i5-12500|*i5-12500[!H]*|*i5-12600|*i5-12600[!KH]*) HPMNEED=no;;
+    *i[3579]-1[2-4][0-9][0-9][0-9]*) HPMNEED=yes;;
+    *) HPMNEED=no;;
+esac
+HPMPKG=no; [ -f "$HPK/Contents/MacOS/HybridPM" ] && [ -f "$HPK/Contents/Info.plist" ] && HPMPKG=yes
+hpm_state() { # same|different|absent|unknown, as kext_state; "different" also for an earlier build (org.hackintosh.HybridPM)
+    [ "$READABLE" = yes ] || { echo unknown; return; }
+    local k=$E/Kexts/$HPM
+    if [ ! -e "$k" ]; then echo absent
+    elif [ $HPMPKG = yes ] && cmp -s "$k/Contents/MacOS/HybridPM" "$HPK/Contents/MacOS/HybridPM" && cmp -s "$k/Contents/Info.plist" "$HPK/Contents/Info.plist"; then echo same
+    else echo different; fi
+}
 
 # the ACPI path of the B580's upstream port (the bridge two PCI levels above the GPU), e.g. \_SB.PC00.PEG1.PEGP;
 # "none" when that port has no ACPI name, nothing when there is no B580
@@ -265,6 +286,7 @@ entry_state() { # enabled|disabled|absent|unknown
 #   copy SRC REL           replace EFI/OC/REL with a copy of SRC
 #   set KEYPATH TYPE VALUE plutil -replace in config.plist
 #   append KEYPATH TYPE VALUE   append to the array at KEYPATH
+#   insert ARRAY.N TYPE VALUE   insert at index N of that array (the items from N on move up by one)
 #   mkdict KEYPATH / mkarray KEYPATH
 PLAN=() OPS=() NOTES=()
 TAB=$'\t'
@@ -327,11 +349,54 @@ plan_files() {
         fi
     fi
 
+    plan_hybridpm   # after every change above that names an item by its index: it may insert one
+
     # so that OpenCore records which EFI it booted from, and the next run finds it without being told
     cur=$(pget "$CFG" Misc.Security.ExposeSensitiveData)
     if [ "$BOOTREC" = no ] && [[ "$cur" =~ ^[0-9]+$ ]] && [ $((cur & 1)) = 0 ]; then
         PLAN+=("config   Misc > Security > ExposeSensitiveData: $cur -> $((cur | 1)) (OpenCore then records which EFI it booted from, for this script)")
         op set Misc.Security.ExposeSensitiveData integer $((cur | 1))
+    fi
+    return 0
+}
+
+# HybridPM.kext with an entry right below Lilu.kext's (a Lilu plugin loads after Lilu), only where it is needed and Lilu
+# is loaded; an earlier build under the same name (org.hackintosh.HybridPM) is replaced
+plan_hybridpm() {
+    [ $HPMNEED = yes ] || return 0
+    local l h hs cur id
+    if [ $HPMPKG = no ]; then
+        NOTES+=("not added: $HPM. This CPU ($BRAND) has efficiency cores and macOS holds it below its clocks, but this package has no $HPM (it comes with 0.1.4 and later)")
+        return 0
+    fi
+    l=$(find_entry "$CFG" Kernel.Add BundlePath "$LILU")
+    if [ -z "$l" ] || [ "$(pget "$CFG" Kernel.Add.$l.Enabled)" != true ] || [ ! -e "$E/Kexts/$LILU" ]; then
+        NOTES+=("not added: $HPM. This CPU ($BRAND) has efficiency cores and $HPM corrects its clocks, but it is a Lilu plugin and this EFI does not load $LILU (no file in EFI/OC/Kexts, or its Kernel > Add entry is missing or off). Add Lilu (github.com/acidanthera/Lilu), then run this again (README-INSTALL.md, Hybrid Intel CPUs)")
+        return 0
+    fi
+    hs=$(hpm_state)
+    case $hs in
+        absent) PLAN+=("copy     EFI/OC/Kexts/$HPM (version $(kext_version "$HPK"); this CPU has efficiency cores: it corrects their clocks)"); op copy "$HPK" "Kexts/$HPM";;
+        different)
+            id=$(pget "$E/Kexts/$HPM/Contents/Info.plist" CFBundleIdentifier)
+            if [ "$id" = org.hackintosh.HybridPM ]; then
+                PLAN+=("replace  EFI/OC/Kexts/$HPM (an earlier build, org.hackintosh.HybridPM $(kext_version "$E/Kexts/$HPM"), by the package's $(kext_version "$HPK"))")
+            else
+                PLAN+=("replace  EFI/OC/Kexts/$HPM (version $(kext_version "$E/Kexts/$HPM") in the EFI, $(kext_version "$HPK") in the package; the files differ)")
+            fi
+            op copy "$HPK" "Kexts/$HPM";;
+    esac
+    h=$(find_entry "$CFG" Kernel.Add BundlePath "$HPM")
+    if [ -z "$h" ]; then
+        PLAN+=("config   Kernel > Add: add $HPM below $LILU, as item $((l + 1)) (ExecutablePath Contents/MacOS/HybridPM, PlistPath Contents/Info.plist, Enabled)")
+        op insert Kernel.Add.$((l + 1)) json '{"Arch":"Any","BundlePath":"HybridPM.kext","Comment":"HybridPM.kext: hybrid-CPU power management (intel-gpu-macos-driver)","Enabled":true,"ExecutablePath":"Contents/MacOS/HybridPM","MaxKernel":"","MinKernel":"","PlistPath":"Contents/Info.plist"}'
+    else
+        [ "$(pget "$CFG" Kernel.Add.$h.Enabled)" = true ] || { PLAN+=("config   Kernel > Add, item $h ($HPM): Enabled false -> true"); op set Kernel.Add.$h.Enabled bool true; }
+        cur=$(pget "$CFG" Kernel.Add.$h.ExecutablePath)
+        [ "$cur" = Contents/MacOS/HybridPM ] || { PLAN+=("config   Kernel > Add, item $h ($HPM): ExecutablePath '$cur' -> 'Contents/MacOS/HybridPM'"); op set Kernel.Add.$h.ExecutablePath string Contents/MacOS/HybridPM; }
+        cur=$(pget "$CFG" Kernel.Add.$h.PlistPath)
+        [ "$cur" = Contents/Info.plist ] || { PLAN+=("config   Kernel > Add, item $h ($HPM): PlistPath '$cur' -> 'Contents/Info.plist'"); op set Kernel.Add.$h.PlistPath string Contents/Info.plist; }
+        [ "$h" -gt "$l" ] || NOTES+=("$HPM is item $h of Kernel > Add, above $LILU (item $l): OpenCore loads it before Lilu and it does not start. Move its entry below $LILU's")
     fi
     return 0
 }
@@ -452,6 +517,7 @@ run_ops() {
             copy) mkdir -p "$(dirname "$E/$c")"; put_copy "$b" "$E/$c"; changed+=("$c"); echo "  ok    EFI/OC/$c";;
             set) plutil -replace "$b" -"$c" "$d" "$T/config.plist"; edited=yes;;
             append) plutil -insert "$b" -"$c" "$d" -append "$T/config.plist"; edited=yes;;
+            insert) plutil -insert "$b" -"$c" "$d" "$T/config.plist"; edited=yes;;
             mkdict) plutil -insert "$b" -dictionary "$T/config.plist"; edited=yes;;
             mkarray) plutil -insert "$b" -array "$T/config.plist"; edited=yes;;
         esac
@@ -468,7 +534,7 @@ run_ops() {
 }
 verify_package() { # the EFI files of the package against its SHA256SUMS, when it has one
     [ -f "$PKG/SHA256SUMS" ] || return 0
-    (cd "$PKG" && grep -E '  EFI/OC/(Kexts/IntelXe\.kext/|ACPI/SSDT-ARCOFF\.aml$)' SHA256SUMS | shasum -a 256 -c -s) \
+    (cd "$PKG" && grep -E '  EFI/OC/(Kexts/(IntelXe|HybridPM)\.kext/|ACPI/SSDT-ARCOFF\.aml$)' SHA256SUMS | shasum -a 256 -c -s) \
         || { echo "the package's EFI files differ from its SHA256SUMS (damaged or changed): nothing changed"; exit 1; }
 }
 
@@ -495,6 +561,14 @@ status() {
     echo "ssdt_file=$(ssdt_state)"
     echo "ssdt_entry=$(entry_state ACPI.Add Path "$SSDT")"
     echo "card_acpi_path=$CARD"
+    echo "hybridpm_needed=$HPMNEED"
+    echo "hybridpm_cpu=$BRAND"
+    echo "hybridpm_package=$HPMPKG"
+    [ $HPMPKG = yes ] && echo "hybridpm_version_package=$(kext_version "$HPK")" || echo "hybridpm_version_package="
+    echo "hybridpm_file=$(hpm_state)"
+    echo "hybridpm_entry=$(entry_state Kernel.Add BundlePath "$HPM")"
+    [ "$READABLE" = yes ] && [ -e "$E/Kexts/$HPM" ] && echo "hybridpm_version_efi=$(kext_version "$E/Kexts/$HPM")" || echo "hybridpm_version_efi="
+    echo "lilu_entry=$(entry_state Kernel.Add BundlePath "$LILU")"
     case $ADAPT in yes) echo "ssdt_package_names_card=yes";; adapted) echo "ssdt_package_names_card=adaptable";; *) echo "ssdt_package_names_card=no";; esac
     if [ "$READABLE" = yes ]; then
         PLAN=() OPS=() NOTES=(); plan_files; echo "plan_changes=${#PLAN[@]}"
