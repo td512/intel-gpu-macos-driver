@@ -64,6 +64,13 @@ already sets for applications and never for WindowServer and the system UI) on t
 less than about the idle limit apart. Render stays on the normal path: WindowServer shares the render engine and
 would be timesliced against a polling context.
 
+*Changed after the first measurements (9 Nov, evening):* the GuC low-latency hint became opt-in (a GPU fault after
+long idle), and Geekbench's OpenCL and Metal work turned out to run on the render class (its faults named class 0).
+Now any application queue of the render or compute class may arm, the hint no longer matters, and the kext keeps
+WindowServer and the system's interface out by process name. On the render class WindowServer's next frame is
+"another queue on the armed one's class": the armed queue leaves before that frame goes to the ring. Measured with
+the compute class first: a 180 fps animation stayed at 179 fps with direct mode on or off under load.
+
 ## What stays the same
 
 - Fences: the seqno store and user interrupt are in the ring as now; `done` and `submitted` mean what they mean now.

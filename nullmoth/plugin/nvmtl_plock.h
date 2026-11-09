@@ -29,10 +29,23 @@
 #include <string.h>
 #include <unistd.h>
 
-/* the build default; NVMTL_LOCK_V2=0/1 in a process's own environment overrides it for that process */
+/* the build default; NVMTL_LOCK_V2=0/1 in a process's own environment overrides it for that process. -1: by process,
+   V2 for applications and the class lock for WindowServer and the system's own interface (nvmtl_plock_system_ui), the
+   default since 9 Nov 2026 (B580: back to back 18.2 -> 11.1 us per command buffer, Geekbench 7 Metal 89.0k -> 95.4k,
+   OpenCL 81.8k -> 85.5k; the ordering stress tests pass) */
 #ifndef NVMTL_LOCK_V2_DEFAULT
-#define NVMTL_LOCK_V2_DEFAULT 0
+#define NVMTL_LOCK_V2_DEFAULT (-1)
 #endif
+
+/* WindowServer and the processes that draw the system's interface: they keep the class lock, as they keep the GuC
+   low-latency hint off (nvmtl_guc_hint_env): a deadlock there is a black screen, not a hung app */
+static inline int nvmtl_plock_system_ui(const char *me)
+{
+    static const char *const ui[] = { "WindowServer", "loginwindow", "Dock", "com.apple.dock.extra", "SystemUIServer",
+        "ControlCenter", "NotificationCenter", "WindowManager", "ScreenSaverEngine", "legacyScreenSaver" };
+    for (size_t i = 0; me && i < sizeof ui / sizeof *ui; i++) if (!strcmp(me, ui[i])) return 1;
+    return 0;
+}
 
 /* Pure rule, testable: e is getenv("NVMTL_LOCK_V2"), confset getenv("NVMTL_CONF_SET") (the keys the conf file put into
    this process's environment, nvmtl_conf_knobs). Only the process's own environment counts: a conf line must not switch

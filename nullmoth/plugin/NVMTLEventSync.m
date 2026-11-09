@@ -40,14 +40,16 @@ void nvmtl_texture_demote(NVMTLTexture *t);   // NVMTLObjects.m (rb7f)
 }
 @end
 static BOOL nvmtl_async_commit_on(void);
-/* NVMTL_LOCK_V2=1 (nvmtl_plock.h): commit and the execution worker without the process-wide class lock. Per process,
-   from its own environment only (never the conf file: WindowServer keeps the class lock unless its own environment asks),
+/* NVMTL_LOCK_V2 (nvmtl_plock.h): commit and the execution worker without the process-wide class lock. On by default for
+   applications, off for WindowServer and the system's interface; NVMTL_LOCK_V2=0/1 decides for one process, from its
+   own environment only (never the conf file: WindowServer keeps the class lock unless its own environment asks),
    and only with the asynchronous worker (NVMTL_ASYNC_COMMIT=0 keeps the synchronous pump, under the class lock). */
 int nvmtl_lock_v2(void) {
     static int on = -1;
     if (on < 0) {
         const char *e = getenv("NVMTL_LOCK_V2");
         int v = nvmtl_plock_rule(e, getenv("NVMTL_CONF_SET"));
+        if (v < 0) v = !nvmtl_plock_system_ui(getprogname());   // the default: applications only
         if (v && !nvmtl_async_commit_on()) v = 0;
         on = v;
         nvlog("commit: locking %s (NVMTL_LOCK_V2=%s, build default %d)", on ? "V2 - state lock, submit-ahead combiner, per-part hand-off; no class lock"

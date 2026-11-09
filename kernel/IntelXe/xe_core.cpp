@@ -2705,8 +2705,18 @@ static IOBufferMemoryDescriptor *gDsMem;
 static uint32_t gDsG, gDsBits;   // its GGTT address; entries in use (gResLock)
 static thread_call_t gDsCall;    // dsIdleRun
 static XeQueue *gDsQ;            // the armed queue (gSchedLock)
-static const XeQueue *gDsLastQ;  // the last queue that submitted to the primary GT's compute class (only compared) and
-static uint64_t gDsLastNs;       // when (gSchedLock)
+static const XeQueue *gDsLastQ[2];  // per class (render, compute) of the primary GT: the last queue that submitted (only
+static uint64_t gDsLastNs[2];       // compared) and when (gSchedLock)
+
+// WindowServer and the processes that draw the system's interface never arm (the Metal driver keeps them on its old paths
+// too, nvmtl_plock_system_ui): what they submit runs whenever the screen changes, and they must never wait behind a
+// polling context. q->name is the process name cut to 15 characters.
+static bool dsSystemUi(const XeQueue *q) {
+	static const char *const ui[] = { "WindowServer", "loginwindow", "Dock", "com.apple.dock.", "SystemUIServer",
+		"ControlCenter", "NotificationCen", "WindowManager", "ScreenSaverEngi", "legacyScreenSav" };
+	for (const char *u : ui) if (!strncmp(q->name, u, 15)) return true;
+	return false;
+}
 
 static void queueBan(XeQueue *q);
 
@@ -2833,8 +2843,9 @@ static bool dsSubmit(XeQueue *q, uint64_t batch, uint32_t seq) {
 	q->submitted = seq;
 	if (gJobTimeoutMs > 0) watchArm();
 	gStats.dsSubmits++;
-	gDsLastQ = q;
-	gDsLastNs = q->dsLastNs = nowNs();
+	const int ci = q->eng->drmClass == DRM_XE_ENGINE_CLASS_COMPUTE;
+	gDsLastQ[ci] = q;
+	gDsLastNs[ci] = q->dsLastNs = nowNs();
 	const uint32_t done = seqnoOf(q->slot);
 	uint32_t sdw[40];
 	const uint32_t m = dsSlot(q, seq + 1, sdw);
@@ -2859,12 +2870,16 @@ static bool dsSubmit(XeQueue *q, uint64_t batch, uint32_t seq) {
 // time, gets the slot for seq + 1 behind the job, in the same ring write and SCHED_CONTEXT. Only on the exec path with
 // an empty FIFO (seq is the last seqno handed out). False: not armed, nothing written. gSchedLock, the switch on.
 static bool dsEnter(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq, uint32_t nInl) {
-	if (q->eng->gt || q->eng->drmClass != DRM_XE_ENGINE_CLASS_COMPUTE) return false;
+	if (q->eng->gt || (q->eng->drmClass != DRM_XE_ENGINE_CLASS_COMPUTE && q->eng->drmClass != DRM_XE_ENGINE_CLASS_RENDER))
+		return false;
+	const int ci = q->eng->drmClass == DRM_XE_ENGINE_CLASS_COMPUTE;
 	const uint64_t now = nowNs(), idle = dsIdleNs();
-	const bool alone = gDsLastQ == q || now - gDsLastNs >= idle, recent = q->dsLastNs && now - q->dsLastNs < idle;
-	gDsLastQ = q;
-	gDsLastNs = q->dsLastNs = now;
-	if (!q->lowLatency || q->kernel || nInl || !alone || !recent || !gDsMem || !gDsCall) return false;
+	const bool alone = gDsLastQ[ci] == q || now - gDsLastNs[ci] >= idle, recent = q->dsLastNs && now - q->dsLastNs < idle;
+	gDsLastQ[ci] = q;
+	gDsLastNs[ci] = q->dsLastNs = now;
+	// 9 Nov: any application queue, not only those with the low-latency hint (off by default now), and render too, where
+	// Metal and OpenCL apps run their work; WindowServer's next frame on the render class makes an armed queue leave
+	if (q->kernel || dsSystemUi(q) || nInl || !alone || !recent || !gDsMem || !gDsCall) return false;
 	if (q->banned || q->closed || q->tdr || gResetting || gSuspended || gWedged) return false;
 	if (q->jobHead || seq != q->seqno + 1 || seq + 1 == 0) return false;
 	const uint32_t done = seqnoOf(q->slot);
