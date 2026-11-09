@@ -19,6 +19,7 @@ screen, render distance 16): zink 741 fps, Apple's OpenGL 160 fps, Windows 450�
 | `./zink-gl-version.sh 1.21.1 --write` | one Minecraft version only: a separate `1.21.1-zink` version |
 | `sudo ./install.sh --undo` | the state before the install |
 | `sudo ./install.sh --status` | what is installed and switched on |
+| `./cglzink-app.sh add /Applications/X.app` | experimental: a native CGL/NSOpenGL application through zink, as "X (zink).app" in `~/Applications` (below) |
 
 `--global on` affects applications started afterwards; running ones must be restarted. Java prints "Picked up
 JAVA_TOOL_OPTIONS" at each start; that is expected. To keep one application on Apple's OpenGL, start it with
@@ -26,7 +27,8 @@ JAVA_TOOL_OPTIONS" at each start; that is expected. To keep one application on A
 
 ## Limits
 
-- Native macOS applications that use CGL/NSOpenGL directly still go through Apple's OpenGL.
+- Native macOS applications that use CGL/NSOpenGL directly still go through Apple's OpenGL, unless started through
+  `cglzink-app.sh` (below).
 - Opaque windows rely on Core Animation's private `contentsOpaque`; a macOS update can break it.
 - Tested on macOS 26.7.1 only: in the game at the spot above, windowed and full screen, with a shader pack through
   Iris. Not tested: scaled (HiDPI) display modes, screen recording while it runs, several windows, Minecraft 26.3,
@@ -35,6 +37,26 @@ JAVA_TOOL_OPTIONS" at each start; that is expected. To keep one application on A
   macOS reopens by itself at login ("Reopen windows when logging back in") can start a few seconds before the
   LaunchAgent and then runs on Apple's OpenGL. Quit it and start it again; Java prints "Picked up JAVA_TOOL_OPTIONS"
   when zink is on.
+
+## Native OpenGL applications (CGL / NSOpenGL), experimental
+
+`libcglzink.dylib` (sources in `cgl/`, details in `cgl/README.md`) sends an application's CGL and NSOpenGL contexts to
+zink instead of Apple's OpenGL. It is opt-in per application:
+
+| Command | What it does |
+|---|---|
+| `./cglzink-app.sh list` | applications that link or import Apple's OpenGL |
+| `./cglzink-app.sh add /Applications/X.app` | makes `~/Applications/X (zink).app`: open it for zink, `X` itself for Apple's OpenGL |
+| `./cglzink-app.sh remove X` | deletes `X (zink).app` |
+| `./cglzink-app.sh run X` | starts X once through zink from Terminal, with the layer's log there |
+
+`X (zink).app` starts the real application through LaunchServices with `DYLD_INSERT_LIBRARIES` for that launch only (log:
+`~/Library/Logs/cglzink/X.log`). If X is already running, quit it first. This works for signed and Apple applications
+because the driver's setup turns AMFI off (`amfi_get_out_of_my_way=0x1`); with AMFI on, macOS drops `DYLD_*` variables
+for hardened applications. There is no switch for every application yet. With AMFI off, `launchctl setenv` does pass
+`DYLD_*` to applications started later (on the test machine; with AMFI on, launchd drops it), so one is possible; it
+waits for measured gains, because it loads the layer into every process the user starts and a missing library would
+stop each of them. Not covered yet: drawing into IOSurfaces (browsers), CGL pbuffers; see `cgl/README.md`.
 
 ## Contents and sources
 
@@ -47,6 +69,7 @@ JAVA_TOOL_OPTIONS" at each start; that is expected. To keep one application on A
 | `vulkan/libvulkan.1.4.363.dylib` | Khronos Vulkan loader, unmodified | Vulkan-Loader `vulkan-sdk-1.4.363.0`, as in `user/vulkan-loader/README.md` |
 | `vulkan/icd.d/intel_icd.x86_64.json` | ICD manifest → `/Library/GPUBundles/nvmtl/libvulkan_intel.dylib` | `user/vulkan-loader/` |
 | `bin/zink-gl-selftest` | the `--test` program | `src/egltri.c` |
+| `lib/libcglzink.dylib` | CGL/NSOpenGL contexts through zink (optional) | `cgl/` (`cgl/build.sh x86_64 OUT`) |
 
 `src/mesa-zink.diff` is the whole difference of the built tree from upstream. Its patches are in `mesa/patches`
 (`0071`, `0072`, `0073` are the zink part). zink talks to ANV only through the Vulkan API, so it does not have to come
@@ -71,4 +94,7 @@ Apple'ın OpenGL'i yerine Mesa'nın zink'iyle doğrudan Vulkan'a gidiyor; Minecr
 `sudo ./install.sh` kurar, `sudo ./install.sh --global on` bütün LWJGL 3 uygulamaları için açar, `--global off`
 kapatır, `--undo` kaldırır. Sürücünün kurulu ve `intelxe_surfvram=2` ayarının açık olması gerekiyor. CGL/NSOpenGL'i
 doğrudan kullanan yerel uygulamalar yine Apple'ın OpenGL'ini kullanır. macOS'un girişte kendiliğinden yeniden açtığı
-bir uygulama ayardan önce başlayıp Apple'ın OpenGL'inde kalabilir: kapatıp yeniden açın.
+bir uygulama ayardan önce başlayıp Apple'ın OpenGL'inde kalabilir: kapatıp yeniden açın. Deneysel: CGL/NSOpenGL kullanan
+yerel bir uygulama `./cglzink-app.sh add /Applications/X.app` ile `~/Applications/X (zink).app` olarak Zink'e geçer; X'in
+kendisi Apple'ın OpenGL'inde kalır, `./cglzink-app.sh remove X` kaldırır. Bütün uygulamalar için tek bir anahtar yok
+(macOS `DYLD_*` değişkenlerini launchd üzerinden geçirmiyor).
