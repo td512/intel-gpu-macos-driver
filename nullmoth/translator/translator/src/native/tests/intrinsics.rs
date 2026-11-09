@@ -375,6 +375,30 @@ declare i32 @air.pack.unorm4x8.srgb.v4f32(<4 x float>)
     }
 }
 
+/// Metal converts a NaN to integer 0, so the finalize pass guards every float-to-integer conversion
+/// (`select(isnan(x), 0, convert(x))`, passes::finalize::metal_nan_to_zero_conversions). Returns the number of
+/// those guards and the number of OpIsNan instructions that are not one of them.
+fn nan_to_zero_guards(spv: &[u8]) -> (usize, usize) {
+    let module = load_bytes(spv).expect("load native spv");
+    let converted: HashSet<Word> = module
+        .all_inst_iter()
+        .filter(|inst| matches!(inst.class.opcode, Op::ConvertFToU | Op::ConvertFToS))
+        .filter_map(|inst| match inst.operands.first() {
+            Some(Operand::IdRef(source)) => Some(*source),
+            _ => None,
+        })
+        .collect();
+    module
+        .all_inst_iter()
+        .filter(|inst| inst.class.opcode == Op::IsNan)
+        .fold((0, 0), |(guards, other), inst| {
+            match inst.operands.first() {
+                Some(Operand::IdRef(source)) if converted.contains(source) => (guards + 1, other),
+                _ => (guards, other + 1),
+            }
+        })
+}
+
 #[test]
 fn native_air_pack_unorm_rgb565_f16_lowers_to_exact_fields() {
     let ll = r#"
@@ -406,7 +430,9 @@ declare i16 @air.pack.unorm.rgb565.v3f16(<3 x half>)
     assert_eq!(asm.matches(" FClamp ").count(), 0, "{asm}");
     assert_eq!(asm.matches(" RoundEven ").count(), 3, "{asm}");
     assert_eq!(asm.matches(" Round ").count(), 0, "{asm}");
-    assert_eq!(asm.matches("OpIsNan").count(), 0, "{asm}");
+    // NClamp maps NaN to 0, so the pack itself tests nothing for NaN; only the generic guard of each of the three
+    // field conversions remains.
+    assert_eq!(nan_to_zero_guards(&spv), (3, 0), "{asm}");
     assert_eq!(asm.matches("OpShiftLeftLogical").count(), 2, "{asm}");
     assert!(asm.contains("OpUConvert"), "{asm}");
     if std::process::Command::new("spirv-val")
@@ -452,7 +478,9 @@ declare i32 @air.pack.unorm.rgb10a2.v4f32(<4 x float>)
     assert_eq!(asm.matches(" FClamp ").count(), 0, "{asm}");
     assert_eq!(asm.matches(" Fma ").count(), 4, "{asm}");
     assert_eq!(asm.matches(" Floor ").count(), 4, "{asm}");
-    assert_eq!(asm.matches("OpIsNan").count(), 0, "{asm}");
+    // NClamp maps NaN to 0, so the pack itself tests nothing for NaN; only the generic guard of each of the four
+    // field conversions remains.
+    assert_eq!(nan_to_zero_guards(&spv), (4, 0), "{asm}");
     assert_eq!(asm.matches("OpShiftLeftLogical").count(), 3, "{asm}");
 
     let module = load_bytes(&spv).expect("load native spv");
@@ -1948,6 +1976,8 @@ declare float @air.fast_tanpi.f32(float)
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// The large-argument flush is opt-in (NVMTL_XLATE_TRIG_FLUSH=1, float_imageblock::fast_trig_flush_on); this test
+/// turns it on for its own thread, and checks at the end that the default is the plain GLSL Sin and Cos.
 #[test]
 fn native_fast_sincos_f32_zeroes_large_arguments() {
     let ll = r#"
@@ -1969,13 +1999,24 @@ declare float @air.fast_sin.f32(float)
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&tmp);
-    let module = load_bytes(emit_vulkan_spirv(ll).expect("native emit")).expect("load native spv");
-    let out = passes::transform(module, Stage::Kernel, None, None, None, Some("main"))
-        .expect("interface transform")
-        .assemble()
-        .iter()
-        .flat_map(|w| w.to_le_bytes())
-        .collect::<Vec<_>>();
+    let translate = |flush: bool| {
+        crate::passes::FAST_TRIG_FLUSH_FOR_TEST.with(|on| on.set(flush));
+        let module = load_bytes(emit_vulkan_spirv(ll).expect("native emit")).expect("load native spv");
+        let out = passes::transform(module, Stage::Kernel, None, None, None, Some("main"))
+            .expect("interface transform")
+            .assemble()
+            .iter()
+            .flat_map(|w| w.to_le_bytes())
+            .collect::<Vec<_>>();
+        crate::passes::FAST_TRIG_FLUSH_FOR_TEST.with(|on| on.set(false));
+        out
+    };
+
+    let plain = disassemble(&translate(false)).expect("disassemble transformed");
+    assert!(plain.contains(" Cos ") && plain.contains(" Sin "), "{plain}");
+    assert!(!plain.contains(" FAbs ") && !plain.contains("OpSelect"), "{plain}");
+
+    let out = translate(true);
     let asm = disassemble(&out).expect("disassemble transformed");
     assert!(asm.contains(" FAbs "), "{asm}");
     assert!(asm.contains(" Cos "), "{asm}");

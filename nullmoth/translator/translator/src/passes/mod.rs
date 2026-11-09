@@ -1466,6 +1466,12 @@ impl Ctx {
 
 mod access;
 mod air_calls;
+#[cfg(test)]
+thread_local! {
+    /// Tests turn the fast_sin/fast_cos large-argument flush on for their own thread (air_calls::float_imageblock);
+    /// NVMTL_XLATE_TRIG_FLUSH is process-wide.
+    pub(crate) static FAST_TRIG_FLUSH_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 mod aliased_imageblock;
 mod emitted_inline;
 mod finalize;
