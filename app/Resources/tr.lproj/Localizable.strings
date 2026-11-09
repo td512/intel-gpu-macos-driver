@@ -131,6 +131,9 @@
 "The card's port has no ACPI name" = "Kartın bağlı olduğu portun ACPI adı yok";
 "%@ (the package's table is for it)" = "%@ (paketteki tablo bunun için)";
 "%@ (the package's table is for \\_SB.PC00.PEG1.PEGP)" = "%@ (paketteki tablo \\_SB.PC00.PEG1.PEGP için)";
+"%@ (adapted to this card's port: the package's table is for \\_SB.PC00.PEG1.PEGP)" = "%@ (bu kartın portuna uyarlanır: paketteki tablo \\_SB.PC00.PEG1.PEGP için)";
+"The package's, adapted to this card's port" = "Paketteki tablo, bu kartın portuna uyarlanmış";
+"Differs from the package's adapted to this card's port" = "Paketteki tablonun bu kartın portuna uyarlanmış halinden farklı";
 "Mount the EFI partition to see what would change." = "Nelerin değişeceğini görmek için EFI bölümünü bağlayın.";
 "This partition has no EFI/OC/OpenCore.efi and config.plist: it is not an OpenCore EFI." = "Bu bölümde EFI/OC/OpenCore.efi ve config.plist yok: Bu bir OpenCore EFI'si değil.";
 "The EFI's config.plist cannot be read." = "EFI'deki config.plist okunamıyor.";

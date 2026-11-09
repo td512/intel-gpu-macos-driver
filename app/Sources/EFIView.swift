@@ -132,7 +132,7 @@ struct EFIView: View {
         Section2(title: "IntelXe.kext and SSDT-ARCOFF (stage 4)", symbol: "puzzlepiece.extension") {
             LabeledContent("IntelXe.kext in the EFI") { Text(kextText).multilineTextAlignment(.trailing) }
             LabeledContent("Kernel > Add entry") { Text(entryText(efi["kext_entry"])) }
-            LabeledContent("SSDT-ARCOFF.aml in the EFI") { Text(fileText(efi["ssdt_file"])) }
+            LabeledContent("SSDT-ARCOFF.aml in the EFI") { Text(ssdtText).multilineTextAlignment(.trailing) }
             LabeledContent("ACPI > Add entry") { Text(entryText(efi["ssdt_entry"])) }
             LabeledContent("The card's ACPI path") { Text(cardText).textSelection(.enabled).multilineTextAlignment(.trailing) }
             planOrHint(.apply)
@@ -259,6 +259,17 @@ struct EFIView: View {
         }
     }
 
+    /// efi.sh compares the EFI's table with the one this card needs: the package's, or the package's adapted to the card's
+    /// port ("adaptable": the same table with the card's ACPI path written in).
+    var ssdtText: String {
+        let adapted = efi["ssdt_package_names_card"] == "adaptable"
+        switch efi["ssdt_file"] {
+        case "same" where adapted: return String(localized: "The package's, adapted to this card's port")
+        case "different" where adapted: return String(localized: "Differs from the package's adapted to this card's port")
+        case let state: return fileText(state)
+        }
+    }
+
     func entryText(_ state: String) -> String {
         switch state {
         case "enabled": return String(localized: "On")
@@ -273,8 +284,11 @@ struct EFIView: View {
         case "": return String(localized: "No Arc B580 or B570 found")
         case "none": return String(localized: "The card's port has no ACPI name")
         case let path:
-            return efi["ssdt_package_names_card"] == "yes" ? String(localized: "\(path) (the package's table is for it)")
-                : String(localized: "\(path) (the package's table is for \\_SB.PC00.PEG1.PEGP)")
+            switch efi["ssdt_package_names_card"] {
+            case "yes": return String(localized: "\(path) (the package's table is for it)")
+            case "adaptable": return String(localized: "\(path) (adapted to this card's port: the package's table is for \\_SB.PC00.PEG1.PEGP)")
+            default: return String(localized: "\(path) (the package's table is for \\_SB.PC00.PEG1.PEGP)")
+            }
         }
     }
 }
