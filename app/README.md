@@ -9,14 +9,27 @@ install was used on the test machine (the test builds before 0.1.2); the EFI pag
 used yet: *Undo* on a real EFI, *Use an EFI folder...* on a USB stick that then booted, and a whole install from a
 fresh macOS.
 
+**Setup assistant** (opens by itself until it has finished once; the Overview page opens it again): 1. OpenCore's
+settings (stage 2), with *Also prepare Safari on the GPU* to turn Apple Secure Boot off in the same change
+(`efi.sh --settings-safari-apply`); 2. the driver package; 3. `IntelXe.kext` and SSDT-ARCOFF in the EFI (stage 4, with
+HybridPM.kext on a hybrid CPU); 4. a GPU test; 5. done, with extras: Safari on the GPU, Zink for Java games, HiDPI
+sizes, the menu bar item and the check at login. When OpenCore recorded no boot path it lists the EFI partitions to
+choose from.
+
 | Page | What |
 |---|---|
-| System | macOS, processor, card, SIP, AMFI boot-arg, `IntelXe.kext`, Metal device, boot guard; installed version and latest release |
-| Driver | choose a package (download the latest release, or a folder you unpacked); check, install, repair, undo, uninstall |
-| EFI (OpenCore) | the EFI OpenCore booted from: mount it; `IntelXe.kext` and `SSDT-ARCOFF.aml` with their `config.plist` entries (stage 4); SIP, boot-args and quirks (stage 2, separate); undo the last change |
-| Display | HiDPI modes (display scaling) on or off through `hidpi.sh` (the package's, or the app's copy); needs IntelXeFB from 0.1.3, takes effect after a restart |
+| Overview | a status header with the one action that matters now, the setup steps, this Mac's requirements (macOS, processor, card, SIP, AMFI boot-arg, `IntelXe.kext`, Metal device, boot guard); start-up warnings with fixes |
+| Monitor | five-minute charts of the GPU clock, temperatures and frames; the optional menu bar item |
+| Driver | choose a package (download the latest release, or a folder you unpacked); check, install, repair, undo, uninstall; *Safari and WebKit*: the system-volume copy of the Metal driver (`ssv-install.sh`) |
+| EFI (OpenCore) | the EFI OpenCore booted from: mount it; `IntelXe.kext` and `SSDT-ARCOFF.aml` with their `config.plist` entries, and `HybridPM.kext` where the CPU needs it (stage 4); SIP, boot-args and quirks (stage 2, separate); `SecureBootModel` for Safari; undo the last change |
 | OpenGL (Zink) | the same for the optional Zink package; on or off for every LWJGL application |
+| Display | HiDPI modes (display scaling) on or off through `hidpi.sh` (the package's, or the app's copy); needs IntelXeFB from 0.1.3, takes effect after a restart; Variable refresh |
+| Power and app | GPU power profile and clock range, *Fast GPU response for apps* (the GuC low-latency hint, off by default), open at login, the check at login |
+| Tests | the GPU test (Metal features, OpenGL, OpenCL, video decoding bit for bit, encoding quality, compute rate, bandwidth, smoothness) and a long test (about two minutes: video memory, a minute under load) |
+| Report | the diagnostics report (`tools/report/collect-macos.sh`): what it found, and the issue forms with the report ID filled in |
 | Log | what the scripts print, while they run |
+
+The About window (app menu) has the version, the licences and the credits.
 
 After an install the app compares the EFI's `IntelXe.kext` with the package's (executable and `Info.plist`, byte for byte). It
 warns only when they differ, the kext or its `Kernel > Add` entry is missing or off, or the EFI could not be read (then it says
@@ -37,13 +50,16 @@ to `ExposeSensitiveData` so that the next boot records it.
 line, then asks; the password dialog follows. The app passes the plan's SHA-256 with the command, and efi.sh writes
 nothing if the EFI no longer gives that plan. Before a change efi.sh copies the whole EFI folder to
 `/Library/Application Support/intel-gpu-macos-driver/efi-backups/<partition UUID>/<NNN-date>/`; **Undo** puts back,
-from the newest backup, only the files that change touched (`config.plist`, `IntelXe.kext`, `SSDT-ARCOFF.aml`), and
+from the newest backup, only the files that change touched (`config.plist`, `IntelXe.kext`, `SSDT-ARCOFF.aml`,
+`HybridPM.kext`), and
 each undo goes one change further back.
 
 - **Stage 4:** copies `IntelXe.kext` when it is missing or differs, adds or enables its `Kernel > Add` entry (and turns
-  off an earlier `B580.kext` entry), copies `SSDT-ARCOFF.aml` and adds or enables its `ACPI > Add` entry, but only when
-  a table names the B580's upstream port as `ioreg` shows it (`\_SB.PC00.PEG1.PEGP` for the shipped one). With another
-  path it says so and leaves the SSDT out; an `SSDT-ARCOFF.aml` of your own that names the port is kept.
+  off an earlier `B580.kext` entry), copies `SSDT-ARCOFF.aml` and adds or enables its `ACPI > Add` entry. The table
+  must name the card's upstream port as `ioreg` shows it (`\_SB.PC00.PEG1.PEGP` for the shipped one); with another path
+  efi.sh writes that path into a copy of the table ("adapted to this card's port"). An `SSDT-ARCOFF.aml` of your own
+  that names the port is kept. On a 12th-14th gen hybrid Intel CPU it also copies `HybridPM.kext` with an entry right
+  below `Lilu.kext`'s; without Lilu in the EFI it leaves HybridPM out with a note.
 - **Stage 2 (separate button):** `csr-active-config` with at least `0x803` (a wider value stays), `amfi_get_out_of_my_way=0x1`
   and `intelxe_surfvram=2` added to the boot-args (the rest kept), `csr-active-config` and `boot-args` in
   `NVRAM > Delete`, `ResizeAppleGpuBars = 10`, `DisableIoMapper = true`, `ReconnectGraphicsOnConnect = false`.
@@ -53,7 +69,8 @@ each undo goes one change further back.
 
 Changes go through the macOS administrator password dialog (`osascript ... with administrator privileges`); there is no helper tool and
 nothing stays running. A download is compared with the `.sha256` file of the same GitHub release. That finds a damaged file, it does
-not prove who made the release. Files go to `~/Library/Application Support/IntelXe Manager`. It contacts only GitHub, and sends no data.
+not prove who made the release. Files go to `~/Library/Application Support/IntelXe Manager`. It contacts only GitHub, and sends no data
+(the Report page only opens the issue form in the browser).
 
 English and Turkish, following the system language (`Resources/`).
 
@@ -72,4 +89,5 @@ on the macOS 27 SDK it is a macro and the Command Line Tools have no SwiftUI mac
   status, plans, apply, settings, undo, the plan hash, the ACPI path check, the boot-path and `ioreg` parsing. No root, no partition.
 - With a package, `--selftest` also runs efi.sh through the app's own functions against a fake EFI (plan, hash, apply, the notice after
   an install, undo), and `--snapshot` adds the EFI page. Not tested without the real machine: OpenCore's `boot-path` on a real boot,
-  mounting a real EFI partition, the password dialog, and `ioreg` with a real B580.
+  mounting a real EFI partition, the password dialog, and `ioreg` with a real card.
+- `IntelXeManager --gputest` / `--longtest` run the Tests page's GPU tests in Terminal (they need the card).

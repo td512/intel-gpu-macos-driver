@@ -43,7 +43,7 @@ for anything that differs on your machine.
    | IntelBluetoothFirmware, IntelBTPatcher | 2.5.0 | [OpenIntelWireless/IntelBluetoothFirmware](https://github.com/OpenIntelWireless/IntelBluetoothFirmware/releases) | Intel Bluetooth |
    | AirportItlwm | 2.4.0 | [OpenIntelWireless/itlwm](https://github.com/OpenIntelWireless/itlwm/releases) | Intel Wi-Fi; take the build for your macOS. The test machine's BE202 needed a patched build that is not published |
    | IntelXe | from the `-efi.zip` | this project | the GPU driver, stage 4 only |
-   | HybridPM | from the `-efi.zip` | this project ([kernel/HybridPM](../../kernel/HybridPM/README.md)) | XCPM fix for hybrid (12th-14th gen) CPUs; the entry is disabled here, enable it after Lilu. Without it the CPU stayed near 4.4 GHz instead of 5.5 GHz on macOS 26 |
+   | HybridPM | from the `-efi.zip` | this project ([kernel/HybridPM](../../kernel/HybridPM/README.md)) | XCPM fix for hybrid (12th-14th gen) CPUs; the entry is disabled here (stage 4 with `efi.sh` or the app turns it on, below Lilu). Without it the CPU stayed near 4.4 GHz instead of 5.5 GHz on macOS 26 |
 
    Leave out what your machine does not have (another Ethernet chip, Wi-Fi card or Bluetooth) and remove its
    `Kernel > Add` entry.
@@ -56,8 +56,8 @@ for anything that differs on your machine.
      map USB another way.
    - `SSDT-PCHWAKE` (with the `HDAS _PRW` rename) stops the onboard audio from waking the machine; `SSDT-USBW` lets a
      USB key press wake it fully. Both name this board's devices; check the paths against your DSDT.
-   - `SSDT-ARCOFF` hides the B580 from macOS's generic display driver. Stage 4 of the install guide says how to check
-     its path for your board.
+   - `SSDT-ARCOFF` hides the card from macOS's generic display driver. Stage 4 of the install guide says how to check
+     its path for your board; `efi.sh` and the app adapt it to your card's path by themselves.
 4. **Serial numbers:** generate a `MacBookPro16,2` identity with [GenSMBIOS](https://github.com/corpnewt/GenSMBIOS)
    and put it in `PlatformInfo > Generic`: `SystemSerialNumber`, `MLB`, `SystemUUID`; `ROM` is the MAC address of your
    Ethernet port (6 bytes).

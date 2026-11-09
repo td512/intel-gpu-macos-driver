@@ -36,7 +36,7 @@
    "id": "bmg",
    "short": "B570, other BMG",
    "title": "Xe2 dGPU: Battlemage B570 and the other BMG IDs",
-   "detail": "the other IDs of Linux INTEL_BMG_IDS (kernel/IntelXe/xe_probe_ids.inc kIdsBMG: E202-E223), B570 = 8086:E20C. IntelXe.kext attaches to 8086:E20B only (kernel/IntelXe/build.py IOPCIMatch 0xe20b8086).",
+   "detail": "the other IDs of Linux INTEL_BMG_IDS (kernel/IntelXe/xe_probe_ids.inc kIdsBMG: E202-E223), B570 = 8086:E20C. IntelXe.kext attaches to 8086:E20B and, since 0.1.4, 8086:E20C (kernel/IntelXe/build.py IOPCIMatch; B570 untested on hardware).",
    "caps": "bmg"
   },
   {
@@ -443,7 +443,7 @@
    ],
    "bmg": [
     "notyet",
-    "IntelXe.kext attaches to 8086:E20B only (kernel/IntelXe/build.py IOPCIMatch 0xe20b8086)",
+    "B570 (8086:E20C): matched since 0.1.4 (kernel/IntelXe/build.py IOPCIMatch 0xe20b8086 0xe20c8086, PR #2), not run on hardware; other BMG IDs: not matched",
     ""
    ],
    "lnl": [
@@ -587,8 +587,8 @@
   "metal": {
    "b580": [
     "works",
-    "Metal plugin over ANV: WindowServer composites on it; mtl_tests 7/7; Geekbench 7 Metal 92898 (macOS 26.7.1)",
-    "2026-11-05, docs/devices/b580.md"
+    "Metal plugin over ANV: WindowServer composites on it; mtl_tests 7/7; Geekbench 7 Metal 95.7k (0.1.4, macOS 26.7.1)",
+    "2026-11-09, docs/devices/b580.md"
    ],
    "bmg": [
     "notyet",
@@ -661,8 +661,8 @@
   "opencl": {
    "b580": [
     "works",
-    "OpenCL 1.2 through Apple's OpenCL over Metal on the B580 (Geekbench 7 OpenCL 86920, macOS 26.7.1); not Intel's compute-runtime",
-    "2026-10-29, docs/devices/b580.md"
+    "OpenCL 1.2 through Apple's OpenCL over Metal on the B580 (Geekbench 7 OpenCL 85.5k, 0.1.4, macOS 26.7.1); not Intel's compute-runtime",
+    "2026-11-09, docs/devices/b580.md"
    ],
    "bmg": [
     "notyet",

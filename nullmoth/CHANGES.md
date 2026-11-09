@@ -1,4 +1,4 @@
-# Changes to nullmoth for the Arc B580
+# Changes to nullmoth for the Arc B580 (and B570)
 
 This directory is a copy of the parts of [nullmoth/nvidia-macos-driver](https://github.com/nullmoth/nvidia-macos-driver)
 that the IntelXe stack uses, with our modifications applied.
@@ -52,7 +52,7 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
 - **`nmx_accel_names.h` (new):** the OSMetaClass names of the released NMXAccel.kext 2.1.0. Upstream's `-DNMX_ACCEL` build includes this header but does not ship it.
   - The NMX build no longer needs NVIDIA's `nvkms-kapi.h`.
   - It does not read NVIDIA's temperature register from another vendor's BAR0.
-- **`Info-NMX-IntelXe.plist` (new):** matches only `8086:e20b`, in the `IOAccelerator` match category.
+- **`Info-NMX-IntelXe.plist` (new):** matches `8086:e20b` (B580) and, since 0.1.4, `8086:e20c` (B570), in the `IOAccelerator` match category.
 - **Display head:** the framebuffer of IntelXeFB (`IntelXeFramebuffer`) is watched as head 0.
   - `nvScanoutInfo` and VRAM allocation calls are answered through IntelXeFB.
   - Placeholder GPU VAs; commit/release are no-ops for NMX.
@@ -77,7 +77,7 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
 
 - **Boot ordering:** waits for IntelXeFB's registration to finish before listing it (boot1c hung arming while IntelXeFB was still being published).
 
-- **`Info-NMX-IntelXe.plist` (new):** loads the AGDC service for the B580 only.
+- **`Info-NMX-IntelXe.plist` (new):** loads the AGDC service (on `IOResources`; it serves IntelXeFB's display, no device-ID match).
 - **Command 0x980:** lists IntelXeFB, so WindowServer builds a display pipe for it.
 - **Commands 0x921 (link config) and 0x711:** answered with nullmoth's `NVRMTiming` (K5) for IntelXeFB.
 - **0x711 gamma capability:** a 3-channel, 10-bit, 1024-entry pipe gamma, so CoreDisplay skips its own per-frame gamma pass. Switch: `debug.nmxagdc_gamma`.
@@ -86,7 +86,7 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
 
 - **Vendor `0x8086` path:**
   - loads our ANV (`/Library/GPUBundles/nvmtl/`);
-  - short device name "Intel Arc B580 Graphics";
+  - short device name: the PCI device's `model` as About This Mac shows it ("Intel Arc B580 Graphics", "Intel Arc B570 Graphics"); the VideoToolbox codecs carry the same name;
   - the allow-list gains `!Name` (only while the display pipe is armed) and `!*`.
 - **WindowServer:**
   - framebuffer fetch on by default for non-NVIDIA devices (`NVMTL_FBFETCH_WS=0` disables);
@@ -118,6 +118,15 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
 - **GPU reset recovery (recover1):** a banned exec queue is replaced on the same VM through Mesa's `nvmtl_anv_device_recover_v1` (`mesa/patches/0050`); at most 3 per minute and 16 per process.
 - **Function constants (speccst6):** variants are specializations of one translated module (`nvmtl_spec_fc.h`); only the constants that shape the module are baked in.
 - **VRAM-shared IOSurfaces (sv2-sv8):** IOSurfaces in shared B580 VRAM through Mesa 0014 and NMXAccel's registry, with implicit sync of every access, instead of per-process VRAM copies synchronised with the system pages. Off until `debug.intelxe.surfvram` is 1 (apps) or 2-3 (also WindowServer).
+- **Commit locking (lock V2, 0.1.4):** commit and the execution worker no longer share the command-buffer class lock
+  (`nvmtl_plock.h`): 18.2 -> 11.1 us per command buffer back to back. On by default for applications; WindowServer and
+  the system's interface keep the class lock; `NVMTL_LOCK_V2=0/1` decides for one process.
+- **GuC low-latency hint (0.1.4):** off by default; `/Library/GPUBundles/NVMTLDriver.low-latency` turns it on for every
+  process but WindowServer and the system's interface, `NVMTL_GUC_LOW_LATENCY=0/1` for one process (`nvmtl_vk.c`).
+- **Working set on Intel (0.1.4):** `recommendedMaxWorkingSetSize` is ANV's heap budget less 1 GB for the desktop, at
+  most the card less 2 GB (8.2 GB on the B580, was 5.1); `NVMTL_WS_INTEL=0` restores the formula below.
+- **`staticThreadgroupMemoryLength` (0.1.4):** reports the threadgroup memory the function declares; it answered 0,
+  so apps and Apple's OpenCL showed "local 0 B".
 - **Function-constant module key without a cache folder:** in a process with no shader cache folder (a sandbox such as
   WebKit's GPU process) the in-memory key of a specialized module printed the structural values' JSON with `%@` of an
   `NSData`, which shows only its length and a few bytes. Variants whose JSON had the same length shared one module, so
@@ -191,4 +200,9 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
   from a `switch` were folded as if the constant were 0. SwiftUI's RenderBox took the default shape in every
   specialized variant, its coverage was zero and widgets, the Dock's Calendar icon and other materials drew nothing.
   Unbaked function constants are no longer folded; baked ones still are (unit test in `native/constfold/mod.rs`).
+- **Disjoint `or` as add (0.1.4, `disjoint_or.rs`):** LLVM writes some index additions as an `or` of bits that do not
+  overlap; the translator turns them back into adds, so Mesa vectorizes the loads (clbench `sgemm_reg` 3778 -> 7130
+  GFLOP/s on the B580).
+- **Relaxed threadgroup atomics (0.1.4):** an integer read-modify-write with memory order 0 on threadgroup memory is
+  emitted Relaxed, not AcquireRelease, so Mesa no longer fences SLM around it; exchange keeps AcquireRelease.
 - **`translator/Cargo.lock`:** regenerated by `cargo build` of the wrapper on this machine. It is smaller than upstream's because it resolves only the wrapper's dependency graph.

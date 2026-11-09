@@ -4,7 +4,7 @@
 
 ## Why
 
-The driver runs on one GPU so far, the Arc B580; its goal is Intel GPUs in general (see [docs/PLATFORMS.md](PLATFORMS.md)). Before we can support another Intel GPU, we need to know what it does at the steps our driver takes:
+The driver runs on one GPU so far, the Arc B580 (the B570, the same chip, is matched since 0.1.4 but untested); its goal is Intel GPUs in general (see [docs/PLATFORMS.md](PLATFORMS.md)). Before we can support another Intel GPU, we need to know what it does at the steps our driver takes:
 - how it identifies itself;
 - whether it wakes;
 - which engines it has;

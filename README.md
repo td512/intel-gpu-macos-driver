@@ -11,7 +11,7 @@
 **A Metal driver that runs Intel Arc graphics cards on macOS.** It brings the GPU up the way Linux's `xe` driver does,
 runs Mesa's Vulkan driver (ANV) on top of it, and implements Metal on Vulkan, so WindowServer, Metal apps and games,
 and VideoToolbox video run on the Intel card. Today it runs on the **Arc B580** on **macOS 26 Tahoe** (x86_64,
-OpenCore).
+OpenCore); the **Arc B570**, the same chip, is supported but untested by us.
 
 <p align="center">
   <img src="docs/images/about-this-mac.png" width="27%" alt="About This Mac showing the Intel Arc B580 with 12 GB">
@@ -37,7 +37,7 @@ OpenCore).
 | GPU | Intel Arc **B580** (8086:E20B); Arc **B570** (8086:E20C) from 0.1.4 | the B570 is untested: reports welcome; other Intel GPUs: see [Project status](#project-status); nothing is claimed before it runs |
 | macOS | **26 Tahoe** (tested on 26.7.1); 15 Sequoia (built from the same sources, not re-tested since the move to Tahoe) | x86_64 only |
 | Machine | a PC with OpenCore (tested: Z790, i7-14700K) | Above 4G decoding and Resizable BAR on |
-| Monitor | one DisplayPort monitor on the B580 | a second monitor is not supported yet |
+| Monitor | one DisplayPort monitor on the card | a second monitor is not supported yet |
 | Apple Silicon | no | Apple Silicon Macs cannot take a PCIe GPU |
 
 ## Install
@@ -47,15 +47,19 @@ You prepare everything from Windows, Linux or macOS; no Mac is needed. The full 
 
 1. Install macOS with a plain OpenCore EFI ([Dortania's guide](https://dortania.github.io/OpenCore-Install-Guide/); the
    test machine's configuration without its serial numbers is in [`efi/sample-z790/`](efi/sample-z790/)).
-   The installer runs on the B580's firmware output, without acceleration; no integrated GPU is needed.
+   The installer runs on the card's firmware output, without acceleration; no integrated GPU is needed.
 2. In `config.plist`: SIP, the AMFI boot-arg, two quirks and `ReconnectGraphicsOnConnect = false` (otherwise
    OpenCore's RELEASE build panics the boot).
 3. On macOS: the **IntelXe Manager** app from [Releases](../../releases) downloads the package for your version and
    installs it, or run `sudo ./install.sh --apply` from the package yourself. Either checks your setup first, backs up
    what it replaces and can undo the install.
-4. In the EFI: `IntelXe.kext` and an ACPI table with your board's path, then reboot with the monitor on the B580. The
-   app's EFI page or `efi.sh` does it from macOS on the PC, `IntelXe-EFI.ps1` (in `-efi.zip`) from Windows, in the
-   EFI you point it to; each backs up the EFI first and changes only what the driver needs.
+4. In the EFI: `IntelXe.kext` and an ACPI table with your card's path, then reboot with the monitor on the card. The
+   app's EFI page or `efi.sh` does it from macOS on the PC (it adapts the table to your card's ACPI path, and on a
+   12th-14th gen hybrid Intel CPU adds `HybridPM.kext` below Lilu), `IntelXe-EFI.ps1` (in `-efi.zip`) from Windows, in
+   the EFI you point it to (it does not add HybridPM yet); each backs up the EFI first and changes only what the driver
+   needs.
+
+The IntelXe Manager app's setup assistant walks through these steps from a fresh macOS install to a tested driver.
 
 Later releases install over the old one from the app's Driver page.
 
@@ -70,12 +74,17 @@ To build everything yourself, see [Building from source](#building-from-source).
   updates.
 - **OpenGL and OpenCL** through Apple's GL-over-Metal and OpenCL-over-Metal (the default). OpenGL also runs through
   Mesa's Zink for applications that open their context with GLFW/EGL (LWJGL 3 games such as Minecraft): the optional
-  `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)).
+  `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)). Experimental: native CGL/NSOpenGL apps through Zink, one app at a
+  time (`cglzink-app.sh`; GZDoom MAP01 uncapped ~1910 fps against ~1600 on Apple's OpenGL).
 - **Safari** on the GPU with the optional copy of the driver on the system volume (Safari's GPU
   process may only load code from there); desktop widgets and the Dock's icons on the GPU.
 - **Video:** VideoToolbox decoders for H.264, HEVC, AV1 and VP9, and encoders for H.264, HEVC and AV1, all on the GPU,
   for QuickTime, OBS, HandBrake and ffmpeg's `videotoolbox` encoders.
 - **GPU recovery:** a hung job resets only its engine; the desktop keeps running.
+- **Hybrid Intel CPUs (12th-14th gen):** the optional `HybridPM.kext` (a Lilu plugin, [`kernel/HybridPM/`](kernel/HybridPM/README.md))
+  lets macOS run their P-cores at full clock; the driver's CPU work per command buffer, and so the GPU, gets faster.
+- **IntelXe Manager:** a setup assistant, install and undo, the EFI changes, Safari on the GPU, Zink, HiDPI, GPU tests,
+  a Monitor page with a menu bar item, and diagnostics reports.
 
 ### Known issues
 
@@ -87,6 +96,13 @@ To build everything yourself, see [Building from source](#building-from-source).
   compiled shaders before: Mesa turned its disk cache off in WindowServer); the first login after an install compiles
   them once.
 - After a restart, the login screen shows a light grey band behind "Your password is required to log in".
+- The GuC low-latency hint (it keeps the GPU clock up while an app's work runs) is off by default since 0.1.4: with it,
+  the first heavy run after a long idle ended in a GPU fault (`MEMORY_CAT_ERROR`, cause still open) in 3 of 6 tests.
+  Off costs some speed: with it on, an earlier test build scored Metal 97.7k and OpenCL 90.1k–92.5k, and Geekbench's
+  Background Blur and Super Resolution depend on the GPU clock. Opt in on the app's *Power and app* page (*Fast GPU
+  response for apps*) or with `/Library/GPUBundles/NVMTLDriver.low-latency`.
+- Direct submission (faster job start, the 97.2k / 92.9k below) is opt-in until it has run longer unattended:
+  `sudo sysctl debug.intelxe.direct=1`, until the next restart.
 - Command-line tools whose first Metal use is a VideoToolbox encode (ffmpeg) do not see our encoders in their first
   session; apps that bring Metal up first (OBS, QuickTime, HandBrake) do.
 
@@ -121,7 +137,7 @@ The same card in the same machine, Intel's Windows driver against this driver
         │
  IntelXe.kext ── GPU core: GuC/HuC, GGTT/PPGTT, VRAM, engines, xe uAPI      kernel/IntelXe
         ▼
- Intel GPU (today: Arc B580, BMG-G21: graphics 20.01, media 13.01, display 14.01)
+ Intel GPU (today: Arc B580 / B570, BMG-G21: graphics 20.01, media 13.01, display 14.01)
 ```
 
 From the hardware up:
@@ -156,11 +172,16 @@ its history: [docs/parity/HISTORY.md](docs/parity/HISTORY.md); next steps: [docs
 |---|---|
 | `kernel/IntelXe/` | GPU kext and `build.py` (builds both kexts); `uapi/` |
 | `kernel/IntelXeFB/` | display kext |
+| `kernel/HybridPM/` | optional CPU power-management fix for hybrid Intel CPUs (Lilu plugin) and `hpmstat` |
 | `nullmoth/` | Metal plugin, translator, NMXAccel, NMXAGDC; `build/build-intelxe.sh` |
 | `mesa/` | Mesa changes: `intelxe.diff` on upstream `f01e9b07a91` (`apply.sh`, `configure.sh`), and the same changes as a patch series |
 | `user/` | `xemac` (user side of the uAPI), tests and tools |
 | `videotoolbox/` | VideoToolbox decoder and encoders; `ffmpeg/` (patches and configure line of the shared FFmpeg libraries) |
 | `release/` | the installer and install guide of the release packages (`templates/`, filled in by `package.sh`) |
+| `app/` | the IntelXe Manager app |
+| `zink-gl/` | the optional Zink OpenGL package; `cgl/`: native OpenGL apps through Zink (experimental) |
+| `windows/` | `IntelXe-EFI.ps1`, the EFI tool for Windows |
+| `tools/` | diagnostics reports (`report/`), `clbench`, the parity tables |
 | `firmware/` | `fetch.sh` for the GuC/HuC firmware |
 | `efi/` | OpenCore notes and `SSDT-ARCOFF.dsl` |
 | `docs/` | measurements (`devices/b580.md`), platform table, roadmap, licensing, design notes |
@@ -176,7 +197,8 @@ Releases follow [Semantic Versioning](https://semver.org) in its 0.x form until 
 number (0.1.1). A change that needs manual steps when updating (an EFI change, renamed boot-args) comes with upgrade
 steps in the release notes. Packages, the GitHub tag and `install.sh` carry the release number; a kext or the Metal
 driver carries the number of the release that last rebuilt it (0.1.1 changed only the guide, the docs and the
-packaging; 0.1.2 rebuilt everything; 0.1.3 rebuilt IntelXeFB and NMXAGDC).
+packaging; 0.1.2 rebuilt everything; 0.1.3 rebuilt IntelXeFB and NMXAGDC; 0.1.4 rebuilt IntelXe, IntelXeFB, NMXAccel
+and the Metal driver).
 
 ## Philosophy
 

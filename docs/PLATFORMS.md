@@ -72,7 +72,7 @@ Kaynak ağaçlar / source trees: linux: torvalds/linux abf8c33470f7 (7.3.0, 2026
 
 | Platform | Bizim durum / our status | Kanıt / evidence | Intel | Intel kaynak / source |
 |---|---|---|---|---|
-| Arc B580 | 🟩 works | Metal plugin over ANV: WindowServer composites on it; mtl_tests 7/7; Geekbench 7 Metal 92898 (macOS 26.7.1); 2026-11-05, docs/devices/b580.md | - | Metal is Apple's API; Intel's stack is Linux/Windows |
+| Arc B580 | 🟩 works | Metal plugin over ANV: WindowServer composites on it; mtl_tests 7/7; Geekbench 7 Metal 95.7k (0.1.4, macOS 26.7.1); 2026-11-09, docs/devices/b580.md | - | Metal is Apple's API; Intel's stack is Linux/Windows |
 | B570, other BMG | ⬜ not yet | — | - | — |
 | Lunar Lake | ⬜ not yet | — | - | — |
 | Panther Lake | ⬜ not yet | — | - | — |
@@ -192,7 +192,7 @@ Kaynak ağaçlar / source trees: linux: torvalds/linux abf8c33470f7 (7.3.0, 2026
 
 | Platform | Bizim durum / our status | Kanıt / evidence | Intel | Intel kaynak / source |
 |---|---|---|---|---|
-| Arc B580 | 🟩 works | OpenCL 1.2 through Apple's OpenCL over Metal on the B580 (Geekbench 7 OpenCL 86920, macOS 26.7.1); not Intel's compute-runtime; 2026-10-29, docs/devices/b580.md | compute-runtime | neo shared/source/xe2_hpg_core/bmg |
+| Arc B580 | 🟩 works | OpenCL 1.2 through Apple's OpenCL over Metal on the B580 (Geekbench 7 OpenCL 85.5k, 0.1.4, macOS 26.7.1); not Intel's compute-runtime; 2026-11-09, docs/devices/b580.md | compute-runtime | neo shared/source/xe2_hpg_core/bmg |
 | B570, other BMG | ⬜ not yet | — | compute-runtime | neo shared/source/xe2_hpg_core/bmg |
 | Lunar Lake | ⬜ not yet | — | compute-runtime | neo shared/source/xe2_hpg_core/lnl |
 | Panther Lake | ⬜ not yet | — | compute-runtime | neo shared/source/xe3_core/ptl |

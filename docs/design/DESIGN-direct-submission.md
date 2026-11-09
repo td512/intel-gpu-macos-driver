@@ -1,6 +1,10 @@
 # Direct submission in IntelXe.kext (design, 2026-11-09)
 
 > Design note with its date: it records the plan and the state of that day, not the current status.
+>
+> Update (2026-11-10): merged and released in 0.1.4, still off by default (`debug.intelxe.direct=1` until the next
+> restart); one armed queue at a time. Measured on the B580: a tiny job's exec -> signal 46-52 -> 15-17 us, Geekbench 7
+> Metal 97.2k, OpenCL 92.9k. Current state: the README, `docs/ROADMAP.md` and `docs/devices/b580.md`.
 
 ## Why
 

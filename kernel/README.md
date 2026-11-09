@@ -2,7 +2,8 @@
 
 ## IntelXe/ — GPU core (`io.github.yusufklncc.IntelXe`, IntelXe.kext)
 
-A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e20b`). It follows Linux `drivers/gpu/drm/xe` closely.
+A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e20b`) and, since 0.1.4, the Arc B570
+(the same chip with fewer Xe-cores, `8086:e20c`; untested on hardware). It follows Linux `drivers/gpu/drm/xe` closely.
 
 - **Bring-up:**
   - pcode init status, forcewake;
@@ -20,10 +21,17 @@ A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e2
   - queries, GEM create/mmap, VM bind (async), exec queues on GuC submission;
   - DRM syncobjs (binary and timeline).
   - `uapi/intelxe_drm.h` adds IOSurface implicit fences (the dma-resv model) and scan-out pinning for the display side.
-- **Robustness:** job watchdog / TDR, GT reset, shutdown quiesce, sleep/wake (`intelxePowerEvent`).
+- **Robustness:** job watchdog / TDR, GT reset, shutdown quiesce, sleep/wake (`intelxePowerEvent`); an engine and
+  fault-register dump in the G2H log when the GuC resets a context or a job never starts.
+- **Direct submission** (opt-in, `debug.intelxe.direct`, default 0): an application's render or compute queue keeps an
+  armed slot on its ring, so a job starts without a GuC round trip ([design](../docs/design/DESIGN-direct-submission.md)).
+- **Settings and readings:** the GPU power profile and clock range from NVRAM (`intelxe-gpu-profile`,
+  `intelxe-gpu-min-mhz`, `intelxe-gpu-max-mhz`, written by the app); `debug.intelxe.sensors` (GT clock, temperatures,
+  readable by anyone); `debug.intelxe.jobtime` (each job's stages in GPU timestamps, off by default).
 
-**Version in this repository: `rb7u`**, the kernel of the 0.1.x releases (renamed to IntelXe; tested on macOS 26.7.1).
-It is `rb7t` (VRAM-shared IOSurfaces fixed at boot, purgeable BOs, shared BOs, external fds behind `debug.intelxe.fds`)
+**Version:** since 0.1.2 the kext carries the number of the release that last rebuilt it (0.1.4 here). 0.1.0 to 0.1.3
+shipped `rb7u` (renamed to IntelXe; tested on macOS 26.7.1); 0.1.4 adds the B570's ID, the NVRAM settings, the sensors and job-timing sysctls, the engine dump and direct submission. `rb7u` is
+`rb7t` (VRAM-shared IOSurfaces fixed at boot, purgeable BOs, shared BOs, external fds behind `debug.intelxe.fds`)
 plus `rb7u` (macOS 26 starts drivers while the card is still leaving its reset: wait for config space, read the VRAM
 size again). The earlier steps, each a separate patch in the development tree:
 
@@ -40,7 +48,7 @@ cannot be pointed elsewhere), so the window is first come, first served, with sp
 
 ## IntelXeFB/ — display (`io.github.yusufklncc.IntelXeFB`, IntelXeFB.kext, class `IntelXeFramebuffer`)
 
-An IOFramebuffer for the B580's DisplayPort outputs (display IP 14.01, C20 PHYs).
+An IOFramebuffer for the card's DisplayPort outputs (display IP 14.01, C20 PHYs).
 
 - **Mode setup:**
   - takes over the mode the GOP lit;
@@ -56,7 +64,7 @@ An IOFramebuffer for the B580's DisplayPort outputs (display IP 14.01, C20 PHYs)
 - **Power:** sleep save/restore.
 - **Boot-time arming:** at boot it matches from the AuxKC and arms acceleration in the kernel together with NMXAccel ("boot1"), with an NVRAM panic-loop guard (`intelxe-guard`).
 
-**Version in this repository: v10m**, the framebuffer of the 0.1.x releases: boot1 + v9 + v10b (`intelxefbRunGated`: NMXAccel's pipe registration inside IOGraphics' gate order; detailed timings answered with their mode size) + v10c (boot-guard fix) + the later steps up to v10m (modes from the EDID).
+**Version:** the number of the release that last rebuilt it (0.1.4 here). 0.1.0 to 0.1.2 shipped v10m: boot1 + v9 + v10b (`intelxefbRunGated`: NMXAccel's pipe registration inside IOGraphics' gate order; detailed timings answered with their mode size) + v10c (boot-guard fix) + the later steps up to v10m (modes from the EDID). 0.1.3 added refresh rates above the firmware's mode, Adaptive-Sync modes on by default and the opt-in HiDPI modes (`intelxefb-hidpi`); 0.1.4 reads the user settings from NVRAM (`intelxefb-hwcursor`, `intelxefb-dpms`, `intelxefb-vrr-lfc`, `intelxefb-vrr-floor`).
 
 Boot guard (`intelxe-guard` in NVRAM): after two accelerated boots in a row that end inside their first minute the next boots arm with
 NMXAccel's safest settings (`IntelXeFBAccelSafe`); four in a row turn acceleration off for the next boots (on macOS 26 that leaves the Apple
@@ -82,7 +90,8 @@ A Lilu plugin, separate from the GPU driver, for Alder Lake / Raptor Lake CPUs (
 E-cores). macOS's XCPM writes the P-cores' HWP request in 100 MHz units where they count 78.741 MHz, and pins busy cores
 to low clocks; HybridPM converts the request and lets the hardware pick each core's clock. On the test machine's
 i7-14700K one thread went from ~55 to 128 M iterations/s and Geekbench's GPU scores rose about a third (the driver's
-CPU work per command buffer runs faster). Details, controls and `hpmstat`: [HybridPM/README.md](HybridPM/README.md).
+CPU work per command buffer runs faster). `efi.sh` and the app add it below Lilu at stage 4 when the CPU needs it.
+Details, controls and `hpmstat`: [HybridPM/README.md](HybridPM/README.md).
 Built by `kernel/HybridPM/build.py` (MacKernelSDK and Lilu's headers).
 
 ## Building
