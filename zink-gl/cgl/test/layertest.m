@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: MIT
 // layertest: draws offscreen through CGL and NSOpenGLContext, in a core and a legacy context, from two threads, and prints a
-// hash of the pixels. Run it alone and with DYLD_INSERT_LIBRARIES=libcglzink.dylib: the hashes must agree.
+// hash of the pixels. Run it alone and with DYLD_INSERT_LIBRARIES=libcglzink.dylib: the hashes must agree (run.sh).
+// Also: a context's lifetime by reference count, shared contexts, one context handed between two threads, Apple's own
+// extensions (APPLE_vertex_array_object, APPLE_fence, APPLE_element_array), an IOSurface texture, a CAOpenGLLayer's
+// context (must stay on Apple's GL) and, with LAYERTEST_VIEW=1, a view in a window that is never shown.
 #define GL_SILENCE_DEPRECATION
 #import <AppKit/AppKit.h>
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/CGLContext.h>
 #include <OpenGL/gl.h>
 #include <OpenGL/glext.h>
+#include <OpenGL/CGLIOSurface.h>
+#include <IOSurface/IOSurface.h>
+#import <QuartzCore/QuartzCore.h>
+#include <dlfcn.h>
+#include <stdatomic.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -39,6 +47,153 @@ static uint64_t clear_only(float r) {
     glViewport(0, 0, 16, 16); glClearColor(r, 0.5f, 0.25f, 1); glClear(GL_COLOR_BUFFER_BIT); glFinish();
     static __thread GLubyte px[16 * 16 * 4]; glReadPixels(0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, px);
     return fnv(px, sizeof px);
+}
+
+// What the layer says about a context, on stderr: the hashes on stdout stay comparable with Apple's GL.
+static void adopted(const char *what, CGLContextObj c) {
+    int (*f)(CGLContextObj) = (int (*)(CGLContextObj))dlsym(RTLD_DEFAULT, "cglzink_adopted");
+    if (f) fprintf(stderr, "layertest: %s %s\n", what, f(c) ? "through the layer" : "on Apple's GL");
+}
+static CGLContextObj make(CGLOpenGLProfile profile, CGLContextObj share) {
+    CGLPixelFormatAttribute a[] = { kCGLPFAAccelerated, kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)profile, 0 };
+    CGLPixelFormatObj pf; GLint np; CGLChoosePixelFormat(a, &pf, &np);
+    CGLContextObj c = NULL; CGLCreateContext(pf, share, &c); CGLReleasePixelFormat(pf);
+    return c;
+}
+// Reference counts: CGLDestroyContext with another reference held leaves a working context.
+static void lifetime(void) {
+    CGLContextObj c = make(kCGLOGLPVersion_GL3_Core, NULL);
+    CGLRetainContext(c);
+    CGLDestroyContext(c);
+    adopted("after destroy with a reference held:", c);
+    CGLSetCurrentContext(c);
+    printf("lifetime  %016llx\n", clear_only(0.125f));
+    CGLSetCurrentContext(NULL);
+    CGLReleaseContext(c);
+    CGLContextObj d = make(kCGLOGLPVersion_GL3_Core, NULL);
+    adopted("a new context after the last release:", d);
+    CGLDestroyContext(d);
+}
+// A texture made in one context, read through a framebuffer in another that shares with it.
+static void shared(void) {
+    CGLContextObj a = make(kCGLOGLPVersion_GL3_Core, NULL), b = make(kCGLOGLPVersion_GL3_Core, a);
+    adopted("shared context:", b);
+    CGLSetCurrentContext(a);
+    GLubyte texels[4 * 4 * 4]; for (int i = 0; i < 64; i++) texels[i] = (GLubyte)(i * 37 + 11);
+    GLuint tex; glGenTextures(1, &tex); glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, texels); glFinish();
+    CGLSetCurrentContext(b);
+    GLuint fbo; glGenFramebuffers(1, &fbo); glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    GLubyte px[64] = {0}; glReadPixels(0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    printf("shared    %016llx%s\n", fnv(px, sizeof px), memcmp(px, texels, 64) ? " DIFFERENT texels" : "");
+    CGLSetCurrentContext(NULL); CGLDestroyContext(b); CGLDestroyContext(a);
+}
+// The CVDisplayLink pattern: the main thread made the context current and keeps it so, a render thread locks it and draws.
+static CGLContextObj g_hand;
+static atomic_int g_hand_done;
+static uint64_t g_hand_hash;
+static void *render_thread(void *unused) {
+    CGLLockContext(g_hand); CGLSetCurrentContext(g_hand);
+    g_hand_hash = clear_only(0.625f);
+    CGLUnlockContext(g_hand); CGLSetCurrentContext(NULL);
+    atomic_store(&g_hand_done, 1);
+    return 0;
+}
+static void handoff(void) {
+    g_hand = make(kCGLOGLPVersion_GL3_Core, NULL);
+    CGLSetCurrentContext(g_hand);
+    printf("hand main %016llx\n", clear_only(0.375f));
+    pthread_t t; pthread_create(&t, 0, render_thread, 0);
+    while (!atomic_load(&g_hand_done)) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);   // the main queue runs here
+    pthread_join(t, 0);
+    printf("hand thr  %016llx\n", g_hand_hash);
+    CGLLockContext(g_hand);
+    printf("hand back %016llx\n", clear_only(0.875f));
+    CGLUnlockContext(g_hand);
+    CGLSetCurrentContext(NULL); CGLDestroyContext(g_hand);
+}
+// Apple's extensions in a 2.1 context, as an application written for the Mac uses them without asking.
+static void apple_extensions(void) {
+    CGLContextObj c = make(kCGLOGLPVersion_Legacy, NULL);
+    CGLSetCurrentContext(c);
+    GLuint fbo, rb; glGenFramebuffersEXT(1, &fbo); glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo);
+    glGenRenderbuffersEXT(1, &rb); glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, rb); glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_RGBA8, 16, 16);
+    glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_RENDERBUFFER_EXT, rb);
+    glViewport(0, 0, 16, 16); glClearColor(0.1f, 0.2f, 0.3f, 1); glClear(GL_COLOR_BUFFER_BIT);
+    static const GLfloat v[] = { -1, -1, 1, -1, 1, 1, -1, 1 };
+    static const GLushort idx[] = { 9, 9, 0, 1, 2, 0, 2, 3 };   // the first two are skipped by "first"
+    GLuint vao = 0; glGenVertexArraysAPPLE(1, &vao); glBindVertexArrayAPPLE(vao);
+    glEnableClientState(GL_VERTEX_ARRAY); glVertexPointer(2, GL_FLOAT, 0, v);
+    glEnableClientState(GL_ELEMENT_ARRAY_APPLE); glElementPointerAPPLE(GL_UNSIGNED_SHORT, idx);
+    glColor4f(0.75f, 0.5f, 0.25f, 1);
+    glDrawElementArrayAPPLE(GL_TRIANGLES, 2, 3);
+    glColor4f(0.25f, 1, 0.5f, 1);
+    glDrawRangeElementArrayAPPLE(GL_TRIANGLES, 0, 3, 5, 3);
+    GLuint fence = 0; glGenFencesAPPLE(1, &fence);
+    int before = glIsFenceAPPLE(fence);
+    glSetFenceAPPLE(fence); glFinishFenceAPPLE(fence);
+    int test = glTestFenceAPPLE(fence), is = glIsFenceAPPLE(fence);
+    glDeleteFencesAPPLE(1, &fence);
+    glBindVertexArrayAPPLE(0);
+    int isvao = glIsVertexArrayAPPLE(vao); glDeleteVertexArraysAPPLE(1, &vao);
+    glFlushRenderAPPLE(); glFinishRenderAPPLE();
+    GLubyte px[16 * 16 * 4]; glReadPixels(0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    printf("apple ext %016llx fence %d/%d/%d\n", fnv(px, sizeof px), before, is, test);
+    // Through the stand-in this is 0: the layer's glIsVertexArrayAPPLE is the core glIsVertexArray, which Apple's own 2.1
+    // context (the stand-in's backend) does not have. zink's compatibility context does.
+    fprintf(stderr, "layertest: glIsVertexArrayAPPLE %d\n", isvao);
+    CGLSetCurrentContext(NULL); CGLDestroyContext(c);
+}
+// A rectangle texture from an IOSurface, drawn into a framebuffer: as CVOpenGLTextureCache gives video frames.
+static void iosurface(void) {
+    NSDictionary *props = @{ (id)kIOSurfaceWidth: @8, (id)kIOSurfaceHeight: @8, (id)kIOSurfaceBytesPerElement: @4,
+                             (id)kIOSurfaceBytesPerRow: @64, (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA') };
+    IOSurfaceRef s = IOSurfaceCreate((CFDictionaryRef)props);
+    IOSurfaceLock(s, 0, NULL);
+    GLubyte *p = IOSurfaceGetBaseAddress(s); size_t row = IOSurfaceGetBytesPerRow(s);
+    for (int y = 0; y < 8; y++) for (int x = 0; x < 32; x++) p[y * row + x] = (GLubyte)(x * 7 + y * 29);
+    IOSurfaceUnlock(s, 0, NULL);
+    CGLContextObj c = make(kCGLOGLPVersion_Legacy, NULL);
+    CGLSetCurrentContext(c);
+    GLuint tex; glGenTextures(1, &tex); glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
+    CGLError e = CGLTexImageIOSurface2D(c, GL_TEXTURE_RECTANGLE_ARB, GL_RGBA, 8, 8, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, s, 0);
+    glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    GLuint fbo, rb; glGenFramebuffersEXT(1, &fbo); glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo);
+    glGenRenderbuffersEXT(1, &rb); glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, rb); glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_RGBA8, 8, 8);
+    glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_RENDERBUFFER_EXT, rb);
+    glViewport(0, 0, 8, 8); glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_TEXTURE_RECTANGLE_ARB); glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glBegin(GL_QUADS); glTexCoord2f(0, 0); glVertex2f(-1, -1); glTexCoord2f(8, 0); glVertex2f(1, -1); glTexCoord2f(8, 8); glVertex2f(1, 1); glTexCoord2f(0, 8); glVertex2f(-1, 1); glEnd();
+    GLubyte px[8 * 8 * 4]; glReadPixels(0, 0, 8, 8, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, px);
+    int same = 1; for (int y = 0; y < 8; y++) same &= !memcmp(px + y * 32, p + y * row, 32);
+    printf("iosurface %016llx error %d %s\n", fnv(px, sizeof px), e, same ? "texels equal the surface" : "texels DIFFER from the surface");
+    CGLSetCurrentContext(NULL); CGLDestroyContext(c); CFRelease(s);
+}
+// Core Animation's own context for a CAOpenGLLayer: must stay on Apple's GL.
+static void calayer(void) {
+    CAOpenGLLayer *layer = [CAOpenGLLayer layer];
+    CGLPixelFormatObj pf = [layer copyCGLPixelFormatForDisplayMask:~0u];
+    CGLContextObj c = [layer copyCGLContextForPixelFormat:pf];
+    adopted("CAOpenGLLayer context:", c);
+    [layer releaseCGLContext:c]; [layer releaseCGLPixelFormat:pf];
+}
+// A view in a window that is never shown: the layer's scale, the swap interval it takes from Apple's context (the fake EGL
+// reports the last one), a present.
+static void view(void) {
+    [NSApplication sharedApplication];
+    NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 160, 120) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    for (int best = 0; best < 2; best++) {
+        NSOpenGLPixelFormatAttribute na[] = { NSOpenGLPFAAccelerated, NSOpenGLPFADoubleBuffer, 0 };
+        NSOpenGLContext *ns = [[NSOpenGLContext alloc] initWithFormat:[[NSOpenGLPixelFormat alloc] initWithAttributes:na] shareContext:nil];
+        w.contentView.wantsBestResolutionOpenGLSurface = best;
+        [ns setView:w.contentView]; [ns makeCurrentContext];
+        glClearColor(0.5f, 0.5f, 0.5f, 1); glClear(GL_COLOR_BUFFER_BIT); [ns flushBuffer];
+        CALayer *sub = w.contentView.layer.sublayers.lastObject;
+        fprintf(stderr, "layertest: window scale %.1f, best resolution %d: %s scale %.1f\n", w.backingScaleFactor, best,
+                [sub isKindOfClass:[CAMetalLayer class]] ? "layer" : "no layer of ours,", sub.contentsScale);
+        [ns clearDrawable]; [NSOpenGLContext clearCurrentContext];
+    }
 }
 static CGLContextObj g_core;
 static uint64_t g_thread_hash;
@@ -97,6 +252,13 @@ int main(void) { @autoreleasepool {
     c->disp.get_floatv(c->rend, GL_COLOR_CLEAR_VALUE, clear);
     printf("direct    %.2f %.2f %.2f\n", clear[0], clear[1], clear[2]);
     CGLDestroyContext(g_core);
+    lifetime();
+    shared();
+    handoff();
+    apple_extensions();
+    iosurface();
+    calayer();
+    if (getenv("LAYERTEST_VIEW")) view();
     printf("done\n");
     return 0;
 } }
