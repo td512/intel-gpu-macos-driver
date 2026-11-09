@@ -75,6 +75,8 @@ struct EFIStatus {
     var fileChanges: Int { Int(self["plan_changes"]) ?? 0 }
     var settingsChanges: Int { Int(self["settings_changes"]) ?? 0 }
     var backup: String? { ["", "none"].contains(self["backup"]) ? nil : self["backup"] }
+    /// HybridPM.kext's rows on the EFI page: for a CPU that needs it, or when the EFI has it
+    var showsHybridPM: Bool { self["hybridpm_needed"] == "yes" || ["same", "different"].contains(self["hybridpm_file"]) }
 }
 
 /// A plan as efi.sh prints it. Its hash goes back to efi.sh with the command.
@@ -111,10 +113,11 @@ enum EFIAction: String, Identifiable {
 }
 
 /// The package's efi.sh, or the copy in this app when the package's is older than it (made before efi.sh, or before
-/// --settings-safari-plan, 0.1.4): the files still come from the package (--package), only the steps are the newer script's.
+/// --settings-safari-plan and HybridPM.kext, 0.1.4): the files still come from the package (--package), only the steps
+/// are the newer script's.
 func efiScript(for package: Package) -> URL? {
     let own = package.directory.appendingPathComponent("efi.sh")
-    if let text = try? String(contentsOf: own, encoding: .utf8), text.contains("--settings-safari-plan") { return own }
+    if let text = try? String(contentsOf: own, encoding: .utf8), text.contains("--settings-safari-plan"), text.contains("hybridpm_needed") { return own }
     return Bundle.main.url(forResource: "efi", withExtension: "sh") ?? (FileManager.default.fileExists(atPath: own.path) ? own : nil)
 }
 

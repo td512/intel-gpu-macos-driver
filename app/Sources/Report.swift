@@ -118,6 +118,7 @@ struct ReportView: View {
         case "accel-off": Button("Clear the boot guard") { manager.clearBootGuard() }
         case "hidpi-half", "hidpi-stale": Button("Open the Display page") { manager.requestedSection = .display }
         case "ssv-mesa", "ssv-build", "ssv-gone", "kext-version": Button("Open the Driver page") { manager.requestedSection = .driver }
+        case "cpu-hybridpm": Button("Open the EFI page") { manager.requestedSection = .efi }
         default: EmptyView()
         }
     }

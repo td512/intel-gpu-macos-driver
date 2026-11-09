@@ -538,6 +538,7 @@ struct Banners: View {
         case "accel-off": return ("Clear the boot guard", { manager.clearBootGuard() })
         case "hidpi-half", "hidpi-stale": return ("Open the Display page", { manager.requestedSection = .display })
         case "ssv-mesa", "ssv-gone", "kext-version": return ("Open the Driver page", { manager.requestedSection = .driver })
+        case "cpu-hybridpm": return ("Open the EFI page", { manager.requestedSection = .efi })
         default: return nil
         }
     }

@@ -257,7 +257,10 @@ desktop and laptop; e.g. i5-12600K, i5-13400F, i7-14700K, i7-13620H). Not Core U
 CPUs without E-cores and older CPUs (it only logs why). The model list is in `kernel/HybridPM/README.md` in the
 repository.
 
-**Adding it** (by hand; `efi.sh` and the app do not add it):
+**Adding it:** on the PC, stage 4 does it: `efi.sh --plan` / `sudo ./efi.sh --apply` and the app's EFI page copy
+`HybridPM.kext` with `IntelXe.kext` when the CPU's name is one of these, and add its entry right below `Lilu.kext`'s
+(an existing entry is turned on; an earlier build under the same name is replaced). They leave it out, with a note,
+when the EFI does not load Lilu. `IntelXe-EFI.ps1` on Windows does not add it yet. By hand:
 
 1. It is a Lilu plugin. Most OpenCore EFIs already have `Lilu.kext` for VirtualSMC; if yours has not, add it from
    [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases) (1.7.2 on the test machine). This package does not

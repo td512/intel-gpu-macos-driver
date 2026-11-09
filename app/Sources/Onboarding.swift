@@ -125,7 +125,7 @@ struct SetupView: View {
             if manager.rebootNeeded { Button("Restart now") { manager.restartNow() }.buttonStyle(.borderedProminent) }
         case .efiKext:
             Text("3. Add IntelXe.kext to OpenCore").font(.headline)
-            Text("The last piece loads before macOS: IntelXe.kext and SSDT-ARCOFF go into the EFI and its config. The EFI page shows the plan and applies it.")
+            Text("The last piece loads before macOS: IntelXe.kext and SSDT-ARCOFF go into the EFI and its config, and on a 12th-14th gen Intel CPU with efficiency cores HybridPM.kext too. The EFI page shows the plan and applies it.")
             efiStep(.apply)
             Text("If the next boot stops at the Apple logo, choose the previous entry or your USB stick in the OpenCore picker: the backup is kept, and the EFI page can put it back.")
                 .font(.callout).foregroundStyle(.secondary)

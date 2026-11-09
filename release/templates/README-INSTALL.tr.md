@@ -264,7 +264,10 @@ sürücüsünden ayrı ve isteğe bağlı; `-efi.zip`'te ve macOS paketinde `EFI
 örneğin i5-12600K, i5-13400F, i7-14700K, i7-13620H). Core Ultra değil: onlara dokunmuyor; E çekirdeği olmayan ve daha eski
 işlemcilere de dokunmuyor (yalnızca nedenini günlüğe yazıyor). Model listesi depodaki `kernel/HybridPM/README.md`'de.
 
-**Eklemek** (elle; `efi.sh` ve uygulama eklemiyor):
+**Eklemek:** kurulacak bilgisayarda 4. aşama bunu yapıyor: `efi.sh --plan` / `sudo ./efi.sh --apply` ve uygulamanın EFI
+sayfası, işlemcinin adı bunlardan biriyse `HybridPM.kext`'i `IntelXe.kext` ile birlikte kopyalıyor ve kaydını `Lilu.kext`'in
+kaydının hemen altına ekliyor (var olan kayıt açılıyor; aynı adlı eski bir derleme değiştiriliyor). EFI Lilu yüklemiyorsa bir
+notla dışarıda bırakıyor. Windows'taki `IntelXe-EFI.ps1` henüz eklemiyor. Elle:
 
 1. Bir Lilu eklentisi. Çoğu OpenCore EFI'sinde VirtualSMC için `Lilu.kext` zaten var; sizinkinde yoksa
    [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases)'dan ekleyin (test makinesinde 1.7.2). Bu paket Lilu

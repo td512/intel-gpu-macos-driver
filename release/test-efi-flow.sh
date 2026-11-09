@@ -4,7 +4,8 @@
 # set back to how stage 1 leaves it, in a throwaway folder: no root, no EFI partition, no NVRAM. Without PACKAGE_DIR the
 # package's IntelXe.kext and SSDT-ARCOFF.aml are stand-ins (and the 0.1.3 table, for adapting it). Checks status, plan,
 # apply, settings, undo, the plan hash, a different kext, the ACPI path check, SSDT-ARCOFF adapted to other ports (with
-# iasl, when there is one, to disassemble and compare), an earlier B580.kext entry, the boot-path and the ioreg parsing.
+# iasl, when there is one, to disassemble and compare), an earlier B580.kext entry, the boot-path and the ioreg parsing;
+# HybridPM.kext by CPU (hybrid with and without Lilu, an existing entry, an earlier build, not hybrid), and its undo.
 set -uo pipefail
 R=$(cd "$(dirname "$0")" && pwd)
 S=$R/templates/efi.sh
@@ -24,6 +25,11 @@ else
     plutil -create xml1 "$P/EFI/OC/Kexts/IntelXe.kext/Contents/Info.plist"
     plutil -insert CFBundleVersion -string 9.9.9 "$P/EFI/OC/Kexts/IntelXe.kext/Contents/Info.plist"
     printf 'SSDT\x2f\x04_SB_PC00PEG1PEGP stand-in' > "$P/EFI/OC/ACPI/SSDT-ARCOFF.aml"
+    mkdir -p "$P/EFI/OC/Kexts/HybridPM.kext/Contents/MacOS"
+    printf 'stand-in HybridPM executable\n' > "$P/EFI/OC/Kexts/HybridPM.kext/Contents/MacOS/HybridPM"
+    plutil -create xml1 "$P/EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist"
+    plutil -insert CFBundleIdentifier -string io.github.yusufklncc.HybridPM "$P/EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist"
+    plutil -insert CFBundleVersion -string 9.9.8 "$P/EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist"
     (cd "$P" && find EFI -type f | LC_ALL=C sort | while IFS= read -r f; do shasum -a 256 "$f"; done > SHA256SUMS)
 fi
 
@@ -44,6 +50,7 @@ plutil -remove NVRAM.Delete.7C436110-AB2A-4BBB-A880-FE41995C9F82.0 "$C"   # boot
 cp "$C" "$ROOT/config.stage1"
 
 export INTELXE_STATE_DIR=$ROOT/state INTELXE_BOOT_PATH="" INTELXE_CARD_ACPI_PATH='\_SB.PC00.PEG1.PEGP'
+export INTELXE_CPU_BRAND='Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz'   # no efficiency cores: no HybridPM.kext (tested below)
 efi() { "$S" --package "$P" --efi "$F" "$@"; }
 state() { efi --status | sed -n "s/^$1=//p"; }
 expect() { # expect WHAT KEY VALUE
@@ -67,6 +74,7 @@ expect "stage 1" ssdt_package_names_card yes
 expect "stage 1" plan_changes 5
 expect "stage 1" settings_changes 6
 expect "stage 1" backup none
+expect "stage 1, a CPU without efficiency cores" hybridpm_needed no
 
 efi --plan > "$ROOT/plan" 2>&1 || bad "--plan exited with an error"
 has "plan copies the kext" "$ROOT/plan" "copy     EFI/OC/Kexts/IntelXe.kext"
@@ -323,6 +331,113 @@ expect "after --settings-safari-apply: settings" settings_changes 0
 expect "after --settings-safari-apply: SecureBootModel" secure_boot_model Disabled
 efi --undo > "$ROOT/out" 2>&1 || { bad "--undo of settings+Safari exited with an error"; cat "$ROOT/out"; }
 cmp -s "$C" "$ROOT/config.both" && ok "--undo of settings+Safari: config.plist back in one step" || bad "--undo of settings+Safari"
+
+# HybridPM.kext: by the CPU's name, below Lilu.kext, only when Lilu loads
+F3=$ROOT/efi3 C3=$F3/EFI/OC/config.plist
+fresh3() { rm -rf "$F3"; mkdir -p "$F3/EFI/OC/ACPI" "$F3/EFI/OC/Kexts/Lilu.kext/Contents/MacOS"; : > "$F3/EFI/OC/OpenCore.efi"; cp "$ROOT/config.stage1" "$C3"; }
+efi3() { "$S" --package "$P" --efi "$F3" "$@"; }
+state3() { efi3 --status | sed -n "s/^$1=//p"; }
+expect3() { local got; got=$(state3 "$2"); if [ "$got" = "$3" ]; then ok "$1: $2=$got"; else bad "$1: $2=$got, expected $3"; fi; }
+bp() { plutil -extract Kernel.Add.$1.BundlePath raw -o - "$2" 2>/dev/null; }
+en() { plutil -extract Kernel.Add.$1.Enabled raw -o - "$2" 2>/dev/null; }
+PH=$P/EFI/OC/Kexts/HybridPM.kext
+for cpu in 'Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz' '12th Gen Intel(R) Core(TM) i5-12400F' 'Intel(R) Core(TM) Ultra 7 155H'; do
+    fresh3
+    INTELXE_CPU_BRAND=$cpu efi3 --plan > "$ROOT/plan" 2>&1
+    hasnt "not hybrid ($cpu): no HybridPM in the plan" "$ROOT/plan" "HybridPM"
+    [ "$(INTELXE_CPU_BRAND=$cpu state3 hybridpm_needed)" = no ] && ok "... and hybridpm_needed=no" || bad "$cpu: hybridpm_needed=$(INTELXE_CPU_BRAND=$cpu state3 hybridpm_needed)"
+done
+export INTELXE_CPU_BRAND='13th Gen Intel(R) Core(TM) i5-13400F'
+if [ -f "$PH/Contents/MacOS/HybridPM" ]; then
+    # the sample's disabled HybridPM entry (item 8), Lilu.kext as item 0
+    fresh3
+    expect3 "hybrid CPU" hybridpm_needed yes
+    expect3 "hybrid CPU" hybridpm_package yes
+    expect3 "hybrid CPU" hybridpm_file absent
+    expect3 "hybrid CPU" hybridpm_entry disabled
+    expect3 "hybrid CPU" lilu_entry enabled
+    expect3 "hybrid CPU" plan_changes 7
+    efi3 --plan > "$ROOT/hplan" 2>&1 || bad "--plan (hybrid) exited with an error"
+    has "hybrid: plan copies HybridPM.kext" "$ROOT/hplan" "copy     EFI/OC/Kexts/HybridPM.kext (version $(plutil -extract CFBundleVersion raw -o - "$PH/Contents/Info.plist"); this CPU has efficiency cores"
+    has "hybrid: plan enables its disabled entry" "$ROOT/hplan" "Kernel > Add, item 8 (HybridPM.kext): Enabled false -> true"
+    hasnt "hybrid: no second entry" "$ROOT/hplan" "add HybridPM.kext"
+    efi3 --plan > "$ROOT/hplan2" 2>&1; cmp -s "$ROOT/hplan" "$ROOT/hplan2" && ok "hybrid: the plan is the same every time" || bad "hybrid: the plan changes between runs"
+    efi3 --apply --expect "$(hash "$ROOT/hplan")" > "$ROOT/out" 2>&1 || { bad "--apply (hybrid) exited with an error"; cat "$ROOT/out"; }
+    expect3 "hybrid, after --apply" hybridpm_file same
+    expect3 "hybrid, after --apply" hybridpm_entry enabled
+    expect3 "hybrid, after --apply" hybridpm_version_efi "$(plutil -extract CFBundleVersion raw -o - "$PH/Contents/Info.plist")"
+    expect3 "hybrid, after --apply" plan_changes 0
+    cp "$ROOT/config.stage1" "$ROOT/want"
+    for k in Kernel.Add.8.Enabled Kernel.Add.15.Enabled ACPI.Add.5.Enabled; do plutil -replace $k -bool true "$ROOT/want"; done
+    plutil -replace Misc.Security.ExposeSensitiveData -integer 7 "$ROOT/want"
+    [ "$(pp "$C3")" = "$(pp "$ROOT/want")" ] && ok "hybrid: config.plist has those four values changed, the rest the same" || { bad "hybrid: config.plist differs:"; diff <(pp "$ROOT/want") <(pp "$C3") | head -20; }
+    efi3 --undo > "$ROOT/out" 2>&1 || { bad "--undo (hybrid) exited with an error"; cat "$ROOT/out"; }
+    cmp -s "$C3" "$ROOT/config.stage1" && [ ! -e "$F3/EFI/OC/Kexts/HybridPM.kext" ] && ok "hybrid: --undo puts config.plist back and removes HybridPM.kext" || bad "hybrid: --undo"
+
+    # no HybridPM entry: one is added right below Lilu.kext; the IntelXe entry below it still gets its change
+    fresh3; plutil -remove Kernel.Add.8 "$C3"; cp "$C3" "$ROOT/config.nohpm"
+    expect3 "no HybridPM entry" hybridpm_entry absent
+    efi3 --plan > "$ROOT/hplan" 2>&1
+    has "plan adds the entry below Lilu" "$ROOT/hplan" "Kernel > Add: add HybridPM.kext below Lilu.kext, as item 1"
+    has "plan still enables IntelXe.kext's entry" "$ROOT/hplan" "Kernel > Add, item 14 (IntelXe.kext): Enabled false -> true"
+    efi3 --apply --expect "$(hash "$ROOT/hplan")" > "$ROOT/out" 2>&1 || { bad "--apply (no entry) exited with an error"; cat "$ROOT/out"; }
+    [ "$(bp 0 "$C3")" = Lilu.kext ] && [ "$(bp 1 "$C3")" = HybridPM.kext ] && [ "$(en 1 "$C3")" = true ] && [ "$(bp 2 "$C3")" = VirtualSMC.kext ] \
+        && ok "HybridPM.kext is item 1, right below Lilu.kext, on" || bad "Kernel > Add: $(bp 0 "$C3"), $(bp 1 "$C3"), $(bp 2 "$C3")"
+    [ "$(plutil -extract Kernel.Add.1.ExecutablePath raw -o - "$C3")" = Contents/MacOS/HybridPM ] && [ "$(plutil -extract Kernel.Add.1.PlistPath raw -o - "$C3")" = Contents/Info.plist ] \
+        && ok "... with its ExecutablePath and PlistPath" || bad "the new entry's paths"
+    [ "$(bp 15 "$C3")" = IntelXe.kext ] && [ "$(en 15 "$C3")" = true ] && [ "$(plutil -extract Kernel.Add raw -o - "$C3")" = 16 ] \
+        && ok "IntelXe.kext's entry moved to item 15 and is on; 16 items" || bad "IntelXe.kext's entry: item 15 is $(bp 15 "$C3") ($(en 15 "$C3"))"
+    expect3 "after --apply (no entry)" plan_changes 0
+    efi3 --undo > /dev/null 2>&1; cmp -s "$C3" "$ROOT/config.nohpm" && ok "--undo takes the new entry back out" || bad "--undo (no entry)"
+
+    # Lilu not loaded: a note, nothing of HybridPM in the plan
+    fresh3; plutil -replace Kernel.Add.0.Enabled -bool false "$C3"
+    efi3 --plan > "$ROOT/hplan" 2>&1
+    has "Lilu off: a note says why" "$ROOT/hplan" "not added: HybridPM.kext. This CPU (13th Gen Intel(R) Core(TM) i5-13400F) has efficiency cores"
+    has "... naming Lilu" "$ROOT/hplan" "this EFI does not load Lilu.kext"
+    hasnt "Lilu off: HybridPM.kext not copied" "$ROOT/hplan" "EFI/OC/Kexts/HybridPM.kext"
+    hasnt "Lilu off: its entry left alone" "$ROOT/hplan" "item 8 (HybridPM.kext)"
+    expect3 "Lilu off" lilu_entry disabled
+    fresh3; rm -rf "$F3/EFI/OC/Kexts/Lilu.kext"
+    efi3 --plan > "$ROOT/hplan" 2>&1; has "no Lilu.kext file: the same note" "$ROOT/hplan" "this EFI does not load Lilu.kext"
+    hasnt "... and no HybridPM change" "$ROOT/hplan" "EFI/OC/Kexts/HybridPM.kext"
+
+    # the test machine's earlier build under the same name: replaced, and put back by --undo
+    fresh3; mkdir -p "$F3/EFI/OC/Kexts/HybridPM.kext/Contents/MacOS"
+    printf 'org.hackintosh build\n' > "$F3/EFI/OC/Kexts/HybridPM.kext/Contents/MacOS/HybridPM"
+    plutil -create xml1 "$F3/EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist"
+    plutil -insert CFBundleIdentifier -string org.hackintosh.HybridPM "$F3/EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist"
+    plutil -insert CFBundleVersion -string 1.0.0 "$F3/EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist"
+    plutil -replace Kernel.Add.8.Enabled -bool true "$C3"
+    expect3 "an earlier HybridPM build" hybridpm_file different
+    expect3 "an earlier HybridPM build" hybridpm_version_efi 1.0.0
+    efi3 --plan > "$ROOT/hplan" 2>&1
+    has "plan replaces the earlier build" "$ROOT/hplan" "replace  EFI/OC/Kexts/HybridPM.kext (an earlier build, org.hackintosh.HybridPM 1.0.0, by the package's"
+    hasnt "its enabled entry stays as it is" "$ROOT/hplan" "item 8 (HybridPM.kext)"
+    efi3 --apply --expect "$(hash "$ROOT/hplan")" > "$ROOT/out" 2>&1 || { bad "--apply (earlier build) exited with an error"; cat "$ROOT/out"; }
+    expect3 "after replacing the earlier build" hybridpm_file same
+    efi3 --undo > /dev/null 2>&1
+    grep -q 'org.hackintosh build' "$F3/EFI/OC/Kexts/HybridPM.kext/Contents/MacOS/HybridPM" 2>/dev/null && ok "--undo puts the earlier build back" || bad "--undo did not put the earlier build back"
+
+    # an entry above Lilu's: a note
+    fresh3; plutil -insert Kernel.Add.0 -json '{"BundlePath":"HybridPM.kext","Enabled":true,"ExecutablePath":"Contents/MacOS/HybridPM","PlistPath":"Contents/Info.plist"}' "$C3"
+    efi3 --plan > "$ROOT/hplan" 2>&1; has "an entry above Lilu's: a note" "$ROOT/hplan" "HybridPM.kext is item 0 of Kernel > Add, above Lilu.kext (item 1)"
+
+    # a damaged HybridPM.kext in the package is refused like IntelXe.kext
+    if [ -f "$P/SHA256SUMS" ] && grep -q 'Kexts/HybridPM.kext/' "$P/SHA256SUMS"; then
+        fresh3; cp -p "$PH/Contents/MacOS/HybridPM" "$ROOT/hpmexe"; printf 'x' >> "$PH/Contents/MacOS/HybridPM"
+        efi3 --apply > "$ROOT/out" 2>&1 && bad "--apply copied a damaged HybridPM.kext" || has "a damaged HybridPM.kext is refused" "$ROOT/out" "differ from its SHA256SUMS"
+        cmp -s "$C3" "$ROOT/config.stage1" && ok "... and nothing changed" || bad "the EFI changed"
+        cp -p "$ROOT/hpmexe" "$PH/Contents/MacOS/HybridPM"
+    fi
+fi
+# a package without HybridPM.kext (0.1.3 and earlier): a note
+PN=$ROOT/pkg-nohpm; ditto "$P/EFI" "$PN/EFI"; rm -rf "$PN/EFI/OC/Kexts/HybridPM.kext"
+fresh3; "$S" --package "$PN" --efi "$F3" --plan > "$ROOT/hplan" 2>&1
+has "a package without HybridPM.kext: a note" "$ROOT/hplan" "this package has no HybridPM.kext"
+hasnt "... and no HybridPM change" "$ROOT/hplan" "EFI/OC/Kexts/HybridPM.kext"
+[ "$("$S" --package "$PN" --efi "$F3" --status | sed -n 's/^hybridpm_package=//p')" = no ] && ok "... and hybridpm_package=no" || bad "hybridpm_package for a package without it"
+export INTELXE_CPU_BRAND='Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz'
 
 echo "== $fails failure(s)"
 exit $fails

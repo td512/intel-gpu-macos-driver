@@ -135,6 +135,11 @@ struct EFIView: View {
             LabeledContent("SSDT-ARCOFF.aml in the EFI") { Text(ssdtText).multilineTextAlignment(.trailing) }
             LabeledContent("ACPI > Add entry") { Text(entryText(efi["ssdt_entry"])) }
             LabeledContent("The card's ACPI path") { Text(cardText).textSelection(.enabled).multilineTextAlignment(.trailing) }
+            if efi.showsHybridPM {
+                LabeledContent("HybridPM.kext needed") { Text(hpmNeededText).multilineTextAlignment(.trailing) }
+                LabeledContent("HybridPM.kext in the EFI") { Text(hpmText).multilineTextAlignment(.trailing) }
+                LabeledContent("HybridPM Kernel > Add entry") { Text(entryText(efi["hybridpm_entry"])) }
+            }
             planOrHint(.apply)
             applyButton(.apply)
         }
@@ -245,6 +250,23 @@ struct EFIView: View {
         switch efi["kext_file"] {
         case "same": return String(localized: "The same as the package's (\(package))")
         case "different": return String(localized: "Differs: \(here.isEmpty ? "?" : here) here, \(package) in the package")
+        case "absent": return String(localized: "Not there")
+        default: return String(localized: "Not checked: the EFI is not mounted")
+        }
+    }
+
+    var hpmNeededText: String {
+        efi["hybridpm_needed"] == "yes" ? String(localized: "Yes: this CPU has efficiency cores (12th-14th gen Core)")
+                                        : String(localized: "No: this CPU has no efficiency cores, or is not a 12th-14th gen Core")
+    }
+
+    var hpmText: String {
+        let package = efi["hybridpm_version_package"], here = efi["hybridpm_version_efi"]
+        switch efi["hybridpm_file"] {
+        case "same": return String(localized: "The same as the package's (\(package))")
+        case "different" where efi["hybridpm_package"] != "yes": return String(localized: "There (\(here.isEmpty ? "?" : here)); this package has none")
+        case "different": return String(localized: "Differs: \(here.isEmpty ? "?" : here) here, \(package) in the package")
+        case "absent" where efi["hybridpm_package"] != "yes": return String(localized: "Not there; this package has none (0.1.4 and later have it)")
         case "absent": return String(localized: "Not there")
         default: return String(localized: "Not checked: the EFI is not mounted")
         }

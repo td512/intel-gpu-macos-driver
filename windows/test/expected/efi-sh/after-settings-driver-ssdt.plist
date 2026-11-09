@@ -585,7 +585,7 @@
 				<key>BundlePath</key>
 				<string>HybridPM.kext</string>
 				<key>Comment</key>
-				<string>HybridPM.kext: hybrid-CPU power management of the test machine, not published yet (without it the CPU stays near 4.4 GHz)</string>
+				<string>HybridPM.kext: hybrid-CPU power management, from the -efi.zip (without it the CPU stays near 4.4 GHz)</string>
 				<key>Enabled</key>
 				<false/>
 				<key>ExecutablePath</key>

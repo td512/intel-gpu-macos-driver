@@ -2,7 +2,7 @@
 // Problems the app can see by itself at start, the same ones the diagnostics report warns about (collect-macos.sh's
 // codes): a kernel panic since the last look, the boot guard holding acceleration off, a system-volume copy of the Metal
 // plugin out of step with /Library, a half-done HiDPI switch, a kext loaded at another version than its file, a hybrid
-// Intel CPU without HybridPM. Each shows as a banner with what to do; a dismissed one stays quiet until it changes.
+// Intel CPU without HybridPM, HybridPM loaded but off. Each shows as a banner with what to do; a dismissed one stays quiet until it changes.
 import Foundation
 
 struct HealthIssue: Identifiable, Hashable {
@@ -22,6 +22,14 @@ private func sha256Prefix(_ path: String) -> String? {
 private func plistValue(_ path: String, _ key: String) -> String? {
     guard let d = NSDictionary(contentsOfFile: path) else { return nil }
     return d[key] as? String
+}
+
+/// 12th-14th gen Core with efficiency cores, by the CPU's name (machdep.cpu.model is what OpenCore's Cpuid1Data makes it):
+/// i3/i5/i7/i9-12xxx..14xxx, without Core Ultra (HybridPM leaves it alone) and the desktop models with P-cores only. The
+/// same list as efi.sh and the diagnostics report.
+func hybridCPU(_ brand: String) -> Bool {
+    brand.range(of: #"\bi[3579]-1[2-4][0-9]{3}"#, options: .regularExpression) != nil
+        && brand.range(of: #"Ultra|i3-1[234]100|i3-12300|i5-12400|i5-12490|i5-12500(?!H)|i5-12600(?![KH])"#, options: .regularExpression) == nil
 }
 
 func healthIssues(_ facts: SystemFacts) -> [HealthIssue] {
@@ -79,8 +87,17 @@ func healthIssues(_ facts: SystemFacts) -> [HealthIssue] {
         }
     }
     let brand = commandOutput("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]) ?? ""
-    if brand.range(of: #"1[2-4][0-9]{3}|Core\(TM\) Ultra|Core Ultra"#, options: .regularExpression) != nil && !loaded.lowercased().contains("hybridpm") {
-        list.append(HealthIssue(code: "cpu-hybridpm", text: String(localized: "This CPU has performance and efficiency cores and HybridPM.kext is not loaded: macOS can hold every core at a low clock, which makes the GPU look slow too. Add HybridPM to your EFI (see the install guide)."), key: "on"))
+    if !loaded.lowercased().contains("hybridpm") {
+        if hybridCPU(brand) {
+            list.append(HealthIssue(code: "cpu-hybridpm", text: String(localized: "This CPU has performance and efficiency cores (12th-14th gen Core) and HybridPM.kext is not loaded: macOS can hold the cores at low clocks, which makes the GPU look slow too. Add HybridPM.kext from the -efi.zip below Lilu in your EFI (the EFI page does it; install guide: Hybrid Intel CPUs)."), key: "on"))
+        }
+    } else if commandOutput("/usr/sbin/sysctl", ["-n", "debug.hybridpm.enabled"])?.trimmingCharacters(in: .whitespacesAndNewlines) == "0" {
+        // loaded but not converting: an unsupported CPU, or a macOS whose XCPM routine it does not find (before 20 s after
+        // boot it is still waiting, which the reason says)
+        let why = commandOutput("/usr/sbin/sysctl", ["-n", "debug.hybridpm.why"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !why.contains("waiting") && !why.contains("routed: on 20 s") {
+            list.append(HealthIssue(code: "hybridpm-off", text: String(localized: "HybridPM.kext is loaded but does nothing: \(why.isEmpty ? "–" : why)."), key: why))
+        }
     }
     return list
 }

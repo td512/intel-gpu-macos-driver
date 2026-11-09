@@ -138,7 +138,7 @@ var selfTestEFIFolder: String?
 /// An EFI folder with OpenCore's layout and a config.plist with the parts efi.sh reads, as after stage 1.
 func makeFakeEFI(in folder: URL) throws {
     let oc = folder.appendingPathComponent("EFI/OC")
-    try FileManager.default.createDirectory(at: oc.appendingPathComponent("Kexts"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: oc.appendingPathComponent("Kexts/Lilu.kext/Contents/MacOS"), withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: oc.appendingPathComponent("ACPI"), withIntermediateDirectories: true)
     try Data().write(to: oc.appendingPathComponent("OpenCore.efi"))
     let apple = "7C436110-AB2A-4BBB-A880-FE41995C9F82"
@@ -171,6 +171,7 @@ func efiSelfTest(package: Package, expect: (Bool, String) -> Void) {
     setenv("INTELXE_STATE_DIR", root.appendingPathComponent("state").path, 1)
     setenv("INTELXE_BOOT_PATH", "", 1)
     setenv("INTELXE_CARD_ACPI_PATH", "\\_SB.PC00.PEG1.PEGP", 1)
+    setenv("INTELXE_CPU_BRAND", "13th Gen Intel(R) Core(TM) i5-13400F", 1)   // a hybrid CPU: HybridPM.kext in the plan
     let target = EFITarget.folder(folder.path)
     var status = efiStatus(script: script, package: package, target: target)
     expect(status["efi_source"] == "folder" && status.isOpenCore && status["kext_file"] == "absent" && status["kext_entry"] == "absent",
@@ -179,6 +180,14 @@ func efiSelfTest(package: Package, expect: (Bool, String) -> Void) {
     guard let plan = efiPlan(script: script, package: package, target: target, "--plan") else { expect(false, "efi.sh --plan"); return }
     print(plan.text, terminator: "")
     expect(plan.changes && plan.text.contains("Kernel > Add: add IntelXe.kext"), "the plan adds IntelXe.kext")
+    expect(status["hybridpm_needed"] == "yes" && status.showsHybridPM && status["lilu_entry"] == "enabled", "efi.sh --status: a hybrid CPU needs HybridPM.kext, Lilu is on")
+    if status["hybridpm_package"] == "yes" {
+        expect(plan.text.contains("copy     EFI/OC/Kexts/HybridPM.kext") && plan.text.contains("Kernel > Add: add HybridPM.kext below Lilu.kext, as item 1"),
+               "the plan adds HybridPM.kext below Lilu.kext")
+    } else {
+        expect(plan.text.contains("this package has no HybridPM.kext") && !plan.text.contains("EFI/OC/Kexts/HybridPM.kext"),
+               "a package without HybridPM.kext: the plan says so and adds none")
+    }
     let log = root.appendingPathComponent("efi.log")
     func runEFI(_ argument: String, _ hash: String) -> Bool {
         let words = efiWords(script: script, package: package, target: target, argument) + ["--expect", hash]
@@ -188,6 +197,9 @@ func efiSelfTest(package: Package, expect: (Bool, String) -> Void) {
     expect(runEFI("--apply", plan.hash), "efi.sh --apply with the hash of the plan the app computed")
     status = efiStatus(script: script, package: package, target: target)
     expect(status["kext_file"] == "same" && status["kext_entry"] == "enabled", "after --apply the EFI's IntelXe.kext is the package's and on")
+    if status["hybridpm_package"] == "yes" {
+        expect(status["hybridpm_file"] == "same" && status["hybridpm_entry"] == "enabled", "after --apply the EFI's HybridPM.kext is the package's and on")
+    }
     expect(EFINotice.after(.install, status: status) == nil, "after an install, no EFI notice when the EFI's IntelXe.kext is the package's")
     let executable = folder.appendingPathComponent("EFI/OC/Kexts/IntelXe.kext/Contents/MacOS/IntelXe")
     if let handle = try? FileHandle(forWritingTo: executable) { handle.seekToEndOfFile(); handle.write(Data("x".utf8)); try? handle.close() }
@@ -197,7 +209,8 @@ func efiSelfTest(package: Package, expect: (Bool, String) -> Void) {
         expect(runEFI("--undo", undo.hash), "efi.sh --undo with the hash of its plan")
     } else { expect(false, "efi.sh --undo-plan") }
     status = efiStatus(script: script, package: package, target: target)
-    expect(status["kext_file"] == "absent" && status["kext_entry"] == "absent", "after --undo the EFI is as before")
+    expect(status["kext_file"] == "absent" && status["kext_entry"] == "absent" && status["hybridpm_file"] == "absent" && status["hybridpm_entry"] == "absent",
+           "after --undo the EFI is as before")
     selfTestEFIFolder = folder.path
 }
 
@@ -226,6 +239,10 @@ func selfTest() {
            && EFINotice.after(.install, status: EFIStatus(text: "kext_file=same\nkext_entry=disabled")) == .kextMissing
            && EFINotice.after(.uninstall, status: EFIStatus(text: "kext_file=same\nkext_entry=disabled")) == nil
            && EFINotice.after(.uninstall, status: EFIStatus(text: "kext_file=same\nkext_entry=enabled")) == .removeKext, "EFI notice after each action")
+    expect(hybridCPU("13th Gen Intel(R) Core(TM) i5-13400F") && hybridCPU("Intel(R) Core(TM) i7-14700K") && hybridCPU("12th Gen Intel(R) Core(TM) i5-12500H")
+           && hybridCPU("12th Gen Intel(R) Core(TM) i5-12600K") && !hybridCPU("12th Gen Intel(R) Core(TM) i5-12400F") && !hybridCPU("12th Gen Intel(R) Core(TM) i5-12600")
+           && !hybridCPU("Intel(R) Core(TM) Ultra 7 155H") && !hybridCPU("13th Gen Intel(R) Core(TM) i3-13100F") && !hybridCPU("Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz")
+           && !hybridCPU("Apple M2"), "a hybrid CPU by its name: 12th-14th gen with efficiency cores, not Core Ultra or P-core-only models")
     expect(EFIPlan(text: "EFI: x\nnothing to change\nnote     y\n").changes == false && EFIPlan(text: "EFI: x\ncopy     z\n").changes, "a plan with and without changes")
     expect(Bundle.main.url(forResource: "efi", withExtension: "sh") != nil, "the app carries efi.sh for packages made before it")
     expect(Bundle.main.url(forResource: "hidpi", withExtension: "sh") != nil, "the app carries hidpi.sh for packages made before it")
