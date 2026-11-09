@@ -68,6 +68,7 @@ mkdir -p "$F/EFI/OC/Kexts" "$F/EFI/OC/ACPI" "$F/EFI/BOOT"
 C=$F/EFI/OC/config.plist
 cp "$T/stage1.plist" "$C"
 export INTELXE_STATE_DIR=$T/state INTELXE_BOOT_PATH="" INTELXE_CARD_ACPI_PATH=""   # no ioreg: the card is given per step
+export INTELXE_CPU_BRAND="Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz"   # no HybridPM.kext: the Windows tool does not add it
 efi() { "$S" --package "$P" --efi "$F" "$@"; }
 hash() { shasum -a 256 < "$1" | cut -d' ' -f1; }
 step() { # step PLANARG APPLYARG NAME CARD: the plan without its "EFI:" line, then apply it and keep config.plist
