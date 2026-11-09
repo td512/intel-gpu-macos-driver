@@ -9,6 +9,11 @@ pub struct EnvVar {
 pub const REGISTRY: &[EnvVar] = &[
     EnvVar { name: "METAL2VULKAN_OWNED_DUMP", default: "unset", effect: "path to dump an owned SPIR-V contract failure (debug)" },
     EnvVar { name: "METAL2VULKAN_RQ_DEBUG", default: "off", effect: "trace ray-query call lowering (debug)" },
+    EnvVar {
+        name: "METAL2VULKAN_RT_DUMP",
+        default: "unset",
+        effect: "directory to write the rt_runtime-rewritten LLVM text to, as <entry>.rt.ll (debug)",
+    },
 
     EnvVar {
         name: "METAL2VULKAN_VAL_PAR",
@@ -256,6 +261,11 @@ pub fn phase_dump() -> Option<OsString> {
     std::env::var_os("METAL2VULKAN_PHASE_DUMP")
 }
 
+/// METAL2VULKAN_NEST: the stages the nest relooper may structure (see reloop_nest).
+pub fn nest() -> Option<OsString> {
+    std::env::var_os("METAL2VULKAN_NEST")
+}
+
 pub fn tool_path_override(cmd: &str) -> Option<OsString> {
     std::env::var_os(format!(
         "METAL2VULKAN_{}",
@@ -361,7 +371,7 @@ pub fn rq_debug() -> bool {
     present("METAL2VULKAN_RQ_DEBUG")
 }
 
-/// METAL2VULKAN_RT_DUMP: write the rt_runtime-rewritten LLVM text to <tmp>/rt_runtime.ll
-pub fn rt_dump() -> bool {
-    present("METAL2VULKAN_RT_DUMP")
+/// METAL2VULKAN_RT_DUMP: the directory rt_runtime writes its rewritten LLVM text to, as <entry>.rt.ll
+pub fn rt_dump() -> Option<OsString> {
+    std::env::var_os("METAL2VULKAN_RT_DUMP")
 }
