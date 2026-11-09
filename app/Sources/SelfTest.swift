@@ -49,17 +49,32 @@ func renderSnapshots(into folder: String) {
         ("zink", AnyView(ZinkView().environmentObject(manager)), 640),
         ("display-off", AnyView(DisplayView().environmentObject(hidpiOff)), 480), ("display-pending", AnyView(DisplayView().environmentObject(hidpiPending)), 480), ("banners", AnyView(Banners().environmentObject(choosing).background(Color(nsColor: .windowBackgroundColor))), 120),
     ]
+    // each page in the light appearance (name.png) and the dark one (name-dark.png), in a key window so that the
+    // default and prominent buttons show their accent colour as they do in the app
     for (name, page, height) in pages {
-        let host = NSHostingView(rootView: page.frame(width: 640, height: height))
-        host.frame = NSRect(x: 0, y: 0, width: 640, height: height)
-        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
-        host.cacheDisplay(in: host.bounds, to: bitmap)
-        try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/\(name).png"))
+        for (suffix, appearance) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
+            let host = NSHostingView(rootView: page.frame(width: 640, height: height).environment(\.controlActiveState, .key))
+            host.frame = NSRect(x: 0, y: 0, width: 640, height: height)
+            let window = SnapshotWindow(contentRect: NSRect(x: -20000, y: -20000, width: 640, height: height), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: appearance)
+            window.contentView = host
+            window.orderFrontRegardless()
+            window.makeKey()
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            if let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/\(name)\(suffix).png"))
+            }
+            window.orderOut(nil)
+        }
     }
+}
+
+/// A borderless window that can be the key window, for the snapshots.
+final class SnapshotWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
 
 /// The fake EFI the EFI test leaves behind, as stage 1 leaves it, for the EFI page's snapshot.
