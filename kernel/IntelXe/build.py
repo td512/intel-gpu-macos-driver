@@ -109,7 +109,8 @@ def main():
   # XeProbe: offered every Intel PCI device, in its own match category (beside any other driver); XeProbe::probe declines
   # all but the display function the boot-arg xeprobe=0xDEVICE names, so without that boot-arg it attaches nowhere.
   xeprobe=dict(IOClass='XeProbe',IOProviderClass='IOPCIDevice',IOPCIMatch='0x00008086&0x0000ffff',IOMatchCategory='XeProbe',IOProbeScore=0)
-  kext('IntelXe','io.github.yusufklncc.IntelXe',['IntelXe.cpp','xe_core.cpp','xe_vram.cpp','IntelXeClient.cpp','xe_probe.cpp','xe_fd.cpp'],libs,intelxepers,
+  kext('IntelXe','io.github.yusufklncc.IntelXe',['IntelXe.cpp','xe_core.cpp','xe_vram.cpp','IntelXeClient.cpp','xe_probe.cpp','xe_fd.cpp',
+   'xe_platform.cpp'],libs,intelxepers,
    dict(OSBundleRequired='Root'),opt=intelxeopt,more={'XeProbe':xeprobe})
  # IntelXeFB links IOGraphicsFamily, so it goes into the AuxKC (/Library/Extensions + kmutil), not OpenCore.
  # IOMatchCategory IOFramebuffer lets it sit on the GPU beside IntelXe and NMXAccel. It matches at boot from the AuxKC
