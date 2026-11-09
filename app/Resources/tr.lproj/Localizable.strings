@@ -643,3 +643,17 @@
 "No: this CPU has no efficiency cores, or is not a 12th-14th gen Core" = "Hayır: bu işlemcide verimlilik çekirdeği yok ya da 12.-14. nesil bir Core değil";
 "There (%@); this package has none" = "Var (%@); bu pakette yok";
 "Not there; this package has none (0.1.4 and later have it)" = "Yok; bu pakette de yok (0.1.4 ve sonrasında var)";
+
+/* diagnostics report progress */
+"PCI devices" = "PCI aygıtları";
+"Displays" = "Ekranlar";
+"The driver" = "Sürücü";
+"The graphics stack" = "Grafik yığını";
+"Logs and panics" = "Günlükler ve çökmeler";
+"Staged probe" = "Aşamalı yoklama";
+"Self-tests" = "Öz testler";
+"Summary" = "Özet";
+"Removing private details" = "Kişisel bilgiler çıkarılıyor";
+"Starting" = "Başlıyor";
+"Step %lld of %lld: %@" = "Adım %lld / %lld: %@";
+"%lld s" = "%lld sn";

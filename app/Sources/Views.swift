@@ -58,6 +58,7 @@ final class Manager: ObservableObject {
     @Published var driverRun: DriverRun?
     /// where the output of the run that started last begins in `log`
     private(set) var runLogStart = 0
+    private(set) var runStartedAt = Date()   // when the running command started (the report's elapsed time)
     private var logTimer: Timer?
 
     init() {
@@ -214,6 +215,7 @@ final class Manager: ObservableObject {
         log += "\n== \(title)\n"
         let start = log.count
         runLogStart = start
+        runStartedAt = Date()
         // install.sh writes to the log file as it works; rebuilding the kernel collection takes minutes.
         logTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in

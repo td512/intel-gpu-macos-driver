@@ -22,6 +22,50 @@ func issueFormURL(template: String, field: String, value: String?) -> URL {
     return c.url!
 }
 
+let reportTitle = String(localized: "Create a diagnostics report")
+
+/// The report's progress: collect-macos.sh prints "== step N/TOTAL: NAME" as each section starts; the bar follows the
+/// last one in the run's output (the log, read every half second while it runs).
+struct ReportProgress: View {
+    @EnvironmentObject var manager: Manager
+    static func names(_ key: String) -> String {
+        switch key {
+        case "system": return String(localized: "This Mac")
+        case "pci": return String(localized: "PCI devices")
+        case "display": return String(localized: "Displays")
+        case "driver": return String(localized: "The driver")
+        case "stack": return String(localized: "The graphics stack")
+        case "logs": return String(localized: "Logs and panics")
+        case "opencore": return String(localized: "OpenCore")
+        case "probe": return String(localized: "Staged probe")
+        case "acpi": return String(localized: "ACPI tables")
+        case "tests": return String(localized: "Self-tests")
+        case "summary": return String(localized: "Summary")
+        case "redaction": return String(localized: "Removing private details")
+        default: return key
+        }
+    }
+    var body: some View {
+        let output = manager.log.dropFirst(manager.runLogStart)
+        let last = output.split(separator: "\n").last { $0.hasPrefix("== step ") }
+        let parts = last.map { $0.dropFirst(8).split(separator: ":", maxSplits: 1) } ?? []
+        let nums = parts.first?.split(separator: "/").compactMap { Int($0) } ?? []
+        let n = nums.count == 2 ? nums[0] : 0, total = nums.count == 2 ? max(nums[1], 1) : 1
+        let name = parts.count == 2 ? Self.names(parts[1].trimmingCharacters(in: .whitespaces)) : String(localized: "Starting")
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: Double(max(n - 1, 0)) + 0.5, total: Double(total))
+                    .animation(.easeInOut(duration: 0.3), value: n)
+                HStack {
+                    Text(n > 0 ? String(localized: "Step \(n) of \(total): \(name)") : name).font(.callout)
+                    Spacer()
+                    Text(String(localized: "\(Int(ctx.date.timeIntervalSince(manager.runStartedAt))) s")).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
 extension Manager {
     func createReport(acpi: Bool, probe: Bool, admin: Bool) {
         guard let script = Bundle.main.url(forResource: "collect-macos", withExtension: "sh") else { return }
@@ -33,7 +77,7 @@ extension Manager {
         if admin { command = "XE_REPORT_USER=\(shellQuoted(NSUserName())) " + command }
         let start = log.count
         reportWarnings = []
-        perform(title: String(localized: "Create a diagnostics report"), command: command, needsRoot: admin, then: { result in
+        perform(title: reportTitle, command: command, needsRoot: admin, then: { result in
             let lines = String(self.log.dropFirst(start)).split(separator: "\n").map(String.init)
             let field = { (name: String) in lines.first { $0.hasPrefix(name) }.map { String($0.dropFirst(name.count)).trimmingCharacters(in: .whitespaces) } }
             self.reportWarnings = lines.compactMap { line in
@@ -68,10 +112,14 @@ struct ReportView: View {
                 CaptionedToggle(title: "Administrator mode", caption: "Asks for your password. Adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock.", isOn: $admin)
                 CaptionedToggle(title: "ACPI tables", caption: "The DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence.", isOn: $acpi)
                 CaptionedToggle(title: "Staged-probe results", caption: "Only for a GPU that is not supported yet.", isOn: $probe)
-                HStack {
-                    Spacer()
-                    Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
-                        .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                if manager.busy == reportTitle {
+                    ReportProgress()
+                } else {
+                    HStack {
+                        Spacer()
+                        Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
+                            .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).disabled(manager.busy != nil)
+                    }
                 }
             }
             if let id = manager.reportID {

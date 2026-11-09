@@ -81,6 +81,14 @@ trap 'exit 130' INT TERM
 
 say() { printf '%s\n' "$*" >&2; }
 note() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >> "$LOG"; }
+# step NAME: a section starts; "== step N/TOTAL: NAME" on stdout is what IntelXe Manager's progress bar reads (the nine
+# sections every report has, plus the optional probe, ACPI and self-test ones)
+STEPN=0
+step() {
+	STEPN=$((STEPN + 1))
+	printf '== step %s/%s: %s\n' "$STEPN" $((9 + PROBE + ACPI + TESTS)) "$1"
+	note "$1"
+}
 skip() { printf '%s\n' "$*" >> "$TMPBASE/.skipped"; note "skipped: $*"; }
 left() { echo $((DEADLINE - $(date +%s))); }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -197,7 +205,7 @@ if [ -n "$WIFI_IF" ]; then
 fi
 
 # ---------------------------------------------------------------- system
-note "system"
+step "system"
 F="$W/system/os.txt"
 cmd "$F" 5 sw_vers
 cmd "$F" 5 uname -mrv
@@ -244,7 +252,7 @@ RUN_TO_FIRST=
 ls -la /Library/LaunchDaemons /Library/LaunchAgents 2>/dev/null | grep -iE 'intelxe|nullmoth|nmx|xe|intel|hackintosh' > "$W/system/launchd.txt"
 
 # ---------------------------------------------------------------- GPUs (PCI)
-note "pci"
+step "pci"
 IOPCI="$TMPBASE/.pci"
 run_to 10 ioreg -r -d1 -l -w0 -c IOPCIDevice > "$IOPCI" 2>/dev/null
 # LE ioreg data <86800000> -> 8086 ; class <00000300> -> 030000. pcidebug is "bus:dev:fn" plus "(secondary:subordinate)"
@@ -311,7 +319,7 @@ cmd "$W/gpu/accelerators.txt" 8 ioreg -r -d1 -l -w0 -c IOAccelerator
 for c in IntelXe NMXAccel NMXAGDC; do cmd "$W/gpu/our-services.txt" 5 ioreg -r -d1 -l -w0 -c "$c"; done
 
 # ---------------------------------------------------------------- displays
-note "display"
+step "display"
 EDID_AWK='
 function hx(s,   i, v) { v = 0; s = tolower(s); for (i = 1; i <= length(s); i++) v = v * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1; return v }
 function byte(e, i) { return hx(substr(e, 2 * i + 1, 2)) }
@@ -367,7 +375,7 @@ fi
 cmd "$W/gpu/system_profiler-displays.txt" 30 system_profiler -detailLevel mini SPDisplaysDataType
 
 # ---------------------------------------------------------------- driver state
-note "driver"
+step "driver"
 F="$W/driver/kexts-loaded.txt"
 run_to 10 kmutil showloaded --list-only > "$TMPBASE/.kexts" 2>/dev/null
 {
@@ -473,7 +481,7 @@ ls -la /Library/GPUBundles /Library/GPUBundles/nvmtl /Library/Extensions 2>/dev/
 # What decides how the stack behaves on this boot: which Metal plugin copy the accelerator names, the boot guard (an
 # unhealthy boot keeps acceleration off on later boots until intelxe-accel-off is cleared), the HiDPI switch, the
 # package and app versions, and the CPU power-management kexts (a CPU held at a low clock looks like a slow GPU).
-note "stack"
+step "stack"
 IOREGL="$TMPBASE/.ioregl"
 run_to 15 ioreg -lw0 > "$IOREGL" 2>/dev/null
 F="$W/driver/stack.txt"
@@ -564,7 +572,7 @@ else
 fi
 
 # ---------------------------------------------------------------- logs
-note "logs"
+step "logs"
 # the two log queries were started in the background at the beginning; wait for them
 [ -n "$KLOG_PID" ] && wait "$KLOG_PID"
 [ -n "$WLOG_PID" ] && wait "$WLOG_PID"
@@ -627,7 +635,7 @@ if [ "$NCRASH" -gt 0 ]; then
 fi
 
 # ---------------------------------------------------------------- OpenCore
-note "opencore"
+step "opencore"
 cp "$W/system/nvram.txt" "$W/opencore/nvram.txt" 2>/dev/null
 # OpenCore config.plist identifiers. MODE=values prints each value (one line, no spaces);
 # MODE=redact prints the plist with each value replaced, element kept (values may span lines).
@@ -854,7 +862,7 @@ fi
 # and sysctl, the NVRAM breadcrumb the previous boot left (it survives a hang and the hard reset after it), and
 # any panic the probe watchdog raised.
 if [ "$PROBE" = 1 ]; then
-	note "probe"
+	step "probe"
 	mkdir -p "$W/probe"
 	v=$(nvram xeprobe-crumb 2>/dev/null | cut -f2-)
 	printf '%s\n' "${v:-no breadcrumb in NVRAM (the probe has not run with debug.xeprobe.nvram=1 or -xeprobecrumb)}" > "$W/probe/nvram-breadcrumb.txt"
@@ -872,7 +880,7 @@ fi
 # patched them, plus the SSDTs OpenCore added. No root needed. Only DSDT and SSDT*; .bin files, which the text redaction
 # leaves intact and the final privacy check still reads.
 if [ "$ACPI" = 1 ]; then
-	note "acpi"
+	step "acpi"
 	mkdir -p "$W/acpi"
 	run_to 10 ioreg -lw0 -p IOService -r -n AppleACPIPlatformExpert -d1 2>/dev/null |
 		awk -v D="$W/acpi" '/"ACPI Tables" = \{/ {
@@ -896,7 +904,7 @@ fi
 
 # ---------------------------------------------------------------- optional self-tests
 if [ "$TESTS" = 1 ]; then
-	note "tests"
+	step "tests"
 	mkdir -p "$W/tests"
 	SD=$(cd "$(dirname "$0")" && pwd)
 	findbin() { for c in "$SD/$1" "$HOME/b580/$1" "$(command -v "$1" 2>/dev/null)"; do [ -n "$c" ] && [ -x "$c" ] && [ -f "$c" ] && { echo "$c"; return 0; }; done; return 1; }
@@ -965,7 +973,7 @@ esac
 [ "$NPANIC" -gt 0 ] && warn panics "$NPANIC kernel panic(s) in the last $DAYS days: their text is in logs/panics/."
 
 # ---------------------------------------------------------------- summary
-note "summary"
+step "summary"
 S="$W/summary.txt"
 kx() { grep -iE "$1" "$TMPBASE/.kexts" 2>/dev/null | head -1 | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\(/) { v = $i; gsub(/[()]/, "", v); print "loaded " v; exit } }' | grep . || echo "not loaded"; }
 inst() { grep -A2 "^$1\$" "$W/driver/installed.txt" 2>/dev/null | grep -E '^  [0-9a-f]{64} ' | head -1 | sed 's/^ *//' | cut -c1-16 | sed 's/^/sha256 /' | grep . || echo "not installed"; }
@@ -1057,7 +1065,7 @@ inst() { grep -A2 "^$1\$" "$W/driver/installed.txt" 2>/dev/null | grep -E '^  [0
 } > "$S" 2>/dev/null
 
 # ---------------------------------------------------------------- redaction
-note "redaction"
+step "redaction"
 # 1. OpenCore config.plist: identifiers keep their element, value removed
 for p in "$W"/opencore/efi-*/config.plist; do
 	[ -f "$p" ] || continue

@@ -79,6 +79,9 @@ func renderSnapshots(into folder: String) {
         monitor.fpsHistory.append(MonitorPoint(t: t, v: busy ? 160 + 18 * wave : (i % 40 < 6 ? 60 : 2)))
     }
     monitor.now = MonitorSample(fps: 171, actMHz: 2780, reqMHz: 2850, maxMHz: 2850, packageC: 67, vramC: 72, vramUsedMB: 3420, mode: "2560x1440, 180 Hz")
+    // the Report page while a report runs: the bar at its fourth section
+    let reporting = Manager()
+    reporting.log = "== step 1/9: system\n== step 2/9: pci\n== step 3/9: display\n== step 4/9: driver\n"; reporting.busy = reportTitle
     // the Tests page after a quick test with one result below expectations
     let tested = Manager()
     tested.testResults = [TestResult(title: "Compute (vector add)", value: "correct", state: .good),
@@ -95,6 +98,7 @@ func renderSnapshots(into folder: String) {
         ("system-update", AnyView(SystemView().environmentObject(outdated)), 640),
         ("monitor", AnyView(MonitorView(model: monitor).environmentObject(working)), 640),
         ("tests", AnyView(TestsView().environmentObject(tested)), 520), ("report", AnyView(ReportView().environmentObject(tested)), 560),
+        ("report-running", AnyView(ReportView().environmentObject(reporting)), 360),
         ("settings", AnyView(SettingsView().environmentObject(tested)), 760),
         ("about", AnyView(AboutView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))), 760),
         ("install-running", AnyView(BusyBar().environmentObject(installing).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 330),
