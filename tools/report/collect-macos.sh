@@ -795,6 +795,18 @@ rm -f "$TMPBASE/.bootopt"
 : > "$TMPBASE/.efiscore"
 NEFI=0
 NOMOUNT=""
+# efi_ro ID: mount an EFI partition read-only, print where. diskutil first; as root, mount_msdos directly when diskutil
+# refuses: an EFI that OpenCore wrote at boot is left marked dirty, and diskutil mounts a dirty FAT read-write only
+# (found on the B580 machine, 10 Nov: administrator mode collected no config.plist). The cleanup unmounts by ID.
+efi_ro() {
+	if run_to 10 diskutil mount readOnly "$1" >/dev/null 2>&1; then
+		diskutil info "$1" 2>/dev/null | sed -n 's/^ *Mount Point: *//p'; return 0
+	fi
+	[ "$(id -u)" = 0 ] || return 1
+	_d=$(mktemp -d "$TMPBASE/efi.XXXXXX") || return 1
+	if run_to 10 mount_msdos -o rdonly "/dev/$1" "$_d" >/dev/null 2>&1; then echo "$_d"; return 0; fi
+	rmdir "$_d" 2>/dev/null; return 1
+}
 mount | awk '$0 ~ /\((msdos|exfat)/ { id = $1; sub("/dev/", "", id); mp = $0; sub(/^[^ ]+ on /, "", mp); sub(/ \(.*$/, "", mp); print id "\t" mp }' > "$TMPBASE/.mounts"
 while IFS='	' read -r id mp; do
 	[ -f "$mp/EFI/OC/config.plist" ] || continue
@@ -804,11 +816,11 @@ if [ "$MOUNT" = 1 ] && [ "$ARCH" = x86_64 ]; then
 	for id in $(diskutil list 2>/dev/null | awk '$2 == "EFI" { print $NF }'); do
 		[ "$(left)" -gt 10 ] || break
 		grep -q "^$id	" "$TMPBASE/.mounts" && continue
-		run_to 10 diskutil mount readOnly "$id" >/dev/null 2>&1 || { NOMOUNT="$NOMOUNT $id"; continue; }
+		mp=$(efi_ro "$id") || { NOMOUNT="$NOMOUNT $id"; continue; }
 		MOUNTED_BY_US="$MOUNTED_BY_US $id"
-		mp=$(diskutil info "$id" 2>/dev/null | sed -n 's/^ *Mount Point: *//p')
 		[ -n "$mp" ] && [ -f "$mp/EFI/OC/config.plist" ] && { NEFI=$((NEFI + 1)); efi_collect "$mp" "$id" "$NEFI"; }
 		diskutil unmount "$id" >/dev/null 2>&1 && MOUNTED_BY_US=$(echo "$MOUNTED_BY_US" | sed "s/ $id//")
+		case "$mp" in "$TMPBASE"/efi.*) rmdir "$mp" 2>/dev/null ;; esac
 	done
 fi
 # --sudo-mount: mount with sudo (read-only, only if sudo needs no password) the booted EFI if it is known and was not
@@ -899,7 +911,13 @@ if [ "$ACPI" = 1 ]; then
 		xxd -r -p "$h" > "${h%.hex}.bin" 2>/dev/null && rm -f "$h"
 	done
 	grep -vE '^(MSDM|SLIC)$' "$W/acpi/table-names.txt" > "$W/acpi/.n" 2>/dev/null; mv "$W/acpi/.n" "$W/acpi/table-names.txt" 2>/dev/null
-	ls "$W"/acpi/*.bin >/dev/null 2>&1 || skip "--acpi: no ACPI tables in the I/O Registry (AppleACPIPlatformExpert)"
+	if ! ls "$W"/acpi/*.bin >/dev/null 2>&1; then
+		# macOS 26 no longer publishes the "ACPI Tables" property (seen on 26.7.1, as root too)
+		case "$(sw_vers -productVersion 2>/dev/null)" in
+		1[0-5].*|"") skip "--acpi: no ACPI tables in the I/O Registry (AppleACPIPlatformExpert)" ;;
+		*) skip "--acpi: macOS 26 and later no longer publish the ACPI tables in the I/O Registry; dump them from Windows or Linux (SSDTTime) or with OpenCore's Misc > Debug > SysReport" ;;
+		esac
+	fi
 fi
 
 # ---------------------------------------------------------------- optional self-tests

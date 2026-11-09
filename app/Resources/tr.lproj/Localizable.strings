@@ -657,3 +657,4 @@
 "Starting" = "Başlıyor";
 "Step %lld of %lld: %@" = "Adım %lld / %lld: %@";
 "%lld s" = "%lld sn";
+"Not available on macOS 26: it no longer gives the tables to apps. Dump them from Windows or Linux (SSDTTime)." = "macOS 26'da yok: tabloları artık uygulamalara vermiyor. Windows ya da Linux'tan (SSDTTime) alın.";

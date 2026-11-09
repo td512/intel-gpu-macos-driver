@@ -110,14 +110,20 @@ struct ReportView: View {
                 Caption("Changes and uploads nothing; private details are removed. About a minute.",
                         detail: "Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop.")
                 CaptionedToggle(title: "Administrator mode", caption: "Asks for your password. Adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock.", isOn: $admin)
-                CaptionedToggle(title: "ACPI tables", caption: "The DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence.", isOn: $acpi)
+                if manager.facts.macOSMajor >= 26 {
+                    // macOS 26 no longer publishes the "ACPI Tables" property the report reads them from
+                    CaptionedToggle(title: "ACPI tables", caption: "Not available on macOS 26: it no longer gives the tables to apps. Dump them from Windows or Linux (SSDTTime).",
+                                    isOn: .constant(false)).disabled(true)
+                } else {
+                    CaptionedToggle(title: "ACPI tables", caption: "The DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence.", isOn: $acpi)
+                }
                 CaptionedToggle(title: "Staged-probe results", caption: "Only for a GPU that is not supported yet.", isOn: $probe)
                 if manager.busy == reportTitle {
                     ReportProgress()
                 } else {
                     HStack {
                         Spacer()
-                        Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
+                        Button("Create a diagnostics report") { manager.createReport(acpi: acpi && manager.facts.macOSMajor < 26, probe: probe, admin: admin) }
                             .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).disabled(manager.busy != nil)
                     }
                 }

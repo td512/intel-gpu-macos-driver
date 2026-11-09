@@ -34,7 +34,8 @@ with nothing moving, and recent kernel panics. The options are:
 - `--no-mount`: do not try to mount an EFI partition to read the OpenCore config;
 - `--sudo-mount`: if `sudo` works without a password, mount EFI partitions read-only as root and unmount them again. With a known boot partition, only that one is mounted; otherwise every EFI partition a user could not mount;
 - `--acpi`: also the DSDT and SSDT tables as macOS sees them, after OpenCore's patches and with the SSDTs it adds
-  (from the I/O Registry, no root needed). Never the MSDM or SLIC table;
+  (from the I/O Registry, no root needed). Never the MSDM or SLIC table. macOS 26 and later no longer publish the tables
+  there, so on Tahoe the option collects nothing (IntelXe Manager greys it out); dump them from Windows or Linux;
 - `--probe`: also collect the results of the staged probe (`XeProbe`, see `docs/PROBE-MODE.md`) and the NVRAM breadcrumb the previous boot left;
 - `--out DIR`: write the file somewhere else.
 
@@ -42,7 +43,9 @@ You do not need `sudo`. A few driver counters can only be read by root. If `sudo
 
 The script uses only tools that ship with macOS. It does not need Xcode or the Command Line Tools, and it does not start their install dialog.
 
-**OpenCore config.** The script reads `EFI/OC/config.plist` from any EFI partition that is already mounted. It also tries to mount the other EFI partitions read-only, which usually needs root. If it found no config, mount the EFI partition you boot from, for example with `sudo diskutil mount disk0s1` or MountEFI, and run the script again.
+**OpenCore config.** The script reads `EFI/OC/config.plist` from any EFI partition that is already mounted. It also tries to mount the other EFI partitions read-only, which usually needs root. Run as root (IntelXe Manager's
+administrator mode), it also reads an EFI partition that macOS refuses to mount read-only because OpenCore left it
+marked dirty at boot (it mounts it with `mount_msdos -o rdonly` instead). If it found no config, mount the EFI partition you boot from, for example with `sudo diskutil mount disk0s1` or MountEFI, and run the script again.
 
 **Which EFI booted.** The script works this out without root, in this order:
 1. the firmware's `BootCurrent` load option (its partition GUID and file path);
