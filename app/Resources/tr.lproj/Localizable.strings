@@ -595,3 +595,19 @@
 "OpenGL page" = "OpenGL sayfası";
 "GPU clock and temperature in the menu bar" = "Menü çubuğunda GPU saat hızı ve sıcaklığı";
 "Monitor page" = "İzleme sayfası";
+
+/* Look and feel: the About window */
+"About IntelXe Manager" = "IntelXe Manager Hakkında";
+"Version %@" = "Sürüm %@";
+"Installs and manages the IntelXe driver for the Intel Arc B580 on macOS." = "macOS'te Intel Arc B580 için IntelXe sürücüsünü kurar ve yönetir.";
+"github.com/%@" = "github.com/%@";
+"License" = "Lisans";
+"This app is under the MIT License. Parts of the driver are under PolyForm Noncommercial 1.0.0 and LGPL-3.0-or-later: the repository and the release packages are for noncommercial use." = "Bu uygulama MIT Lisansı altındadır. Sürücünün bazı parçaları PolyForm Noncommercial 1.0.0 ve LGPL-3.0-or-later lisanslıdır: Depo ve sürüm paketleri ticari olmayan kullanım içindir.";
+"Credits" = "Emeği geçenler";
+"The Metal plugin, the AIR to SPIR-V translator and the accelerator kexts this stack is built on." = "Bu yapının üzerine kurulduğu Metal eklentisi, AIR'den SPIR-V'ye çevirici ve hızlandırıcı kext'leri.";
+"The translator nullmoth's is based on." = "nullmoth'un çeviricisinin dayandığı çevirici.";
+"The kernel driver follows them." = "Çekirdek sürücüsü bunları izler.";
+"ANV, the Vulkan driver." = "Vulkan sürücüsü ANV.";
+"The Xe2 VDEnc work." = "Xe2 VDEnc çalışması.";
+"The Vulkan video code the VideoToolbox codecs use." = "VideoToolbox kodeklerinin kullandığı Vulkan video kodu.";
+"Intel, Arc, Apple, macOS and Metal are trademarks of their owners." = "Intel, Arc, Apple, macOS ve Metal, sahiplerinin ticari markalarıdır.";

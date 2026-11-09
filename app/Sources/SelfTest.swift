@@ -78,6 +78,7 @@ func renderSnapshots(into folder: String) {
         ("system", AnyView(SystemView().environmentObject(manager)), 640), ("system-working", AnyView(SystemView().environmentObject(working)), 640),
         ("system-update", AnyView(SystemView().environmentObject(outdated)), 640),
         ("monitor", AnyView(MonitorView(model: monitor).environmentObject(working)), 640),
+        ("about", AnyView(AboutView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))), 760),
         ("install-running", AnyView(BusyBar().environmentObject(installing).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 330),
         ("install-done", AnyView(BusyBar().environmentObject(installed).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 360),
         ("setup-installing", AnyView(SetupView(close: {}).environmentObject(installing.copySetup(from: setupDriver)).background(Color(nsColor: .windowBackgroundColor))), 520), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
