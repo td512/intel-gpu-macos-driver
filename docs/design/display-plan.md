@@ -1,5 +1,8 @@
 # IntelXeFB: modes, hotplug, second monitor — Linux-sourced plan (display 14.01 / Xe2_HPD)
 
+> Design note: it records the plan and the state of the code when it was written (before 0.1.0), not the current
+> status. The current state is in the README, `kernel/README.md` and `docs/devices/b580.md`.
+
 Source: torvalds/linux master, `drivers/gpu/drm/i915/display/*` (xe reuses it; `xe/display/xe_initial_plane.c` adopts the GOP plane like we do). Files in `scratchpad/linux/`. Offsets below are transcoder/pipe A unless said; pipe/transcoder B = +0x1000.
 
 ## 0. Facts first (verified in source)
