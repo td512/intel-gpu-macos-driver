@@ -54,6 +54,10 @@ final class Manager: ObservableObject {
     /// A folder holding EFI/OC that the user chose instead of the partition (for this session only).
     @Published var efiFolder: String?
     @Published var requestedSection: Section?
+    /// the last install.sh run from the Driver page or the setup assistant, for its step list (InstallProgress.swift)
+    @Published var driverRun: DriverRun?
+    /// where the output of the run that started last begins in `log`
+    private(set) var runLogStart = 0
     private var logTimer: Timer?
 
     init() {
@@ -209,6 +213,7 @@ final class Manager: ObservableObject {
         lastResult = nil
         log += "\n== \(title)\n"
         let start = log.count
+        runLogStart = start
         // install.sh writes to the log file as it works; rebuilding the kernel collection takes minutes.
         logTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -238,6 +243,10 @@ final class Manager: ObservableObject {
         let command = "\(shellQuoted(package.script.path)) \(action.argument)"
         var succeeded = false
         perform(title: action.title, command: command, needsRoot: action.needsRoot, then: { result in
+            if var run = self.driverRun, run.action == action, !run.finished {
+                run.finished = true; run.succeeded = result.succeeded; run.cancelled = result.cancelled; run.end = Date()
+                self.driverRun = run
+            }
             if result.cancelled {
                 self.lastResult = String(localized: "Cancelled. Nothing changed.")
             } else if result.succeeded {
@@ -251,6 +260,8 @@ final class Manager: ObservableObject {
             // the EFI as it is after the refresh: a notice only when its IntelXe.kext is not this package's or could not be read
             if succeeded { self.efiNotice = EFINotice.after(action, status: self.efi) }
         })
+        // perform(title:) has set runLogStart for this run: the step list reads the output from there
+        driverRun = action.steps.isEmpty ? nil : DriverRun(action: action, logStart: runLogStart)
     }
 
     /// An EFI change through efi.sh, with the hash of the plan that was shown: efi.sh refuses if the EFI changed since.
@@ -441,7 +452,7 @@ struct RootView: View {
             .frame(minWidth: 560, minHeight: 460)
         }
         .disabled(manager.busy != nil)
-        .overlay(alignment: .bottom) { BusyBar() }
+        .overlay(alignment: .bottom) { BusyBar().animation(.easeInOut(duration: 0.3), value: manager.driverRun?.dismissed) }
         .onChange(of: manager.requestedSection) { _, section in
             if let section { page.section = section; manager.requestedSection = nil }
         }
@@ -472,7 +483,17 @@ struct RootView: View {
 struct BusyBar: View {
     @EnvironmentObject var manager: Manager
     var body: some View {
-        if let busy = manager.busy {
+        if let run = manager.driverRun, !run.dismissed {
+            // an install, repair, undo or uninstall: its steps, while it runs and after, until closed
+            DriverRunView(run: run, closable: true)
+                .frame(width: 470)
+                .padding(16)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+                .shadow(color: .black.opacity(0.18), radius: 14, y: 4)
+                .padding(14)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if let busy = manager.busy {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 Text(busy)

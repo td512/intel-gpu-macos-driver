@@ -58,21 +58,27 @@ struct SetupView: View {
             ProgressView(value: Double(step.number), total: 5)
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 12) { page(step) }.frame(maxWidth: .infinity, alignment: .leading) }
-            if let busy = manager.busy { HStack { ProgressView().controlSize(.small); Text(busy).foregroundStyle(.secondary) } }
+                .disabled(manager.busy != nil)
+            // the install's steps stay usable (its log can be opened) while the rest waits for it
+            if let run = manager.driverRun, !run.dismissed {
+                DriverRunView(run: run, closable: true)
+                    .padding(12)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if let busy = manager.busy { HStack { ProgressView().controlSize(.small); Text(busy).foregroundStyle(.secondary) } }
             if let r = manager.lastResult { Text(r).font(.callout) }
             Divider()
             HStack {
-                Button("Check again") { Task { await manager.refresh() } }.disabled(manager.probing)
+                Button("Check again") { Task { await manager.refresh() } }.disabled(manager.probing || manager.busy != nil)
                 Spacer()
                 Button(step == .done ? "Finish" : "Close, continue later") {
                     if step == .done { UserDefaults.standard.set(true, forKey: "setupDone") }
                     close()
                 }
+                .disabled(manager.busy != nil)
             }
         }
         .padding(22)
         .frame(width: 620, height: 520)
-        .disabled(manager.busy != nil)
     }
 
     @ViewBuilder func page(_ step: SetupStep) -> some View {

@@ -48,11 +48,23 @@ func renderSnapshots(into folder: String) {
         m.testResults = setupDone.testResults
     }
     outdated.release = try? JSONDecoder().decode(Release.self, from: Data(#"{"tag_name":"v0.1.5","html_url":"https://example.invalid/r","body":"","prerelease":false,"assets":[]}"#.utf8))
+    // an install half way (copying the Metal driver, the Kernel Collection next) and one that has finished
+    let installing = Manager(), installed = Manager()
+    let output = "== intel-gpu-macos-driver 0.1.4: checks\n  ok    macOS 26.7.1\n== 0 problem(s)\n== backup: /Library/Application Support/intel-gpu-macos-driver/backup-20261109-101500\n"
+        + "  ok    /Library/Extensions/IntelXeFB.kext\n  ok    /Library/Extensions/NMXAccel.kext\n  ok    /Library/GPUBundles/NVMTLDriverLib.bundle\n"
+    installing.log = output; installing.busy = DriverAction.install.title
+    installing.driverRun = DriverRun(action: .install, logStart: 0)
+    installed.log = output + "== rebuilding the Auxiliary Kernel Collection (log: /tmp/auxkc)\n  ok    /Library/KernelCollections/AuxiliaryKernelExtensions.kc\n== done. Reboot.\n"
+    var finishedRun = DriverRun(action: .install, logStart: 0); finishedRun.finished = true; finishedRun.succeeded = true; finishedRun.end = finishedRun.start.addingTimeInterval(207)
+    installed.driverRun = finishedRun
     print("setup steps: driver page \(setupDriver.setupStep.number), last page \(setupDone.setupStep.number)")
     let pages: [(String, AnyView, CGFloat)] = [
         ("setup-driver", AnyView(SetupView(close: {}).environmentObject(setupDriver).background(Color(nsColor: .windowBackgroundColor))), 520), ("setup-done", AnyView(SetupView(close: {}).environmentObject(setupDone).background(Color(nsColor: .windowBackgroundColor))), 520),
         ("system", AnyView(SystemView().environmentObject(manager)), 640), ("system-working", AnyView(SystemView().environmentObject(working)), 640),
-        ("system-update", AnyView(SystemView().environmentObject(outdated)), 640), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
+        ("system-update", AnyView(SystemView().environmentObject(outdated)), 640),
+        ("install-running", AnyView(BusyBar().environmentObject(installing).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 330),
+        ("install-done", AnyView(BusyBar().environmentObject(installed).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 360),
+        ("setup-installing", AnyView(SetupView(close: {}).environmentObject(installing.copySetup(from: setupDriver)).background(Color(nsColor: .windowBackgroundColor))), 520), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
         ("efi", AnyView(EFIView().environmentObject(manager)), 1500), ("efi-choose", AnyView(EFIView().environmentObject(choosing)), 640),
         ("zink", AnyView(ZinkView().environmentObject(manager)), 640),
         ("display-off", AnyView(DisplayView().environmentObject(hidpiOff)), 480), ("display-pending", AnyView(DisplayView().environmentObject(hidpiPending)), 480), ("banners", AnyView(Banners().environmentObject(choosing).background(Color(nsColor: .windowBackgroundColor))), 120),
@@ -234,4 +246,9 @@ func selfTest() {
     if let folder = selfTestEFIFolder { try? FileManager.default.removeItem(at: URL(fileURLWithPath: folder).deletingLastPathComponent()) }
     print(failures == 0 ? "selftest passed" : "selftest: \(failures) failure(s)")
     exit(failures == 0 ? 0 : 1)
+}
+
+extension Manager {
+    /// this manager with another's facts and package, for a snapshot of the setup assistant during a run
+    @MainActor func copySetup(from other: Manager) -> Manager { facts = other.facts; package = other.package; return self }
 }

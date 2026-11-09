@@ -563,3 +563,17 @@
 "For Adaptive-Sync monitors: no tearing or stutter below the maximum rate." = "Adaptive-Sync monitörler için: En yüksek hızın altında yırtılma ve takılma olmaz.";
 "About 25 seconds. Close games and other GPU-heavy apps first." = "Yaklaşık 25 saniye. Önce oyunları ve GPU'yu yoğun kullanan diğer uygulamaları kapatın.";
 "Changes and uploads nothing; private details are removed. About a minute." = "Hiçbir şeyi değiştirmez ve yüklemez; kişisel bilgiler çıkarılır. Yaklaşık bir dakika sürer.";
+
+/* Look and feel: the steps of an install */
+"Administrator password" = "Yönetici parolası";
+"Check the system and the package" = "Sistemi ve paketi denetle";
+"Rebuild the Auxiliary Kernel Collection (a few minutes)" = "Auxiliary Kernel Collection'ı yeniden oluştur (birkaç dakika)";
+"Back up what it replaces" = "Değişecek dosyaları yedekle";
+"Copy the kexts into /Library/Extensions" = "Kext'leri /Library/Extensions'a kopyala";
+"Copy the Metal driver into /Library/GPUBundles" = "Metal sürücüsünü /Library/GPUBundles'a kopyala";
+"Put back the files that differ" = "Uyuşmayan dosyaları yeniden kopyala";
+"Restore the last backup" = "Son yedeği geri koy";
+"Remove the driver's files" = "Sürücünün dosyalarını sil";
+"Close" = "Kapat";
+"Nothing yet." = "Henüz bir şey yok.";
+"Full log" = "Günlüğün tamamı";
