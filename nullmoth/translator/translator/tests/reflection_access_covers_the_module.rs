@@ -49,6 +49,8 @@ fn a_declared_access_the_body_contradicts_is_replaced_by_what_the_body_does() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_reflects_an_access_that_covers_its_module() {
     let mut checked = 0;
     let mut accesses = 0;

@@ -134,6 +134,8 @@ fn a_texel_read_cube_reflects_the_two_dimensional_array_it_binds() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_reflects_the_images_it_binds() {
     let mut checked = 0;
     let mut shapes = 0;

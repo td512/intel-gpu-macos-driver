@@ -172,6 +172,8 @@ fn an_unbound_buffer_kernel_translates_to_the_same_bytes_every_time() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_translates_to_the_same_bytes_every_time() {
     let mut checked = 0;
     for path in public_fixtures() {
@@ -196,6 +198,8 @@ fn every_public_fixture_translates_to_the_same_bytes_every_time() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_is_stable_under_every_stage_it_translates_under() {
     let mut checked = 0;
     for path in public_fixtures() {

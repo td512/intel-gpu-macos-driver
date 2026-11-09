@@ -67,6 +67,8 @@ fn assert_no_unused_globals(label: &str, spirv: &[u8]) -> usize {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn no_public_fixture_translates_to_a_module_with_an_unused_global_variable() {
     let mut variables = 0;
     let mut checked = 0;
@@ -93,6 +95,8 @@ fn no_public_fixture_translates_to_a_module_with_an_unused_global_variable() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn no_fixture_leaves_an_unused_global_variable_under_any_stage_it_translates_under() {
     let mut variables = 0;
     let mut checked = 0;

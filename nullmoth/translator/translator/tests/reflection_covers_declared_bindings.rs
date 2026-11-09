@@ -540,6 +540,8 @@ fn array_lengths_the_module_declares(spirv: &[u8]) -> std::collections::BTreeMap
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_reflects_every_descriptor_it_declares() {
     let mut declared = 0;
     let mut checked = 0;
@@ -645,6 +647,8 @@ fn constexpr_samplers_are_reported_on_the_bindings_the_module_gives_them() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_reflects_every_descriptor_it_declares_under_a_shifted_layout() {
     let layout = shifted_layout();
     let mut checked = 0;

@@ -21,6 +21,8 @@ const IMAGE_CAPABILITIES: &[(&str, &str, bool)] = &[
 ];
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_declared_image_capability_has_an_image_that_needs_it() {
     let mut checked = 0;
     for path in public_fixtures() {
@@ -75,6 +77,8 @@ fn every_declared_image_capability_has_an_image_that_needs_it() {
 const IMPLIED_BY_ANOTHER: &[&str] = &["GroupNonUniform"];
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn no_public_fixture_declares_a_capability_it_does_not_need() {
     let mut checked = 0;
     let mut stripped = 0;
@@ -134,6 +138,8 @@ const GROUP_ARITHMETIC_OPCODES: &[&str] = &[
 ];
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn group_arithmetic_capability_follows_the_group_operation() {
     let mut checked = 0;
     for (label, text) in translated_fixtures() {
@@ -168,6 +174,8 @@ fn group_arithmetic_capability_follows_the_group_operation() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn variable_pointers_is_not_declared_for_addresses() {
     let mut checked = 0;
     for (label, text) in translated_fixtures() {
