@@ -2,7 +2,7 @@
 
 The order is roughly the intended one. Every item should follow the Linux xe/i915 and Mesa way of doing it, not a macOS-only shortcut (see the README's philosophy section).
 
-## Near term (Arc B580)
+## Near term (Arc B580, and the B570 with it)
 
 ### VideoToolbox
 - **Done (2026-10-29):** AV1 decoder and HEVC/H.264/AV1 encoders, registered in-process by the plugin in every Metal process (VTDecoderXPCService included); FFmpeg shared.
@@ -40,8 +40,11 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Done (0.1.4):** the translator turns an `or` of disjoint bits back into an add, so Mesa vectorizes the loads it
   indexes: clbench `sgemm_reg` 3778 -> 7130 GFLOP/s (Windows 5456). Apps see an 8.2 GB working set, not 5.1.
 - **Next, Geekbench gaps against Windows:** Background Blur (the kernels compile well: SIMD32, no spills; the gap is
-  thought to be per-dispatch cost and the MPS path, to be measured on the B580) and Super Resolution (measure it with
-  and without the GuC low-latency hint, now off by default). clbench `blur_h` is still at 64% of Windows.
+  thought to be per-dispatch cost and the MPS path, to be measured on the B580) and Super Resolution; both depend on
+  the GPU clock and score lower with the GuC low-latency hint off (the default since 0.1.4). clbench `blur_h` is still
+  at 64% of Windows.
+- **Done (0.1.4):** relaxed threadgroup atomics stay relaxed in the translator, so Mesa no longer fences shared local
+  memory around them (clbench `hist256`'s loop now matches IGC's).
 
 ### Descriptor model
 - Stage 1 (front end without per-draw atomics or retain/release, address table, bind cache): done. Stage 2, the descriptor-buffer model, is in the plugin behind `NVMTL_DESC_MODEL=buffer` and off by default until it has been soaked (`docs/design/DESCRIPTOR-MODEL.md`).
@@ -72,7 +75,9 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Done (0.1.4):** `HybridPM.kext` published (`kernel/HybridPM/`, a Lilu plugin): it corrects XCPM's HWP requests on
   Alder Lake / Raptor Lake hybrid CPUs, which held the P-cores low and busy cores at 800 MHz (i7-14700K: one thread
   ~55 -> 128 M it/s; Geekbench GPU scores about a third higher). It leaves Core Ultra, CPUs without E-cores and other
-  CPUs alone. Optional, added to the EFI by hand below Lilu.
+  CPUs alone. Optional; `efi.sh` and the app's EFI page add it below Lilu at stage 4 when the CPU needs it (Lilu is
+  required and not shipped).
+- **Next:** the Windows EFI tool (`IntelXe-EFI.ps1`) adds HybridPM too; it does not yet.
 
 ### Integrated GPU
 - Out of scope for this stack: the test machine runs with the CPU's integrated GPU off. A headless iGPU next to the B580
@@ -91,11 +96,12 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   context through GLFW/EGL (LWJGL 3 games). Minecraft 1.21.1 with Sodium, Iris and BSL (HIGH), windowed: 197–205 fps
   against 214–218 on Windows; without a shader pack 1400–1500 against 700–1000.
 - Next: the remaining ~5–7% with shaders is GPU work per frame (Windows' GPU is not fully busy, ours is): measure per
-  draw (`INTEL_MEASURE=draw`), Zink's multi-draw path, the generated ISA. Then native CGL/NSOpenGL applications (a CGL
-  front end for Zink), which is what "Zink by default for every OpenGL application" needs.
-- **Next (cglzink, not in 0.1.4):** Zink for native CGL/NSOpenGL applications, per application first (a wrapper
-  that starts the app with Zink), then globally; a global `DYLD_` injection is not possible, so global needs another
-  way in.
+  draw (`INTEL_MEASURE=draw`), Zink's multi-draw path, the generated ISA.
+- **Done (0.1.4, experimental):** Zink for native CGL/NSOpenGL applications, one application at a time
+  (`zink-gl/cgl`, `cglzink-app.sh`: a launcher that starts the app with the layer). GZDoom MAP01 uncapped: ~1910 fps
+  against ~1600 on Apple's OpenGL.
+- **Next:** a switch for every OpenGL application (with AMFI off `launchctl setenv` passes `DYLD_*`, but it would load
+  the layer into every process); drawing into IOSurfaces (browsers) and CGL pbuffers.
 - The LaunchAgent sets `JAVA_TOOL_OPTIONS` at login, after apps that macOS reopens at login may already have started.
 
 ### IntelXe Manager (the app)
@@ -103,9 +109,11 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   release, runs `install.sh` (check, install, repair, undo, uninstall), Zink's script, and `efi.sh` for stages 2 and 4
   in the EFI OpenCore booted from or a folder the user picks. The Windows counterpart for the EFI is
   `windows/IntelXe-EFI.ps1`.
-- **Done (0.1.4):** a setup assistant from a fresh macOS install to a verified driver; the system-volume copy for
-  Safari (and OpenCore's `SecureBootModel`); diagnostics for a bug report (Report page); GPU tests; Monitor; a check
-  at login.
+- **Done (0.1.4):** a redesign (Overview with a status header, charts on the Monitor page, a menu bar item, an About
+  window); a setup assistant from a fresh macOS install to a verified driver (Safari's setting with stage 2, the
+  extras on its last page, an EFI chooser when OpenCore recorded no boot path); the system-volume copy for Safari (and
+  OpenCore's `SecureBootModel`); SSDT-ARCOFF adapted to the card's ACPI path and HybridPM at stage 4; diagnostics for a
+  bug report (Report page); GPU tests; a check at login.
 - Next: release signatures that are independent of GitHub; a check that the EFI page's state is current after changes
   made outside the app.
 
