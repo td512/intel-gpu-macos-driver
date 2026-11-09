@@ -292,6 +292,8 @@ extern int gTlbEveryBatch;   // rb7k
 extern int gJobTime;         // debug.intelxe.jobtime (xe_core.cpp)
 int xeJobTimeSet(int on);
 int xeJobTimeString(char *b, size_t len, int fwHold);
+extern int gDirect, gDirectIdleUs;   // debug.intelxe.direct, direct_idle_us (xe_core.cpp, direct submission)
+int xeDirectSet(int on);
 // rb7p: boot-arg -intelxe_nowhitelist: 0 = no RING_FORCE_TO_NONPRIV programming (as rb7o); 1 = xe_reg_whitelist.c (default)
 extern int gNonpriv;
 
@@ -325,6 +327,9 @@ struct IntelXeStats {
 	// interrupts (MI_USER_INTERRUPT, INTR_IDENTITY vector bit 0) per physical engine of the media GT: [0] VCSn, [1] VECSn
 	uint32_t vqMulti, vqSingle;
 	uint32_t mediaUserIrqs[2][8];
+	// direct submission (debug.intelxe.direct): jobs put in an armed slot, stretches started, and the stretches that ended
+	// idle, because another queue used the engine class, or otherwise (FIFO, suspend, reset, close, ban, switch off, ring)
+	uint32_t dsSubmits, dsArms, dsIdleExits, dsContendExits, dsOtherExits;
 };
 extern IntelXeStats gStats;
 // The last 64 H2G actions per GuC by CT fence (ctSend), to name the request a G2H failure reply refers to.
