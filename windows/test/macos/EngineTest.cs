@@ -12,7 +12,8 @@ using IntelXeEfi;
 class EngineTest
 {
     static int fails;
-    static string Stage1, NoEntries, Sample, X, O, Work, F, P, Bk;
+    static string Stage1, NoEntries, NoHpm, Aml013, Sample, X, O, Work, F, P, Bk;
+    const string Hybrid = "13th Gen Intel(R) Core(TM) i5-13400F";
     static readonly StringBuilder log = new StringBuilder();
 
     static void Ok(bool c, string what)
@@ -35,6 +36,13 @@ class EngineTest
         if (card != null) f.SetCard(card);
         return f;
     }
+    static EfiFolder Open(string card, string cpu)
+    {
+        EfiFolder f = Open(card);
+        f.Cpu = cpu;
+        return f;
+    }
+    static string Pk(string rel) { return Path.Combine(P, rel.Replace('/', Path.DirectorySeparatorChar)); }
     static Dictionary<string, string> Status(EfiFolder f)
     {
         var d = new Dictionary<string, string>();
@@ -103,9 +111,18 @@ class EngineTest
         File.WriteAllText(Path.Combine(Path.Combine(k, "Contents"), "Info.plist"),
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
             "<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleVersion</key>\n\t<string>9.9.9</string>\n</dict>\n</plist>\n");
+        string h = Path.Combine(Path.Combine(Path.Combine(Path.Combine(P, "EFI"), "OC"), "Kexts"), "HybridPM.kext");
+        Directory.CreateDirectory(Path.Combine(Path.Combine(h, "Contents"), "MacOS"));
+        File.WriteAllText(Path.Combine(Path.Combine(Path.Combine(h, "Contents"), "MacOS"), "HybridPM"), "stand-in HybridPM executable\n");
+        File.WriteAllText(Path.Combine(Path.Combine(h, "Contents"), "Info.plist"), InfoPlist("io.github.yusufklncc.HybridPM", "9.9.8"));
         File.WriteAllBytes(Path.Combine(Path.Combine(Path.Combine(Path.Combine(P, "EFI"), "OC"), "ACPI"), "SSDT-ARCOFF.aml"),
             Encoding.ASCII.GetBytes("SSDT\x2f\x04_SB_PC00PEG1PEGP stand-in"));
         WriteSums();
+    }
+    static string InfoPlist(string id, string version)
+    {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>" + id +
+            "</string>\n\t<key>CFBundleVersion</key>\n\t<string>" + version + "</string>\n</dict>\n</plist>\n";
     }
     static void WriteSums()
     {
@@ -136,6 +153,8 @@ class EngineTest
     {
         Stage1 = Path.GetFullPath(args[0]);
         NoEntries = Path.Combine(Path.GetDirectoryName(Stage1), "config-noentries.plist");
+        NoHpm = Path.Combine(Path.GetDirectoryName(Stage1), "config-nohybridpm.plist");
+        Aml013 = Path.Combine(Path.GetDirectoryName(Stage1), "SSDT-ARCOFF-0.1.3.aml");
         Sample = Path.GetFullPath(args[1]);
         X = Path.GetFullPath(args[2]);
         O = Path.GetFullPath(args[3]);
@@ -148,7 +167,7 @@ class EngineTest
         byte[] stage1 = File.ReadAllBytes(Stage1);
 
         // ---- reading and writing ----
-        foreach (string f in new[] { Stage1, NoEntries, Sample })
+        foreach (string f in new[] { Stage1, NoEntries, NoHpm, Sample })
             Ok(SameBytes(Plist.Load(f).ToBytes(), File.ReadAllBytes(f)), Path.GetFileName(f) + " read and written back: the same bytes");
         byte[] crlf = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(stage1).Replace("\n", "\r\n"));
         Ok(SameBytes(Plist.Parse(crlf, "crlf").ToBytes(), crlf), "with CRLF line ends: the same bytes");
@@ -321,6 +340,124 @@ class EngineTest
         Apply(Open(null), "settings");
         string after = File.ReadAllText(Cfg);
         Ok(!after.Replace("\r\n", "").Contains("\n") && after.Replace("\r\n", "\n") == Encoding.UTF8.GetString(afterSettings), "a CRLF config.plist stays CRLF, otherwise the same edit");
+
+        // ---- HybridPM.kext: by the CPU's name, below Lilu.kext, only when Lilu loads ----
+        int cpus = 0, cpuFails = 0;
+        foreach (string line in File.ReadAllLines(Path.Combine(Path.Combine(X, "efi-sh"), "hybrid-cpus.txt")))
+        {
+            int bar = line.IndexOf('|');
+            if (bar < 0) continue;
+            cpus++;
+            if (EfiFolder.HybridCpu(line.Substring(bar + 1)) != (line.Substring(0, bar) == "yes"))
+            {
+                cpuFails++;
+                Console.WriteLine("      " + line.Substring(bar + 1) + ": efi.sh says " + line.Substring(0, bar));
+            }
+        }
+        Ok(cpus >= 10 && cpuFails == 0, "hybrid CPU names: the same answer as efi.sh for all " + cpus);
+        FreshEfi(Stage1);
+        Directory.CreateDirectory(Oc("Kexts/Lilu.kext/Contents/MacOS"));
+        Ok(!Open(null).MakePlan("driver").Text.Contains("HybridPM"), "no CPU name: no HybridPM in the plan");
+        Expect(Open(null, Hybrid), "hybrid CPU", "hybridpm_needed", "yes");
+        Expect(Open(null, Hybrid), "hybrid CPU", "hybridpm_package", "yes");
+        Expect(Open(null, Hybrid), "hybrid CPU", "hybridpm_version_package", "9.9.8");
+        Expect(Open(null, Hybrid), "hybrid CPU", "hybridpm_file", "absent");
+        Expect(Open(null, Hybrid), "hybrid CPU", "hybridpm_entry", "disabled");
+        Expect(Open(null, Hybrid), "hybrid CPU", "lilu_entry", "enabled");
+        ComparePlan(Open(null, Hybrid).MakePlan("driver"), "hybrid-driver");
+        Apply(Open(null, Hybrid), "driver");
+        CompareConfig("after-hybrid-driver", Stage1);
+        Ok(Util.SameFile(Oc("Kexts/HybridPM.kext/Contents/MacOS/HybridPM"), Pk("EFI/OC/Kexts/HybridPM.kext/Contents/MacOS/HybridPM")), "HybridPM.kext copied");
+        Expect(Open(null, Hybrid), "hybrid, after apply", "hybridpm_file", "same");
+        Expect(Open(null, Hybrid), "hybrid, after apply", "hybridpm_entry", "enabled");
+        Expect(Open(null, Hybrid), "hybrid, after apply", "hybridpm_version_efi", "9.9.8");
+        Expect(Open(null, Hybrid), "hybrid, after apply", "plan_changes", "0");
+        Apply(Open(null), "undo");
+        Ok(SameBytes(File.ReadAllBytes(Cfg), stage1) && !Directory.Exists(Oc("Kexts/HybridPM.kext")), "undo: stage 1, HybridPM.kext removed");
+
+        FreshEfi(NoHpm);
+        Directory.CreateDirectory(Oc("Kexts/Lilu.kext/Contents/MacOS"));
+        Expect(Open(null, Hybrid), "no HybridPM entry", "hybridpm_entry", "absent");
+        ComparePlan(Open(null, Hybrid).MakePlan("driver"), "nohybridpm-driver");
+        Apply(Open(null, Hybrid), "driver");
+        CompareConfig("after-nohybridpm-driver", NoHpm);
+        Plist ins = Plist.Load(Cfg), was = Plist.Load(NoHpm);
+        Ok(Plist.Raw(ins.Get("Kernel", "Add", "0", "BundlePath")) == "Lilu.kext" && Plist.Raw(ins.Get("Kernel", "Add", "1", "BundlePath")) == "HybridPM.kext"
+            && Plist.Raw(ins.Get("Kernel", "Add", "1", "Enabled")) == "true"
+            && Plist.Canonical(ins.Get("Kernel", "Add", "2")) == Plist.Canonical(was.Get("Kernel", "Add", "1")), "HybridPM.kext is item 1, right below Lilu.kext, on; the others one further down");
+        string ht = File.ReadAllText(Cfg);
+        Ok(ht.Contains("\t\t\t</dict>\n\t\t\t<dict>\n\t\t\t\t<key>Arch</key>\n\t\t\t\t<string>Any</string>\n\t\t\t\t<key>BundlePath</key>\n\t\t\t\t<string>HybridPM.kext</string>")
+            && ht.Contains("<string>Contents/Info.plist</string>\n\t\t\t</dict>\n\t\t\t<dict>\n"), "the inserted entry is indented like its neighbours");
+        Apply(Open(null), "undo");
+        Ok(SameBytes(File.ReadAllBytes(Cfg), File.ReadAllBytes(NoHpm)), "undo: as before");
+
+        FreshEfi(Stage1);
+        Plan lp = Open(null, Hybrid).MakePlan("driver");
+        Ok(lp.Text.Contains("this EFI does not load Lilu.kext") && !lp.Text.Contains("EFI/OC/Kexts/HybridPM.kext") && !lp.Text.Contains("item 8 (HybridPM.kext)"), "no Lilu.kext file: a note, HybridPM left alone");
+        Directory.CreateDirectory(Oc("Kexts/Lilu.kext"));
+        Edit(delegate(Plist pl) { pl.Set(new[] { "Kernel", "Add", "0", "Enabled" }, PValue.Bool(false)); });
+        Expect(Open(null, Hybrid), "Lilu off", "lilu_entry", "disabled");
+        lp = Open(null, Hybrid).MakePlan("driver");
+        Ok(lp.Text.Contains("this EFI does not load Lilu.kext") && !lp.Text.Contains("EFI/OC/Kexts/HybridPM.kext"), "Lilu's entry off: the same note");
+        File.WriteAllBytes(Cfg, stage1);
+        string oldHpm = Oc("Kexts/HybridPM.kext");
+        Directory.CreateDirectory(Path.Combine(Path.Combine(oldHpm, "Contents"), "MacOS"));
+        File.WriteAllText(Path.Combine(Path.Combine(Path.Combine(oldHpm, "Contents"), "MacOS"), "HybridPM"), "org.hackintosh build\n");
+        File.WriteAllText(Path.Combine(Path.Combine(oldHpm, "Contents"), "Info.plist"), InfoPlist("org.hackintosh.HybridPM", "1.0.0"));
+        Expect(Open(null, Hybrid), "an earlier HybridPM build", "hybridpm_file", "different");
+        Expect(Open(null, Hybrid), "an earlier HybridPM build", "hybridpm_version_efi", "1.0.0");
+        Ok(Open(null, Hybrid).MakePlan("driver").Text.Contains("replace  EFI/OC/Kexts/HybridPM.kext (an earlier build, org.hackintosh.HybridPM 1.0.0, by the package's 9.9.8)"), "plan replaces the earlier build");
+        Apply(Open(null, Hybrid), "driver");
+        Expect(Open(null, Hybrid), "after replacing the earlier build", "hybridpm_file", "same");
+        Apply(Open(null), "undo");
+        Ok(File.ReadAllText(Path.Combine(Path.Combine(Path.Combine(oldHpm, "Contents"), "MacOS"), "HybridPM")).Contains("org.hackintosh build"), "undo puts the earlier build back");
+        Util.Delete(oldHpm);
+        Edit(delegate(Plist pl) { pl.Insert(new[] { "Kernel", "Add" }, 0, PValue.Dict("BundlePath", "HybridPM.kext", "Enabled", true, "ExecutablePath", "Contents/MacOS/HybridPM", "PlistPath", "Contents/Info.plist")); });
+        Ok(Open(null, Hybrid).MakePlan("driver").Text.Contains("HybridPM.kext is item 0 of Kernel > Add, above Lilu.kext (item 1)"), "an entry above Lilu's: a note");
+        File.WriteAllBytes(Cfg, stage1);
+        string hexe = Pk("EFI/OC/Kexts/HybridPM.kext/Contents/MacOS/HybridPM");
+        File.AppendAllText(hexe, "x");
+        Ok(Throws(delegate { Apply(Open(null, Hybrid), "driver"); }, "differ from its SHA256SUMS"), "a damaged HybridPM.kext is refused");
+        File.WriteAllText(hexe, "stand-in HybridPM executable\n");
+        string P1 = P;
+        P = Path.Combine(Work, "pkg-nohpm");
+        MakePackage();
+        Util.Delete(Pk("EFI/OC/Kexts/HybridPM.kext"));
+        WriteSums();
+        lp = Open(null, Hybrid).MakePlan("driver");
+        Ok(lp.Text.Contains("this package has no HybridPM.kext") && !lp.Text.Contains("EFI/OC/Kexts/HybridPM.kext"), "a package without HybridPM.kext: a note, nothing copied");
+        Expect(Open(null, Hybrid), "a package without HybridPM.kext", "hybridpm_package", "no");
+
+        // ---- SSDT-ARCOFF adapted to the card's port (the 0.1.3 table) ----
+        P = Path.Combine(Work, "pkg-aml");
+        MakePackage();
+        File.Copy(Aml013, Pk("EFI/OC/ACPI/SSDT-ARCOFF.aml"), true);
+        WriteSums();
+        FreshEfi(Stage1);
+        Expect(Open(@"\_SB.PC00.PEG1.PEGP"), "the 0.1.3 table, the shipped port", "ssdt_package_names_card", "yes");
+        Ok(Open(@"\_SB.PC00.PEG1.PEGP").MakePlan("driver").Text.Contains(@"copy     EFI/OC/ACPI/SSDT-ARCOFF.aml (names \_SB.PC00.PEG1.PEGP, this card's port)"), "... copied as it is");
+        string[][] ports = { new[] { "rp05", @"\_SB.PC00.RP05.PXSX" }, new[] { "gpp8", @"\_SB.PCI0.GPP8" }, new[] { "deep", @"\_SB.PCI0.GPP8.UP00.DP40.UP00" } };
+        foreach (string[] port in ports)
+        {
+            FreshEfi(Stage1);
+            Expect(Open(port[1]), "the 0.1.3 table, " + port[1], "ssdt_package_names_card", "adaptable");
+            ComparePlan(Open(port[1]).MakePlan("driver"), "adapt-" + port[0]);
+            Apply(Open(port[1]), "driver");
+            Ok(SameBytes(File.ReadAllBytes(Oc("ACPI/SSDT-ARCOFF.aml")), File.ReadAllBytes(Path.Combine(Path.Combine(X, "efi-sh"), "adapt-" + port[0] + ".aml"))),
+                "adapt-" + port[0] + ": byte for byte the table efi.sh writes");
+            if (port[0] == "rp05") CompareConfig("after-adapt-rp05", Stage1);
+            Expect(Open(port[1]), "adapted, after apply", "ssdt_file", "same");
+            Expect(Open(port[1]), "adapted, after apply", "plan_changes", "0");
+            Apply(Open(null), "undo");
+            Ok(SameBytes(File.ReadAllBytes(Cfg), stage1) && !File.Exists(Oc("ACPI/SSDT-ARCOFF.aml")), "undo: stage 1, the adapted table removed");
+        }
+        File.WriteAllBytes(Oc("ACPI/SSDT-ARCOFF.aml"), Encoding.ASCII.GetBytes("SSDT\x2f\x04_SB_PC00RP05PXSX my own build"));
+        Ok(Open(@"\_SB.PC00.RP05.PXSX").MakePlan("driver").Text.Contains(@"kept: EFI/OC/ACPI/SSDT-ARCOFF.aml differs from the package's adapted to this card's port but names this card's port (\_SB.PC00.RP05.PXSX): yours stays"),
+            "your own table for that port is kept");
+        File.Delete(Oc("ACPI/SSDT-ARCOFF.aml"));
+        P = P1;
+        Expect(Open(@"\_SB.PC00.PEG1"), "the stand-in table, a shorter path", "ssdt_package_names_card", "no");
+        Ok(!Open(@"\_SB.PC00.PEG1").MakePlan("driver").Text.Contains("EFI/OC/ACPI/SSDT-ARCOFF.aml ("), "a shorter path inside the package's does not count as named");
 
         // ---- the folder ----
         FreshEfi(Stage1);

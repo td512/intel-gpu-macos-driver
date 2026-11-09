@@ -11,7 +11,8 @@ Without arguments it opens a window. In a console:
   .\IntelXe-EFI.ps1 -Status -Efi E:\EFI                  the EFI compared with the package, "key=value" lines
   .\IntelXe-EFI.ps1 -Plan settings -Efi E:\EFI           stage 2: SIP, AMFI and surfvram boot-args, quirks
   .\IntelXe-EFI.ps1 -Apply settings -Efi E:\EFI -Expect HASH
-  .\IntelXe-EFI.ps1 -Plan driver -Efi E:\EFI             stage 4: IntelXe.kext (and SSDT-ARCOFF.aml, see below)
+  .\IntelXe-EFI.ps1 -Plan driver -Efi E:\EFI             stage 4: IntelXe.kext (and SSDT-ARCOFF.aml, see below;
+                                                         HybridPM.kext on a hybrid CPU)
   .\IntelXe-EFI.ps1 -Apply driver -Efi E:\EFI -Expect HASH
   .\IntelXe-EFI.ps1 -Plan undo -Efi E:\EFI               what -Undo would put back
   .\IntelXe-EFI.ps1 -Undo -Efi E:\EFI -Expect HASH       one change back per run, from the newest backup
@@ -28,7 +29,11 @@ checked before IntelXe.kext or SSDT-ARCOFF.aml is copied. Stage 2 does not need 
 of less than 2 GB, %LOCALAPPDATA%\intel-gpu-macos-driver\efi-backups). Undo looks there too.
 -CardAcpiPath: SSDT-ARCOFF.aml is added only with it, after macOS is installed and install.sh --apply has run:
 the ACPI path of the B580's upstream port, e.g. \_SB.PC00.PEG1.PEGP (the shipped table's), or the "ACPI(...)" line of
-Device Manager > the B580 > Properties > Details > Location paths.
+Device Manager > the B580 > Properties > Details > Location paths. For another path than the shipped table's, the
+table is adapted to it (the same bytes as efi.sh writes on macOS).
+HybridPM.kext: on a 12th-14th gen Intel CPU with efficiency cores (by its name, Win32_Processor.Name; the CPU of the
+PC this runs on), stage 4 also copies it and puts its entry right below Lilu.kext's, when the EFI loads Lilu.kext.
+INTELXE_CPU_BRAND in the environment names another CPU (the tests).
 #>
 [CmdletBinding()]
 param(
@@ -95,19 +100,25 @@ namespace IntelXeEfi
         {
             if (!File.Exists(a) || !File.Exists(b)) return false;
             if (new FileInfo(a).Length != new FileInfo(b).Length) return false;
-            byte[] x = File.ReadAllBytes(a), y = File.ReadAllBytes(b);
+            return SameBytes(File.ReadAllBytes(a), File.ReadAllBytes(b));
+        }
+        public static bool SameBytes(byte[] x, byte[] y)
+        {
+            if (x == null || y == null || x.Length != y.Length) return false;
             for (int i = 0; i < x.Length; i++) if (x[i] != y[i]) return false;
             return true;
         }
-        public static bool Contains(byte[] hay, byte[] needle)
+        public static bool Contains(byte[] hay, byte[] needle) { return Find(hay, needle, 0) >= 0; }
+        /// Where needle first starts in hay at or after from, or -1.
+        public static int Find(byte[] hay, byte[] needle, int from)
         {
-            for (int i = 0; i + needle.Length <= hay.Length; i++)
+            for (int i = Math.Max(from, 0); i + needle.Length <= hay.Length; i++)
             {
                 int j = 0;
                 while (j < needle.Length && hay[i + j] == needle[j]) j++;
-                if (j == needle.Length) return true;
+                if (j == needle.Length) return i;
             }
-            return false;
+            return -1;
         }
         public static bool Exists(string p) { return File.Exists(p) || Directory.Exists(p); }
         public static string Native(string rel) { return rel.Replace('/', Path.DirectorySeparatorChar); }
@@ -159,6 +170,18 @@ namespace IntelXeEfi
             CopyTree(src, tmp);
             Delete(dst);
             if (Directory.Exists(tmp)) Directory.Move(tmp, dst); else File.Move(tmp, dst);
+        }
+        /// dst replaced by a file with these bytes: written next to it first, read back, then put in its place.
+        public static void PutBytes(byte[] bytes, string dst)
+        {
+            string tmp = dst + ".new";
+            string parent = Path.GetDirectoryName(dst);
+            if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+            Delete(tmp);
+            File.WriteAllBytes(tmp, bytes);
+            if (!SameBytes(File.ReadAllBytes(tmp), bytes)) throw new EfiException("writing " + tmp + " failed: it reads back differently");
+            Delete(dst);
+            File.Move(tmp, dst);
         }
         /// A file's new content, written next to it first and then put in its place.
         public static void Replace(string path, byte[] bytes)
@@ -251,17 +274,22 @@ namespace IntelXeEfi
         public string Raw { get { return Type == "dict" || Type == "array" ? Entries.Count.ToString() : Text; } }
     }
 
-    /// One step of a plan: copy (Source -> EFI/OC/Rel), set, append, mkdict, mkarray (Path in config.plist).
+    /// One step of a plan: copy (Source, or Bytes when set, -> EFI/OC/Rel), set, append, insert (at Index of the array
+    /// at Path), mkdict, mkarray (Path in config.plist).
     public sealed class Op
     {
         public string Kind;
         public string[] Path;
+        public int Index;
         public PValue Value;
         public string Source;
+        public byte[] Bytes;
         public string Rel;
         public static Op Copy(string source, string rel) { var o = new Op(); o.Kind = "copy"; o.Source = source; o.Rel = rel; return o; }
+        public static Op CopyBytes(byte[] bytes, string rel) { var o = new Op(); o.Kind = "copy"; o.Bytes = bytes; o.Rel = rel; return o; }
         public static Op Set(string[] path, PValue v) { var o = new Op(); o.Kind = "set"; o.Path = path; o.Value = v; return o; }
         public static Op Append(string[] path, PValue v) { var o = new Op(); o.Kind = "append"; o.Path = path; o.Value = v; return o; }
+        public static Op Insert(string[] path, int index, PValue v) { var o = new Op(); o.Kind = "insert"; o.Path = path; o.Index = index; o.Value = v; return o; }
         public static Op Make(string kind, string[] path)
         {
             var o = new Op(); o.Kind = kind; o.Path = path; o.Value = kind == "mkdict" ? PValue.Dict() : PValue.Array(); return o;
@@ -538,12 +566,28 @@ namespace IntelXeEfi
             AddAtEnd(arr, indent, Build(v, indent));
         }
 
+        /// v inserted as item index of the array at path (the items from index on move up by one), on its own line
+        /// before that item; at the end when index is the array's length.
+        public void Insert(string[] path, int index, PValue v)
+        {
+            XmlElement arr = Get(path);
+            if (arr == null || arr.Name != "array") throw new EfiException("config.plist: " + Show(path) + " is not an array");
+            List<XmlElement> items = Elements(arr);
+            if (index < 0 || index > items.Count) throw new EfiException("config.plist: " + Show(path) + " has no item " + index);
+            if (index == items.Count) { Append(path, v); return; }
+            string indent = ChildIndent(arr);
+            XmlElement next = items[index];
+            arr.InsertBefore(Build(v, indent), next);
+            arr.InsertBefore(Doc.CreateWhitespace("\n" + indent), next);
+        }
+
         public void Apply(Op op)
         {
             switch (op.Kind)
             {
                 case "set": Set(op.Path, op.Value); break;
                 case "append": Append(op.Path, op.Value); break;
+                case "insert": Insert(op.Path, op.Index, op.Value); break;
                 case "mkdict": case "mkarray": if (Get(op.Path) == null) Set(op.Path, op.Value); break;
                 default: throw new EfiException("not a config.plist step: " + op.Kind);
             }
@@ -713,12 +757,195 @@ namespace IntelXeEfi
         }
     }
 
+    /// SSDT-ARCOFF adapted to the card's port: adapt_ssdt in release/templates/efi.sh, step for step. The package's
+    /// table (efi/SSDT-ARCOFF.dsl) names the port twice as an absolute NamePath: 5c, then for two NameSegs 2e, for
+    /// more 2f and the count, then the 4-byte NameSegs padded with "_" (5c 2f 04 "_SB_PC00PEG1PEGP"). The table is
+    ///   header (36 bytes; the length at 4, the checksum at 9)
+    ///   If (a0) PkgLength Zero (00)  External (15) NamePath ObjectType ArgCount
+    ///   If (a0) PkgLength  CondRefOf (\_OSI, Local0) && _OSI ("Darwin")
+    ///       Scope (10) PkgLength NamePath  Device (BRG1) { ... }
+    /// and ends with the Scope. Adapt finds those parts, builds the table again from them with the package's path and
+    /// goes on only when that gives the package's table byte for byte; then it builds it with the card's path (a
+    /// longer or shorter path changes the three PkgLengths and the length, which the build computes).
+    public static class Aml
+    {
+        public const string ShippedPath = @"\_SB.PC00.PEG1.PEGP";
+
+        /// The NamePath of an absolute ACPI path, or null for anything that is not one.
+        public static byte[] NamePath(string path)
+        {
+            if (path == null || !Regex.IsMatch(path, @"^\\[A-Z_][A-Z0-9_]{0,3}(\.[A-Z_][A-Z0-9_]{0,3})*\z")) return null;
+            string[] segs = path.Substring(1).Split('.');
+            if (segs.Length > 255) return null;
+            var b = new List<byte>();
+            b.Add(0x5c);
+            if (segs.Length == 2) b.Add(0x2e);
+            else if (segs.Length > 2) { b.Add(0x2f); b.Add((byte)segs.Length); }
+            foreach (string s in segs) b.AddRange(Encoding.ASCII.GetBytes(s.PadRight(4, '_')));
+            return b.ToArray();
+        }
+
+        /// Do the table's bytes name the path? Its NamePath with "\" or without (before a Dual- or MultiNamePrefix), the
+        /// prefix and the count included, so that a shorter path inside a longer one does not match.
+        public static bool NamesPath(byte[] table, string path)
+        {
+            byte[] np = NamePath(path);
+            if (np == null || table == null) return false;
+            if (np[1] == 0x2e || np[1] == 0x2f) np = Slice(np, 1, np.Length - 1);
+            return Util.Contains(table, np);
+        }
+
+        static byte[] Slice(byte[] b, int start, int count)
+        {
+            var r = new byte[count];
+            System.Array.Copy(b, start, r, 0, count);
+            return r;
+        }
+        static bool At(byte[] h, byte[] x, int i)
+        {
+            if (i < 0 || i + x.Length > h.Length) return false;
+            for (int j = 0; j < x.Length; j++) if (h[i + j] != x[j]) return false;
+            return true;
+        }
+        static int Sum(byte[] b)
+        {
+            int s = 0;
+            foreach (byte x in b) s += x;
+            return s & 255;
+        }
+
+        /// The PkgLength at byte i: { its value, its size in bytes }, or null past the end.
+        static int[] PkgLengthAt(byte[] b, int i)
+        {
+            if (i < 0 || i >= b.Length) return null;
+            int lead = b[i], k = lead >> 6, v;
+            if (i + k >= b.Length) return null;
+            if (k == 0) v = lead & 63;
+            else
+            {
+                v = lead & 15;
+                for (int j = 1; j <= k; j++) v |= b[i + j] << (4 + 8 * (j - 1));
+            }
+            return new int[] { v, k + 1 };
+        }
+
+        /// The PkgLength for n bytes that follow it, in as few bytes as it fits (as iasl writes it); null when too long.
+        static byte[] PkgLength(int n)
+        {
+            if (n + 1 <= 63) return new byte[] { (byte)(n + 1) };
+            for (int k = 1; k <= 3; k++)
+            {
+                long v = n + 1 + k;
+                if (v < (1L << (4 + 8 * k)))
+                {
+                    var r = new byte[k + 1];
+                    r[0] = (byte)((k << 6) | (int)(v & 15));
+                    for (int j = 0; j < k; j++) r[j + 1] = (byte)((v >> (4 + 8 * j)) & 255);
+                    return r;
+                }
+            }
+            return null;
+        }
+
+        static byte[] Wrap(byte opcode, List<byte> content)
+        {
+            byte[] pl = PkgLength(content.Count);
+            if (pl == null) return null;
+            var r = new List<byte>();
+            r.Add(opcode);
+            r.AddRange(pl);
+            r.AddRange(content);
+            return r.ToArray();
+        }
+
+        sealed class Parts
+        {
+            public byte[] Header, Axt, Pred, Body;
+        }
+
+        /// The table from the parts, naming np; null when a PkgLength does not fit.
+        static byte[] Build(Parts p, byte[] np)
+        {
+            var ext = new List<byte>();
+            ext.Add(0x00);
+            ext.Add(0x15);
+            ext.AddRange(np);
+            ext.AddRange(p.Axt);
+            var scope = new List<byte>(np);
+            scope.AddRange(p.Body);
+            byte[] extp = Wrap(0xa0, ext), scopep = Wrap(0x10, scope);
+            if (extp == null || scopep == null) return null;
+            var ifb = new List<byte>(p.Pred);
+            ifb.AddRange(scopep);
+            byte[] ifp = Wrap(0xa0, ifb);
+            if (ifp == null) return null;
+            int len = 36 + extp.Length + ifp.Length;
+            var t = new byte[len];
+            System.Array.Copy(p.Header, t, 36);
+            for (int i = 0; i < 4; i++) t[4 + i] = (byte)((len >> (8 * i)) & 255);
+            t[9] = 0;
+            System.Array.Copy(extp, 0, t, 36, extp.Length);
+            System.Array.Copy(ifp, 0, t, 36 + extp.Length, ifp.Length);
+            t[9] = (byte)((256 - Sum(t)) & 255);
+            return t;
+        }
+
+        /// The package's table h naming card instead of the shipped path, or null with why it cannot be.
+        public static byte[] Adapt(byte[] h, string card, string tableName, out string why)
+        {
+            byte[] ec = NamePath(card), ep = NamePath(ShippedPath);
+            if (ec == null) { why = card + " is not an ACPI path this script can write into the table"; return null; }
+            why = "the package's " + tableName + " is not laid out as SSDT-ARCOFF.dsl builds it";
+            int n = h == null ? 0 : h.Length;
+            if (n <= 40 || Encoding.ASCII.GetString(h, 0, 4) != "SSDT") return null;
+            long hl = (long)h[4] | (long)h[5] << 8 | (long)h[6] << 16 | (long)h[7] << 24;
+            if (hl != n || Sum(h) != 0) return null;
+            // the port's NamePath twice: the External's right after the header, then the Scope's
+            if (h[36] != 0xa0) return null;
+            int[] pk = PkgLengthAt(h, 37);
+            if (pk == null) return null;
+            int first = 37 + pk[1];
+            if (first + 1 >= n || h[first] != 0x00 || h[first + 1] != 0x15 || !At(h, ep, first + 2)) return null;
+            int i = first + 2 + ep.Length;
+            if (i + 1 >= n) return null;
+            byte[] axt = { h[i], h[i + 1] };   // the External's ObjectType and ArgCount
+            i += 2;
+            if (37 + pk[0] != i) return null;   // the If (Zero) holds the External only
+            if (Util.Find(h, ep, 0) != first + 2) return null;
+            int q = Util.Find(h, ep, first + 2 + ep.Length);   // the byte where the Scope's NamePath starts
+            if (q < 0 || Util.Find(h, ep, q + ep.Length) >= 0) return null;
+            if (i >= n || h[i] != 0xa0) return null;
+            pk = PkgLengthAt(h, i + 1);
+            if (pk == null || i + 1 + pk[0] != n) return null;   // the If ends with the table
+            int p1 = i + 1 + pk[1], sc = 0;   // the If's predicate starts at p1
+            for (int k = 1; k <= 4; k++)       // the Scope opcode and its PkgLength before the NamePath
+            {
+                if (q - 1 - k < p1 || h[q - 1 - k] != 0x10 || (h[q - k] >> 6) != k - 1) continue;
+                int[] s = PkgLengthAt(h, q - k);
+                if (s != null && s[1] == k && q - k + s[0] == n) { sc = k; break; }   // the Scope ends with the table too
+            }
+            if (sc == 0) return null;
+            var parts = new Parts();
+            parts.Header = Slice(h, 0, 36);
+            parts.Axt = axt;
+            parts.Pred = Slice(h, p1, q - 1 - sc - p1);
+            parts.Body = Slice(h, q + ep.Length, n - q - ep.Length);
+            if (!Util.SameBytes(Build(parts, ep), h)) return null;   // the parts make the package's table again
+            why = "the table built for " + card + " did not read back as built";
+            byte[] t = Build(parts, ec);
+            if (t == null || Sum(t) != 0 || !NamesPath(t, card)) return null;
+            why = "";
+            return t;
+        }
+    }
+
     /// An OpenCore EFI folder and the package: what stage 2 and stage 4 change there, backups and undo. The same
     /// rules as release/templates/efi.sh.
     public sealed class EfiFolder
     {
         public const string Apple = "7C436110-AB2A-4BBB-A880-FE41995C9F82";
         public const string KextName = "IntelXe.kext", OldKext = "B580.kext", SsdtName = "SSDT-ARCOFF.aml";
+        public const string HpmName = "HybridPM.kext", LiluName = "Lilu.kext";
         public const string ShippedPath = @"\_SB.PC00.PEG1.PEGP";
         static readonly string[] KernelAdd = { "Kernel", "Add" };
         static readonly string[] AcpiAdd = { "ACPI", "Add" };
@@ -726,8 +953,10 @@ namespace IntelXeEfi
         public string EfiDir, RootDir, OcDir, ConfigPath;
         public bool OpenCore, Readable;
         public string ReadError = "";
-        public string PackageDir = "", PackageKext = "", PackageSsdt = "";
+        public string PackageDir = "", PackageKext = "", PackageSsdt = "", PackageHpm = "";
         public string PackageProblem;
+        /// The CPU's name (Win32_Processor.Name): HybridPM.kext is added for a hybrid one ("" until it is set).
+        public string Cpu = "";
         public string BackupRoot, BackupKey;
         /// The card's upstream port as the user confirmed it ("" until then; "none" when it has no ACPI name).
         public string Card = "";
@@ -737,6 +966,8 @@ namespace IntelXeEfi
         public string BackupDir { get { return Path.Combine(BackupRoot, BackupKey); } }
         string EfiKext { get { return Path.Combine(Path.Combine(OcDir, "Kexts"), KextName); } }
         string EfiSsdt { get { return Path.Combine(Path.Combine(OcDir, "ACPI"), SsdtName); } }
+        string EfiHpm { get { return Path.Combine(Path.Combine(OcDir, "Kexts"), HpmName); } }
+        string EfiLilu { get { return Path.Combine(Path.Combine(OcDir, "Kexts"), LiluName); } }
 
         public EfiFolder(string efiPath, string packagePath, string backupRoot)
         {
@@ -766,6 +997,7 @@ namespace IntelXeEfi
                 PackageDir = Path.GetFullPath(packagePath.Trim().Trim('"'));
                 PackageKext = Path.Combine(Path.Combine(Path.Combine(Path.Combine(PackageDir, "EFI"), "OC"), "Kexts"), KextName);
                 PackageSsdt = Path.Combine(Path.Combine(Path.Combine(Path.Combine(PackageDir, "EFI"), "OC"), "ACPI"), SsdtName);
+                PackageHpm = Path.Combine(Path.Combine(Path.Combine(Path.Combine(PackageDir, "EFI"), "OC"), "Kexts"), HpmName);
                 if (!File.Exists(Path.Combine(Path.Combine(Path.Combine(PackageKext, "Contents"), "MacOS"), "IntelXe")) || !File.Exists(PackageSsdt))
                     PackageProblem = "no EFI/OC/Kexts/" + KextName + " and EFI/OC/ACPI/" + SsdtName + " in " + PackageDir;
             }
@@ -882,36 +1114,94 @@ namespace IntelXeEfi
 
         public void SetCard(string input) { Card = NormalizeCard(input); }
 
-        /// Do the table's bytes name the card's port? \_SB.PC00.PEG1.PEGP is "_SB_PC00PEG1PEGP" in AML.
+        /// Do the table's bytes name the card's port? \_SB.PC00.PEG1.PEGP is 2f 04 "_SB_PC00PEG1PEGP" in AML (Aml.NamesPath).
         public bool AmlNamesCard(string file)
         {
             if (Card == "" || Card == "none" || !File.Exists(file)) return false;
-            var seg = new StringBuilder();
-            foreach (string s in Card.TrimStart('\\').Split('.')) seg.Append(s.PadRight(4, '_'));
-            return Util.Contains(File.ReadAllBytes(file), Encoding.ASCII.GetBytes(seg.ToString()));
+            return Aml.NamesPath(File.ReadAllBytes(file), Card);
+        }
+
+        /// The table this card needs (ssdtTable): the package's, or the package's adapted to the card's port. adapt: yes
+        /// (the package's names the port), adapted, or no (adaptWhy says why, for a port that is given).
+        string adapt = "no", adaptWhy = "";
+        byte[] ssdtTable;
+        void PrepareSsdt()
+        {
+            adapt = "no"; adaptWhy = ""; ssdtTable = null;
+            if (PackageProblem != null) return;
+            byte[] pkg = File.ReadAllBytes(PackageSsdt);
+            ssdtTable = pkg;
+            if (Aml.NamesPath(pkg, Card)) adapt = "yes";
+            else if (Card != "" && Card != "none")
+            {
+                string why;
+                byte[] t = Aml.Adapt(pkg, Card, SsdtName, out why);
+                if (t != null) { adapt = "adapted"; ssdtTable = t; }
+                else adaptWhy = why;
+            }
+        }
+
+        // ---- HybridPM.kext: only for Alder Lake / Raptor Lake CPUs with efficiency cores --------------------------------
+        /// By the CPU's name, as efi.sh: i3/i5/i7/i9-12xxx..14xxx, without Core Ultra (HybridPM leaves it alone) and the
+        /// desktop models with P-cores only.
+        public static bool HybridCpu(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            if (Regex.IsMatch(name, "Ultra|i3-1[234]100|i3-12300|i5-12400|i5-12490|i5-12500(?!H)|i5-12600(?![KH])")) return false;
+            return Regex.IsMatch(name, "i[3579]-1[2-4][0-9][0-9][0-9]");
+        }
+        public bool HpmNeeded { get { return HybridCpu(Cpu); } }
+        /// Does the package have HybridPM.kext (0.1.4 and later)?
+        public bool HpmPackage
+        {
+            get
+            {
+                return PackageProblem == null && File.Exists(Path.Combine(Path.Combine(Path.Combine(PackageHpm, "Contents"), "MacOS"), "HybridPM"))
+                    && File.Exists(Path.Combine(Path.Combine(PackageHpm, "Contents"), "Info.plist"));
+            }
         }
 
         // ---- states -----------------------------------------------------------------------------------------------
+        /// The executable and Info.plist of two kexts, byte for byte.
+        static bool SameKext(string a, string b, string executable)
+        {
+            string[] parts = { Path.Combine(Path.Combine("Contents", "MacOS"), executable), Path.Combine("Contents", "Info.plist") };
+            foreach (string p in parts)
+                if (!Util.SameFile(Path.Combine(a, p), Path.Combine(b, p))) return false;
+            return true;
+        }
         public string KextState()
         {
             if (!Readable) return "unknown";
             if (!Util.Exists(EfiKext)) return "absent";
             if (PackageProblem != null) return "present";
-            string[] parts = { Path.Combine(Path.Combine("Contents", "MacOS"), "IntelXe"), Path.Combine("Contents", "Info.plist") };
-            foreach (string p in parts)
-                if (!Util.SameFile(Path.Combine(EfiKext, p), Path.Combine(PackageKext, p))) return "different";
-            return "same";
+            return SameKext(EfiKext, PackageKext, "IntelXe") ? "same" : "different";
         }
+        /// Against the table this card needs: the package's, or the package's adapted to the card's port.
         public string SsdtState()
         {
             if (!Readable) return "unknown";
             if (!Util.Exists(EfiSsdt)) return "absent";
             if (PackageProblem != null) return "present";
-            return Util.SameFile(EfiSsdt, PackageSsdt) ? "same" : "different";
+            PrepareSsdt();
+            return File.Exists(EfiSsdt) && Util.SameBytes(File.ReadAllBytes(EfiSsdt), ssdtTable) ? "same" : "different";
+        }
+        /// As KextState; "different" also for an earlier build (org.hackintosh.HybridPM) and when the package has none.
+        public string HpmState()
+        {
+            if (!Readable) return "unknown";
+            if (!Util.Exists(EfiHpm)) return "absent";
+            if (PackageProblem != null) return "present";
+            return HpmPackage && SameKext(EfiHpm, PackageHpm, "HybridPM") ? "same" : "different";
         }
         public static string KextVersion(string kext)
         {
             try { return Plist.Raw(Plist.Load(Path.Combine(Path.Combine(kext, "Contents"), "Info.plist")).Get("CFBundleVersion")); }
+            catch (Exception) { return ""; }
+        }
+        static string BundleId(string kext)
+        {
+            try { return Plist.Raw(Plist.Load(Path.Combine(Path.Combine(kext, "Contents"), "Info.plist")).Get("CFBundleIdentifier")); }
             catch (Exception) { return ""; }
         }
 
@@ -940,8 +1230,8 @@ namespace IntelXeEfi
             return Plist.Raw(cfg.Get(Cat(array, i.ToString(), "Enabled"))) == "true" ? "enabled" : "disabled";
         }
 
-        /// The package's kext and table against its SHA256SUMS: "ok", "no SHA256SUMS", or what differs. Every file
-        /// of the kext must be listed.
+        /// The package's kexts (IntelXe.kext, and HybridPM.kext when it has one) and table against its SHA256SUMS:
+        /// "ok", "no SHA256SUMS", or what differs. Every file of the kexts must be listed.
         public string CheckSums()
         {
             if (PackageProblem != null) return "no package";
@@ -954,13 +1244,18 @@ namespace IntelXeEfi
                 if (!m.Success) continue;
                 string p = m.Groups[2].Value;
                 if (p.StartsWith("./")) p = p.Substring(2);
-                if (p.StartsWith("EFI/OC/Kexts/" + KextName + "/") || p == "EFI/OC/ACPI/" + SsdtName) listed[p] = m.Groups[1].Value.ToLowerInvariant();
+                if (p.StartsWith("EFI/OC/Kexts/" + KextName + "/", StringComparison.Ordinal) || p.StartsWith("EFI/OC/Kexts/" + HpmName + "/", StringComparison.Ordinal)
+                    || p == "EFI/OC/ACPI/" + SsdtName) listed[p] = m.Groups[1].Value.ToLowerInvariant();
             }
             var files = new List<string>();
             files.Add("EFI/OC/ACPI/" + SsdtName);
-            string kroot = Path.GetFullPath(PackageKext);
-            foreach (string f in Directory.GetFiles(kroot, "*", SearchOption.AllDirectories))
-                files.Add("EFI/OC/Kexts/" + KextName + "/" + f.Substring(kroot.Length).TrimStart('\\', '/').Replace('\\', '/'));
+            foreach (string kext in new[] { KextName, HpmName })
+            {
+                string kroot = Path.GetFullPath(kext == KextName ? PackageKext : PackageHpm);
+                if (!Directory.Exists(kroot)) continue;   // HybridPM.kext: 0.1.4 and later
+                foreach (string f in Directory.GetFiles(kroot, "*", SearchOption.AllDirectories))
+                    files.Add("EFI/OC/Kexts/" + kext + "/" + f.Substring(kroot.Length).TrimStart('\\', '/').Replace('\\', '/'));
+            }
             foreach (string f in files)
             {
                 string h;
@@ -1048,9 +1343,10 @@ namespace IntelXeEfi
                 p.Ops.Add(Op.Set(Cat(KernelAdd, i.ToString(), "Enabled"), PValue.Bool(false)));
             }
 
-            // SSDT-ARCOFF only for a port the user confirmed, and only when a table names it
+            // SSDT-ARCOFF only for a port the user confirmed, and only when a table names it: the shipped one names
+            // \_SB.PC00.PEG1.PEGP; for another port, the shipped one adapted to it (Aml.Adapt)
+            PrepareSsdt();
             string ss = SsdtState();
-            bool pkgok = AmlNamesCard(PackageSsdt);
             bool efiok = ss != "absent" && AmlNamesCard(EfiSsdt);
             if (Card == "")
             {
@@ -1058,20 +1354,30 @@ namespace IntelXeEfi
                 if (CardDetected == "none") seen = " Windows reports a Location path for the B580 here in which the card's port has no ACPI name.";
                 else if (CardDetected != "") seen = " Windows reports the card's port here as " + CardDetected + ".";
                 p.Notes.Add("not added: " + SsdtName + ". Add it only after macOS is installed and install.sh --apply has run (stage 3), and only for your card's ACPI path: the package's table is for " + ShippedPath +
-                    ". Check it in Device Manager (the B580 > Properties > Details > Location paths), then confirm it (-CardAcpiPath, or the SSDT-ARCOFF box in the window); stage 4, step 2 of README-INSTALL.md." + seen);
+                    " (for another path it is adapted to that one). Check it in Device Manager (the B580 > Properties > Details > Location paths), then confirm it (-CardAcpiPath, or the SSDT-ARCOFF box in the window); stage 4, step 2 of README-INSTALL.md." + seen);
             }
             else if (Card == "none")
                 p.Notes.Add("not added: " + SsdtName + ". The B580's upstream port has no ACPI name on this board; the table needs one more bridge level (stage 4, step 2 of README-INSTALL.md; please open an issue)");
-            else if (!efiok && !pkgok)
-                p.Notes.Add("not added: " + SsdtName + ". The package's table is for " + ShippedPath + "; the card's port here is " + Card + ". Put that path into SSDT-ARCOFF.dsl, compile it with iasl and copy it to EFI/OC/ACPI (stage 4, step 2 of README-INSTALL.md); then this adds its entry");
+            else if (!efiok && adapt == "no")
+                p.Notes.Add("not added: " + SsdtName + ". The package's table is for " + ShippedPath + "; the card's port here is " + Card + ", and " + adaptWhy + ". Put that path into SSDT-ARCOFF.dsl, compile it with iasl and copy it to EFI/OC/ACPI (stage 4, step 2 of README-INSTALL.md); then this adds its entry");
             else
             {
                 if (efiok && ss == "different")
-                    p.Notes.Add("kept: EFI/OC/ACPI/" + SsdtName + " differs from the package's but names this card's port (" + Card + "): yours stays");
+                    p.Notes.Add("kept: EFI/OC/ACPI/" + SsdtName + " differs from " + (adapt == "adapted" ? "the package's adapted to this card's port" : "the package's") +
+                        " but names this card's port (" + Card + "): yours stays");
                 else if (ss != "same")
                 {
-                    p.Lines.Add((ss == "absent" ? "copy" : "replace").PadRight(8) + " EFI/OC/ACPI/" + SsdtName + " (names " + Card + ", this card's port)");
-                    p.Ops.Add(Op.Copy(PackageSsdt, "ACPI/" + SsdtName));
+                    string verb = (ss == "absent" ? "copy" : "replace").PadRight(8);
+                    if (adapt == "adapted")
+                    {
+                        p.Lines.Add(verb + " EFI/OC/ACPI/" + SsdtName + " (the package's table adapted to this card's port: names " + Card + " instead of " + ShippedPath + ")");
+                        p.Ops.Add(Op.CopyBytes(ssdtTable, "ACPI/" + SsdtName));
+                    }
+                    else
+                    {
+                        p.Lines.Add(verb + " EFI/OC/ACPI/" + SsdtName + " (names " + Card + ", this card's port)");
+                        p.Ops.Add(Op.Copy(PackageSsdt, "ACPI/" + SsdtName));
+                    }
                 }
                 i = FindEntry(cfg, AcpiAdd, "Path", SsdtName);
                 if (i < 0)
@@ -1087,6 +1393,8 @@ namespace IntelXeEfi
                 }
             }
 
+            PlanHybridPM(p, cfg);   // after every change above that names an item by its index: it may insert one
+
             // so that OpenCore records which EFI it booted from (efi.sh and IntelXe Manager on macOS find it by that)
             cur = Plist.Raw(cfg.Get("Misc", "Security", "ExposeSensitiveData"));
             long v;
@@ -1095,6 +1403,67 @@ namespace IntelXeEfi
                 p.Lines.Add("config   Misc > Security > ExposeSensitiveData: " + cur + " -> " + (v | 1) + " (OpenCore then records which EFI it booted from, for efi.sh on macOS)");
                 p.Ops.Add(Op.Set(new[] { "Misc", "Security", "ExposeSensitiveData" }, PValue.Int(v | 1)));
             }
+        }
+
+        /// HybridPM.kext with an entry right below Lilu.kext's (a Lilu plugin loads after Lilu), only where it is needed
+        /// and Lilu is loaded; an earlier build under the same name (org.hackintosh.HybridPM) is replaced.
+        void PlanHybridPM(Plan p, Plist cfg)
+        {
+            if (!HpmNeeded) return;
+            if (!HpmPackage)
+            {
+                p.Notes.Add("not added: " + HpmName + ". This CPU (" + Cpu + ") has efficiency cores and macOS holds it below its clocks, but this package has no " + HpmName + " (it comes with 0.1.4 and later)");
+                return;
+            }
+            int l = FindEntry(cfg, KernelAdd, "BundlePath", LiluName);
+            if (l < 0 || Plist.Raw(cfg.Get(Cat(KernelAdd, l.ToString(), "Enabled"))) != "true" || !Util.Exists(EfiLilu))
+            {
+                p.Notes.Add("not added: " + HpmName + ". This CPU (" + Cpu + ") has efficiency cores and " + HpmName + " corrects its clocks, but it is a Lilu plugin and this EFI does not load " + LiluName +
+                    " (no file in EFI/OC/Kexts, or its Kernel > Add entry is missing or off). Add Lilu (github.com/acidanthera/Lilu), then run this again (README-INSTALL.md, Hybrid Intel CPUs)");
+                return;
+            }
+            string hs = HpmState(), cur;
+            if (hs == "absent")
+            {
+                p.Lines.Add("copy     EFI/OC/Kexts/" + HpmName + " (version " + KextVersion(PackageHpm) + "; this CPU has efficiency cores: it corrects their clocks)");
+                p.Ops.Add(Op.Copy(PackageHpm, "Kexts/" + HpmName));
+            }
+            else if (hs == "different")
+            {
+                if (BundleId(EfiHpm) == "org.hackintosh.HybridPM")
+                    p.Lines.Add("replace  EFI/OC/Kexts/" + HpmName + " (an earlier build, org.hackintosh.HybridPM " + KextVersion(EfiHpm) + ", by the package's " + KextVersion(PackageHpm) + ")");
+                else
+                    p.Lines.Add("replace  EFI/OC/Kexts/" + HpmName + " (version " + KextVersion(EfiHpm) + " in the EFI, " + KextVersion(PackageHpm) + " in the package; the files differ)");
+                p.Ops.Add(Op.Copy(PackageHpm, "Kexts/" + HpmName));
+            }
+            int h = FindEntry(cfg, KernelAdd, "BundlePath", HpmName);
+            if (h < 0)
+            {
+                p.Lines.Add("config   Kernel > Add: add " + HpmName + " below " + LiluName + ", as item " + (l + 1) + " (ExecutablePath Contents/MacOS/HybridPM, PlistPath Contents/Info.plist, Enabled)");
+                p.Ops.Add(Op.Insert(KernelAdd, l + 1, PValue.Dict("Arch", "Any", "BundlePath", HpmName, "Comment", "HybridPM.kext: hybrid-CPU power management (intel-gpu-macos-driver)",
+                    "Enabled", true, "ExecutablePath", "Contents/MacOS/HybridPM", "MaxKernel", "", "MinKernel", "", "PlistPath", "Contents/Info.plist")));
+                return;
+            }
+            string[] e = Cat(KernelAdd, h.ToString());
+            if (Plist.Raw(cfg.Get(Cat(e, "Enabled"))) != "true")
+            {
+                p.Lines.Add("config   Kernel > Add, item " + h + " (" + HpmName + "): Enabled false -> true");
+                p.Ops.Add(Op.Set(Cat(e, "Enabled"), PValue.Bool(true)));
+            }
+            cur = Plist.Raw(cfg.Get(Cat(e, "ExecutablePath")));
+            if (cur != "Contents/MacOS/HybridPM")
+            {
+                p.Lines.Add("config   Kernel > Add, item " + h + " (" + HpmName + "): ExecutablePath '" + cur + "' -> 'Contents/MacOS/HybridPM'");
+                p.Ops.Add(Op.Set(Cat(e, "ExecutablePath"), PValue.Str("Contents/MacOS/HybridPM")));
+            }
+            cur = Plist.Raw(cfg.Get(Cat(e, "PlistPath")));
+            if (cur != "Contents/Info.plist")
+            {
+                p.Lines.Add("config   Kernel > Add, item " + h + " (" + HpmName + "): PlistPath '" + cur + "' -> 'Contents/Info.plist'");
+                p.Ops.Add(Op.Set(Cat(e, "PlistPath"), PValue.Str("Contents/Info.plist")));
+            }
+            if (h < l)
+                p.Notes.Add(HpmName + " is item " + h + " of Kernel > Add, above " + LiluName + " (item " + l + "): OpenCore loads it before Lilu and it does not start. Move its entry below " + LiluName + "'s");
         }
 
         /// csr-active-config as a number: its first four bytes, little-endian.
@@ -1287,7 +1656,8 @@ namespace IntelXeEfi
                         throw new EfiException("the edited config.plist does not read back " + Plist.Show(op.Path) + ": nothing changed");
             }
             long need = edited == null ? 0 : edited.Length;
-            foreach (Op op in p.Ops) if (op.Kind == "copy") { int f; need += Util.TreeSize(op.Source, out f); }
+            foreach (Op op in p.Ops)
+                if (op.Kind == "copy") { int f; need += op.Bytes != null ? op.Bytes.Length : Util.TreeSize(op.Source, out f); }
             long free = Util.FreeSpace(EfiDir);
             if (free >= 0 && free < need + 1000000)
                 throw new EfiException("not enough space on the EFI's volume (" + Util.Size(free) + " free): nothing changed");
@@ -1298,7 +1668,8 @@ namespace IntelXeEfi
             {
                 if (op.Kind != "copy") continue;
                 File.AppendAllText(changed, op.Rel + "\n");   // before the copy: an interrupted copy is undone too
-                Util.PutCopy(op.Source, Path.Combine(OcDir, Util.Native(op.Rel)));
+                if (op.Bytes != null) Util.PutBytes(op.Bytes, Path.Combine(OcDir, Util.Native(op.Rel)));
+                else Util.PutCopy(op.Source, Path.Combine(OcDir, Util.Native(op.Rel)));
                 say("  ok    EFI/OC/" + op.Rel);
             }
             if (edited != null)
@@ -1351,7 +1722,16 @@ namespace IntelXeEfi
             s.Add("ssdt_entry=" + EntryState(cfg, AcpiAdd, "Path", SsdtName));
             s.Add("card_acpi_path=" + Card);
             s.Add("card_acpi_path_windows=" + CardDetected);
-            s.Add("ssdt_package_names_card=" + (PackageProblem == null && AmlNamesCard(PackageSsdt) ? "yes" : "no"));
+            s.Add("hybridpm_needed=" + (HpmNeeded ? "yes" : "no"));
+            s.Add("hybridpm_cpu=" + Cpu);
+            s.Add("hybridpm_package=" + (HpmPackage ? "yes" : "no"));
+            s.Add("hybridpm_version_package=" + (HpmPackage ? KextVersion(PackageHpm) : ""));
+            s.Add("hybridpm_file=" + HpmState());
+            s.Add("hybridpm_entry=" + EntryState(cfg, KernelAdd, "BundlePath", HpmName));
+            s.Add("hybridpm_version_efi=" + (Readable && Util.Exists(EfiHpm) ? KextVersion(EfiHpm) : ""));
+            s.Add("lilu_entry=" + EntryState(cfg, KernelAdd, "BundlePath", LiluName));
+            PrepareSsdt();
+            s.Add("ssdt_package_names_card=" + (adapt == "yes" ? "yes" : adapt == "adapted" ? "adaptable" : "no"));
             string pc = "", sc = "";
             if (OpenCore && Readable)
             {
@@ -1420,6 +1800,17 @@ function Get-CardDetected {
     $p = [IntelXeEfi.EfiFolder]::ConvertLocationPath($loc)
     if ($null -eq $p) { return '' }
     return $p
+}
+
+# The CPU's name, for HybridPM.kext: INTELXE_CPU_BRAND when it is set (the tests, as for efi.sh), else Windows'
+# Win32_Processor.Name; "" when Windows does not tell.
+function Get-CpuName {
+    if (Test-Path -LiteralPath 'Env:INTELXE_CPU_BRAND') { return [string](Get-Item -LiteralPath 'Env:INTELXE_CPU_BRAND').Value }
+    try {
+        $cpu = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop) | Select-Object -First 1
+        if ($null -ne $cpu -and $null -ne $cpu.Name) { return ([string]$cpu.Name).Trim() }
+    } catch { }
+    return ''
 }
 
 function Get-DriveLetterText($partition) {
@@ -1504,10 +1895,11 @@ function Resolve-PackageDir([string]$given) {
     return ''
 }
 
-function New-EfiFolder([string]$efiPath, [string]$packagePath, [string]$backupPath, [string]$card, [string]$detected) {
+function New-EfiFolder([string]$efiPath, [string]$packagePath, [string]$backupPath, [string]$card, [string]$detected, [string]$cpu) {
     $f = [IntelXeEfi.EfiFolder]::new($efiPath, (Resolve-PackageDir $packagePath), $backupPath)
     if ($card -ne '') { $f.SetCard($card) }
     $f.CardDetected = $detected
+    $f.Cpu = $cpu
     return $f
 }
 
@@ -1518,6 +1910,7 @@ function Show-Window {
     [System.Windows.Forms.Application]::EnableVisualStyles()
     $script:mounted = ''
     $script:detected = $null
+    $script:cpuName = $null
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'IntelXe EFI (intel-gpu-macos-driver): OpenCore changes for the Arc B580'
@@ -1578,7 +1971,7 @@ function Show-Window {
     $detectButton.Anchor = $top -bor $right
     $group.Controls.Add($detectButton)
     $cardHint = New-Object System.Windows.Forms.Label
-    $cardHint.Text = "The shipped table is for $ShippedPath. Check yours: Device Manager > Display adapters > the B580 (or Microsoft Basic Display Adapter) > Properties > Details > Location paths. ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000) is $ShippedPath; you can paste that line. Leave it unticked before macOS is installed: the table hides the B580 from the display driver the installer uses."
+    $cardHint.Text = "The shipped table is for $ShippedPath; for another path it is adapted to that one. Check yours: Device Manager > Display adapters > the B580 (or Microsoft Basic Display Adapter) > Properties > Details > Location paths. ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000) is $ShippedPath; you can paste that line. Leave it unticked before macOS is installed: the table hides the B580 from the display driver the installer uses."
     $cardHint.Location = New-Object System.Drawing.Point(10, 50); $cardHint.Size = New-Object System.Drawing.Size(921, 46)
     $cardHint.Anchor = $top -bor $left -bor $right
     $group.Controls.Add($cardHint)
@@ -1638,13 +2031,17 @@ function Show-Window {
         if ($null -eq $script:detected) { $script:detected = Get-CardDetected }
         return $script:detected
     }
+    function Get-Cpu {
+        if ($null -eq $script:cpuName) { $script:cpuName = Get-CpuName }
+        return $script:cpuName
+    }
     function Open-Folder {
         $card = ''
         if ($ssdtCheck.Checked) {
             $card = $cardBox.Text.Trim()
             if ($card -eq '') { throw "SSDT-ARCOFF.aml is ticked, but no ACPI path is given: type the card's path (for the shipped table $ShippedPath) or untick it" }
         }
-        return New-EfiFolder $efiBox.Text $pkgBox.Text $bkBox.Text $card (Get-Detected)
+        return New-EfiFolder $efiBox.Text $pkgBox.Text $bkBox.Text $card (Get-Detected) (Get-Cpu)
     }
     function Start-Busy($title) { $out.Clear(); $say.Invoke("== $title"); $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor }
     function Stop-Busy { $form.Cursor = [System.Windows.Forms.Cursors]::Default }
@@ -1745,7 +2142,7 @@ function Show-Window {
         $cardBox.Text = $loc
         $say.Invoke("Windows: the B580's Location path is $loc")
         if ($path -eq 'none') { $say.Invoke("The card's upstream port has no ACPI name in it: the shipped table cannot be used (stage 4, step 2 of README-INSTALL.md).") }
-        else { $say.Invoke("That is the ACPI path $path$(if ($path -eq $ShippedPath) { ', the shipped table''s' } else { ', not the shipped table''s' }).") }
+        else { $say.Invoke("That is the ACPI path $path$(if ($path -eq $ShippedPath) { ', the shipped table''s' } else { ', not the shipped table''s: the table is adapted to it' }).") }
     })
     $ssdtCheck.Add_CheckedChanged({
         if ($ssdtCheck.Checked) {
@@ -1763,7 +2160,7 @@ function Show-Window {
     $driverPlan.Add_Click({ Invoke-Plan 'driver' })
     $undoPlan.Add_Click({ Invoke-Plan 'undo' })
     $settingsApply.Add_Click({ Invoke-Change 'settings' 'Change these settings' 'Stage 2: SIP, the boot-args and the quirks. The whole EFI folder is backed up first.' })
-    $driverApply.Add_Click({ Invoke-Change 'driver' 'Make these changes' 'Stage 4: IntelXe.kext and its config.plist entry. The whole EFI folder is backed up first.' })
+    $driverApply.Add_Click({ Invoke-Change 'driver' 'Make these changes' 'Stage 4: IntelXe.kext and its config.plist entry (SSDT-ARCOFF.aml when ticked, HybridPM.kext on a hybrid CPU). The whole EFI folder is backed up first.' })
     $undoApply.Add_Click({ Invoke-Change 'undo' 'Undo the last change' 'Puts back, from the newest backup, the files that change replaced. The backup stays.' })
     $adminButton.Add_Click({
         if (Ask 'Start this tool again as administrator (Windows asks for permission), with the folders filled in?' 'Administrator rights') { Restart-Elevated }
@@ -1874,8 +2271,9 @@ try {
         default {
             if ($Efi -eq '') { Write-Line 'give the EFI folder: -Efi E:\EFI (-Help lists the options)'; exit 2 }
             $detected = ''
-            if ($action[0] -eq 'status' -or $Plan -eq 'driver' -or $Apply -eq 'driver') { $detected = Get-CardDetected }
-            $f = New-EfiFolder $Efi $Package $BackupDir $CardAcpiPath $detected
+            $cpu = ''
+            if ($action[0] -eq 'status' -or $Plan -eq 'driver' -or $Apply -eq 'driver') { $detected = Get-CardDetected; $cpu = Get-CpuName }
+            $f = New-EfiFolder $Efi $Package $BackupDir $CardAcpiPath $detected $cpu
             switch ($action[0]) {
                 'status' { foreach ($l in $f.Status()) { Write-Line $l } }
                 'plan' {

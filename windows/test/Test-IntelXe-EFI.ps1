@@ -11,8 +11,10 @@ Each config.plist the tool writes is compared twice:
  - with expected\efi-sh\: what efi.sh writes on macOS for the same step (the same keys and values);
  - with expected\engine\: what the tool's engine writes on macOS (make-expected.sh), byte for byte apart from line
    ends: the layout of the file is kept, only the changed values and the added entries differ.
-Plans are compared with efi.sh's line by line (notes aside). Without -RealPackage the package's IntelXe.kext and
-SSDT-ARCOFF.aml are stand-ins.
+Plans are compared with efi.sh's line by line (notes aside). Without -RealPackage the package's IntelXe.kext,
+HybridPM.kext and SSDT-ARCOFF.aml are stand-ins. HybridPM.kext is tested with a hybrid CPU's name in
+INTELXE_CPU_BRAND (the rest with a CPU without efficiency cores), and the table adapted to other ports is compared
+byte for byte with what efi.sh writes from the 0.1.3 SSDT-ARCOFF.aml (stage1\SSDT-ARCOFF-0.1.3.aml).
 
   powershell -ExecutionPolicy Bypass -File windows\test\Test-IntelXe-EFI.ps1      (Windows PowerShell 5.1)
   pwsh -File windows\test\Test-IntelXe-EFI.ps1                                    (PowerShell 7)
@@ -23,6 +25,11 @@ $Here = $PSScriptRoot
 $ToolPath = Join-Path (Split-Path -Parent $Here) 'IntelXe-EFI.ps1'
 $Stage1 = Join-Path $Here 'stage1\config.plist'
 $NoEntries = Join-Path $Here 'stage1\config-noentries.plist'
+$NoHpm = Join-Path $Here 'stage1\config-nohybridpm.plist'
+$Aml013 = Join-Path $Here 'stage1\SSDT-ARCOFF-0.1.3.aml'
+$NoHybrid = 'Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz'
+$Hybrid = '13th Gen Intel(R) Core(TM) i5-13400F'
+$CpuBefore = [Environment]::GetEnvironmentVariable('INTELXE_CPU_BRAND')
 $Xp = Join-Path $Here 'expected'
 $Exe = (Get-Process -Id $PID).Path
 
@@ -89,6 +96,7 @@ function Get-Actions([string[]]$lines, [bool]$fromEfiSh) {
         if ($fromEfiSh) {
             $l = $l.Replace('for this script)', 'for efi.sh on macOS)')
             if ($script:version -ne '') { $l = $l.Replace('(version 9.9.9)', "(version $script:version)") }
+            if ($script:hpmVersion -ne '') { $l = $l.Replace('(version 9.9.8;', "(version $script:hpmVersion;") }
         }
         $list += $l
     }
@@ -138,13 +146,13 @@ function New-Efi([string]$config) {
     [IO.File]::WriteAllBytes((Oc 'OpenCore.efi'), [byte[]]@())
     [IO.File]::Copy($config, $script:Cfg, $true)
 }
-function Write-Sums {
+function Write-Sums([string]$dir) {
     $lines = @()
-    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Pk 'EFI') -Recurse -File -Force | Sort-Object FullName)) {
-        $rel = $f.FullName.Substring($Pk.Length + 1).Replace('\', '/')
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $dir 'EFI') -Recurse -File -Force | Sort-Object FullName)) {
+        $rel = $f.FullName.Substring($dir.Length + 1).Replace('\', '/')
         $lines += (Get-FileHash -Algorithm SHA256 -LiteralPath $f.FullName).Hash.ToLowerInvariant() + '  ' + $rel
     }
-    [IO.File]::WriteAllText((Join-Path $Pk 'SHA256SUMS'), ($lines -join "`n") + "`n")
+    [IO.File]::WriteAllText((Join-Path $dir 'SHA256SUMS'), ($lines -join "`n") + "`n")
 }
 
 try {
@@ -160,13 +168,20 @@ try {
     Check ((Test-Admin) -is [bool]) 'Test-Admin runs'
     $loc = Get-CardLocation
     Write-Host "      this PC's B580 Location path: $(if ($loc -eq '') { 'none found' } else { $loc })"
+    [Environment]::SetEnvironmentVariable('INTELXE_CPU_BRAND', $null)
+    $realCpu = Get-CpuName
+    Check ($realCpu -ne '') "Get-CpuName: Win32_Processor.Name is '$realCpu' (hybrid: $(if ([IntelXeEfi.EfiFolder]::HybridCpu($realCpu)) { 'yes' } else { 'no' }))"
+    # the tool's processes inherit it: a CPU without efficiency cores, but in the HybridPM steps
+    [Environment]::SetEnvironmentVariable('INTELXE_CPU_BRAND', $NoHybrid)
 
     # ---- the package ----
     $script:version = ''
+    $script:hpmVersion = ''
     if ($RealPackage -ne '') {
         Copy-Item -LiteralPath (Join-Path $RealPackage 'EFI') -Destination (Join-Path $Pk 'EFI') -Recurse
         Copy-Item -LiteralPath (Join-Path $RealPackage 'SHA256SUMS') -Destination (Join-Path $Pk 'SHA256SUMS')
         $script:version = [IntelXeEfi.EfiFolder]::KextVersion((Join-Path $Pk 'EFI\OC\Kexts\IntelXe.kext'))
+        $script:hpmVersion = [IntelXeEfi.EfiFolder]::KextVersion((Join-Path $Pk 'EFI\OC\Kexts\HybridPM.kext'))
     } else {
         $k = Join-Path $Pk 'EFI\OC\Kexts\IntelXe.kext\Contents'
         $null = New-Item -ItemType Directory -Path (Join-Path $k 'MacOS') -Force
@@ -175,7 +190,11 @@ try {
         [IO.File]::WriteAllText((Join-Path $k 'Info.plist'), "<?xml version=`"1.0`" encoding=`"UTF-8`"?>`n<plist version=`"1.0`">`n<dict>`n`t<key>CFBundleVersion</key>`n`t<string>9.9.9</string>`n</dict>`n</plist>`n")
         $aml = [Text.Encoding]::ASCII.GetBytes("SSDT") + [byte[]](0x2f, 0x04) + [Text.Encoding]::ASCII.GetBytes('_SB_PC00PEG1PEGP stand-in')
         [IO.File]::WriteAllBytes((Join-Path $Pk 'EFI\OC\ACPI\SSDT-ARCOFF.aml'), [byte[]]$aml)
-        Write-Sums
+        $hk = Join-Path $Pk 'EFI\OC\Kexts\HybridPM.kext\Contents'
+        $null = New-Item -ItemType Directory -Path (Join-Path $hk 'MacOS') -Force
+        [IO.File]::WriteAllText((Join-Path $hk 'MacOS\HybridPM'), "stand-in HybridPM executable`n")
+        [IO.File]::WriteAllText((Join-Path $hk 'Info.plist'), "<?xml version=`"1.0`" encoding=`"UTF-8`"?>`n<plist version=`"1.0`">`n<dict>`n`t<key>CFBundleIdentifier</key>`n`t<string>io.github.yusufklncc.HybridPM</string>`n`t<key>CFBundleVersion</key>`n`t<string>9.9.8</string>`n</dict>`n</plist>`n")
+        Write-Sums $Pk
     }
     $stage1Bytes = Get-Bytes $Stage1
 
@@ -294,6 +313,76 @@ try {
     $null = Invoke-Apply 'undo' @()
     Check (Test-SameBytes (Get-Bytes $Cfg) (Get-Bytes $NoEntries)) 'undo: as before'
 
+    # ---- HybridPM.kext: by the CPU's name, below Lilu.kext, only when Lilu loads ----
+    $cpus = 0
+    $cpuFails = 0
+    foreach ($l in [IO.File]::ReadAllLines((Join-Path $Xp 'efi-sh\hybrid-cpus.txt'))) {
+        $bar = $l.IndexOf('|')
+        if ($bar -lt 0) { continue }
+        $cpus++
+        if ([IntelXeEfi.EfiFolder]::HybridCpu($l.Substring($bar + 1)) -ne ($l.Substring(0, $bar) -eq 'yes')) {
+            $cpuFails++
+            Write-Host "      $($l.Substring($bar + 1)): efi.sh says $($l.Substring(0, $bar))"
+        }
+    }
+    Check ($cpus -ge 10 -and $cpuFails -eq 0) "hybrid CPU names: the same answer as efi.sh for all $cpus"
+    New-Efi $Stage1
+    $null = [IO.Directory]::CreateDirectory((Oc 'Kexts\Lilu.kext\Contents\MacOS'))
+    Check (-not (Test-Has (Get-Plan 'driver' @()) 'HybridPM')) 'a CPU without efficiency cores: no HybridPM in the plan'
+    [Environment]::SetEnvironmentVariable('INTELXE_CPU_BRAND', $Hybrid)
+    $st = Get-Status @()
+    foreach ($kv in @(@('hybridpm_needed', 'yes'), @('hybridpm_cpu', $Hybrid), @('hybridpm_package', 'yes'), @('hybridpm_file', 'absent'), @('hybridpm_entry', 'disabled'), @('lilu_entry', 'enabled'))) {
+        Check ($st[$kv[0]] -eq $kv[1]) "hybrid CPU: $($kv[0])=$($st[$kv[0]])$(if ($st[$kv[0]] -ne $kv[1]) { ", expected $($kv[1])" })"
+    }
+    Compare-Plan (Get-Plan 'driver' @()) 'hybrid-driver'
+    $null = Invoke-Apply 'driver' @()
+    Compare-Config 'after-hybrid-driver' $Stage1
+    Check ([IntelXeEfi.Util]::SameFile((Oc 'Kexts\HybridPM.kext\Contents\MacOS\HybridPM'), (Join-Path $Pk 'EFI\OC\Kexts\HybridPM.kext\Contents\MacOS\HybridPM'))) 'HybridPM.kext copied'
+    $st = Get-Status @()
+    Check ($st['hybridpm_file'] -eq 'same' -and $st['hybridpm_entry'] -eq 'enabled' -and $st['plan_changes'] -eq '0') "hybrid, after apply: hybridpm_file=$($st['hybridpm_file']), hybridpm_entry=$($st['hybridpm_entry']), plan_changes=$($st['plan_changes'])"
+    $null = Invoke-Apply 'undo' @()
+    Check ((Test-SameBytes (Get-Bytes $Cfg) $stage1Bytes) -and -not (Test-Path -LiteralPath (Oc 'Kexts\HybridPM.kext'))) 'undo: stage 1, HybridPM.kext removed'
+
+    New-Efi $NoHpm
+    $null = [IO.Directory]::CreateDirectory((Oc 'Kexts\Lilu.kext\Contents\MacOS'))
+    Compare-Plan (Get-Plan 'driver' @()) 'nohybridpm-driver'
+    $null = Invoke-Apply 'driver' @()
+    Compare-Config 'after-nohybridpm-driver' $NoHpm
+    $pl = [IntelXeEfi.Plist]::Load($Cfg)
+    Check ([IntelXeEfi.Plist]::Raw($pl.Get([string[]]@('Kernel', 'Add', '0', 'BundlePath'))) -eq 'Lilu.kext' -and [IntelXeEfi.Plist]::Raw($pl.Get([string[]]@('Kernel', 'Add', '1', 'BundlePath'))) -eq 'HybridPM.kext') 'HybridPM.kext is item 1, right below Lilu.kext'
+    $null = Invoke-Apply 'undo' @()
+    Check (Test-SameBytes (Get-Bytes $Cfg) (Get-Bytes $NoHpm)) 'undo: as before'
+
+    New-Efi $Stage1
+    $pp = Get-Plan 'driver' @()
+    Check ((Test-Has $pp 'this EFI does not load Lilu.kext') -and -not (Test-Has $pp 'EFI/OC/Kexts/HybridPM.kext')) 'no Lilu.kext file: a note, HybridPM left alone'
+    [Environment]::SetEnvironmentVariable('INTELXE_CPU_BRAND', $NoHybrid)
+
+    # ---- SSDT-ARCOFF adapted to the card's port (the 0.1.3 table) ----
+    $PkStandIn = $Pk
+    $Pk = Join-Path $Root 'pkg-aml'   # Get-Plan, Get-Status and Invoke-Apply use $Pk
+    [IntelXeEfi.Util]::CopyTree((Join-Path $PkStandIn 'EFI'), (Join-Path $Pk 'EFI'))
+    [IO.File]::Copy($Aml013, (Join-Path $Pk 'EFI\OC\ACPI\SSDT-ARCOFF.aml'), $true)
+    Write-Sums $Pk
+    New-Efi $Stage1
+    $st = Get-Status @('-CardAcpiPath', '\_SB.PC00.PEG1.PEGP')
+    Check ($st['ssdt_package_names_card'] -eq 'yes') "the 0.1.3 table, the shipped port: ssdt_package_names_card=$($st['ssdt_package_names_card'])"
+    foreach ($port in @(@('rp05', '\_SB.PC00.RP05.PXSX'), @('gpp8', '\_SB.PCI0.GPP8'), @('deep', '\_SB.PCI0.GPP8.UP00.DP40.UP00'))) {
+        New-Efi $Stage1
+        $more = @('-CardAcpiPath', $port[1])
+        $st = Get-Status $more
+        Check ($st['ssdt_package_names_card'] -eq 'adaptable') "the 0.1.3 table, $($port[1]): ssdt_package_names_card=$($st['ssdt_package_names_card'])"
+        Compare-Plan (Get-Plan 'driver' $more) "adapt-$($port[0])"
+        $null = Invoke-Apply 'driver' $more
+        Check (Test-SameBytes (Get-Bytes (Oc 'ACPI\SSDT-ARCOFF.aml')) (Get-Bytes (Join-Path $Xp "efi-sh\adapt-$($port[0]).aml"))) "adapt-$($port[0]): byte for byte the table efi.sh writes"
+        if ($port[0] -eq 'rp05') { Compare-Config 'after-adapt-rp05' $Stage1 }
+        $st = Get-Status $more
+        Check ($st['ssdt_file'] -eq 'same' -and $st['plan_changes'] -eq '0') "adapted, after apply: ssdt_file=$($st['ssdt_file']), plan_changes=$($st['plan_changes'])"
+        $null = Invoke-Apply 'undo' @()
+        Check ((Test-SameBytes (Get-Bytes $Cfg) $stage1Bytes) -and -not (Test-Path -LiteralPath (Oc 'ACPI\SSDT-ARCOFF.aml'))) 'undo: stage 1, the adapted table removed'
+    }
+    $Pk = $PkStandIn
+
     # ---- the folder, the default backup place ----
     New-Efi $Stage1
     $a = Invoke-Tool @('-Status', '-Efi', $F, '-Package', $Pk, '-BackupDir', $Bk)
@@ -331,6 +420,7 @@ try {
     Write-Host $_.ScriptStackTrace
     $script:fails++
 } finally {
+    [Environment]::SetEnvironmentVariable('INTELXE_CPU_BRAND', $CpuBefore)
     if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Recurse -Force }
 }
 Write-Host "== $($script:fails) failure(s)"
