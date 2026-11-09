@@ -64,8 +64,11 @@ struct SystemFacts {
         facts.architecture = commandOutput("/usr/bin/uname", ["-m"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let pci = commandOutput("/usr/sbin/ioreg", ["-r", "-c", "IOPCIDevice", "-l"]) ?? ""
-        facts.hasCard = pci.contains("\"device-id\" = <0be20000>") && pci.contains("\"vendor-id\" = <86800000>")
-        facts.cardName = facts.hasCard ? "Intel Arc B580 (8086:e20b)" : ""
+        // the Arc B580 (8086:e20b) and the B570 (8086:e20c, the same BMG-G21 with fewer Xe cores; from #2)
+        let intel = pci.contains("\"vendor-id\" = <86800000>")
+        if intel && pci.contains("\"device-id\" = <0be20000>") { facts.cardName = "Intel Arc B580 (8086:e20b)" }
+        else if intel && pci.contains("\"device-id\" = <0ce20000>") { facts.cardName = "Intel Arc B570 (8086:e20c)" }
+        facts.hasCard = !facts.cardName.isEmpty
 
         let loaded = commandOutput("/usr/bin/kmutil", ["showloaded", "--list-only"], seconds: 30) ?? ""
         facts.kextLoaded = loaded.contains("io.github.yusufklncc.IntelXe ")

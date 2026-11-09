@@ -1402,10 +1402,10 @@ function Test-Admin {
     return (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# The "ACPI(...)" Location path of an Arc B580 (PCI 8086:E20B) in this PC, as Device Manager shows it; "" without one.
+# The "ACPI(...)" Location path of an Arc B580 or B570 (PCI 8086:E20B / E20C) in this PC, as Device Manager shows it; "" without one.
 function Get-CardLocation {
     try {
-        $devices = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.InstanceId -like 'PCI\VEN_8086&DEV_E20B*' })
+        $devices = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.InstanceId -like 'PCI\VEN_8086&DEV_E20B*' -or $_.InstanceId -like 'PCI\VEN_8086&DEV_E20C*' })
         foreach ($d in $devices) {
             $paths = @((Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_LocationPaths' -ErrorAction Stop).Data)
             foreach ($l in $paths) { if ("$l" -like 'ACPI(*') { return "$l" } }

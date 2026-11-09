@@ -214,6 +214,9 @@ got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg" "$S" --pack
 sed '/PEG1@10000\/PEGP@0/d' "$ROOT/ioreg" > "$ROOT/ioreg2"
 got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg2" "$S" --package "$P" --efi "$F" --status | sed -n 's/^card_acpi_path=//p')
 [ "$got" = none ] && ok "ioreg: a port without an ACPI name is 'none'" || bad "ioreg without the port's name: $got"
+sed 's/<0be20000>/<0ce20000>/' "$ROOT/ioreg" > "$ROOT/ioreg4"   # an Arc B570 (8086:e20c) in the same slot
+got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg4" "$S" --package "$P" --efi "$F" --status | sed -n 's/^card_acpi_path=//p')
+[ "$got" = '\_SB.PC00.PEG1.PEGP' ] && ok "ioreg: a B570's port is $got" || bad "ioreg with a B570: card_acpi_path=$got"
 grep -v 0be20000 "$ROOT/ioreg" > "$ROOT/ioreg3"
 got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg3" "$S" --package "$P" --efi "$F" --status | sed -n 's/^card_acpi_path=//p')
 [ -z "$got" ] && ok "ioreg: no card, no path" || bad "ioreg without a card: $got"

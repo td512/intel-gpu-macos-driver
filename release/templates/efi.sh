@@ -126,7 +126,7 @@ card_acpi_path() {
         }
         n == 0 || done { next }
         /"acpi-path" = "/ { s = $0; sub(/.*"acpi-path" = "/, "", s); sub(/".*/, "", s); acpi[n] = s }
-        /"device-id" = <0be20000>/ { did[n] = 1 }
+        /"device-id" = <0[bc]e20000>/ { did[n] = 1 }   # Arc B580 (e20b) or B570 (e20c)
         /"vendor-id" = <86800000>/ { vid[n] = 1 }
         pci[n] && did[n] && vid[n] {
             done = 1; up = 0
