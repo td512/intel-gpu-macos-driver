@@ -5,7 +5,8 @@
 #   release/package.sh VERSION TAHOE_DIR SEQUOIA_DIR OUT_DIR
 #
 # TAHOE_DIR / SEQUOIA_DIR hold the binaries in the package layout (EFI/, Library/, system-volume/, LICENSES/, sigcheck,
-# SOURCES.md), e.g. the unpacked previous release. install.sh and README-INSTALL.md come from templates/ with @VER@,
+# hpmstat, SOURCES.md), e.g. the unpacked previous release. EFI/OC/Kexts/ has IntelXe.kext and HybridPM.kext
+# (kernel/HybridPM/build.py writes HybridPM.kext and hpmstat), the same files in both. install.sh and README-INSTALL.md come from templates/ with @VER@,
 # @MACOS@, @MAJOR@, @CODENAME@ and @TESTED@ / @TESTED_TR@ filled in, Library/GPUBundles/nvmtl-allow.txt comes from release/; SHA256SUMS is
 # regenerated. The filled Tahoe copies are also
 # written next to this script (release/install.sh, release/README-INSTALL.md), for reading in the repository.
@@ -25,7 +26,10 @@ mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 
 # the OpenCore pieces must be identical in both, or the one -efi.zip would be wrong for one of them
 for f in EFI/OC/Kexts/IntelXe.kext/Contents/MacOS/IntelXe EFI/OC/Kexts/IntelXe.kext/Contents/Info.plist \
-         EFI/OC/ACPI/SSDT-ARCOFF.aml EFI/OC/ACPI/SSDT-ARCOFF.dsl; do
+         EFI/OC/Kexts/HybridPM.kext/Contents/MacOS/HybridPM EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist \
+         EFI/OC/Kexts/HybridPM.kext/Contents/Resources/LICENSE-Lilu.txt \
+         EFI/OC/ACPI/SSDT-ARCOFF.aml EFI/OC/ACPI/SSDT-ARCOFF.dsl hpmstat; do
+    [ -f "$T/$f" ] || { echo "missing in the Tahoe input: $f"; exit 1; }
     cmp -s "$T/$f" "$S/$f" || { echo "differs between the Tahoe and Sequoia inputs: $f"; exit 1; }
 done
 
@@ -54,7 +58,7 @@ zipdir() { # zipdir PARENT NAME: NAME.zip with Unix modes, no resource forks, no
 for src in "$T" "$S"; do
     while IFS= read -r f; do
         if file -b "$f" | grep -q Mach-O && ! codesign -v "$f" 2>/dev/null; then echo "not signed: ${f#$src/}"; exit 1; fi
-    done < <(find "$src/Library" "$src/system-volume" "$src/sigcheck" -type f)
+    done < <(find "$src/Library" "$src/system-volume" "$src/sigcheck" "$src/hpmstat" -type f)
 done
 
 W=$(mktemp -d -t ixepkg)
@@ -63,7 +67,8 @@ for c in tahoe sequoia; do
     src=$T; [ $c = sequoia ] && src=$S
     d=$W/$N-$c
     mkdir -p "$d"
-    for x in EFI Library system-volume LICENSES sigcheck SOURCES.md; do ditto "$src/$x" "$d/$x"; done
+    for x in EFI Library system-volume LICENSES sigcheck hpmstat SOURCES.md; do ditto "$src/$x" "$d/$x"; done
+    cp "$R/../kernel/HybridPM/LICENSE.Lilu" "$d/LICENSES/Lilu-BSD-3-Clause.txt"   # Lilu's plugin_start.cpp is in HybridPM.kext
     cp "$R/nvmtl-allow.txt" "$d/Library/GPUBundles/nvmtl-allow.txt"   # the allow-list is kept in the repository
     fill "$R/templates/install.sh" "$d/install.sh" $c; chmod 755 "$d/install.sh"
     install -m 755 "$R/templates/efi.sh" "$d/efi.sh"   # no placeholders: the app carries the same file
@@ -89,6 +94,9 @@ cat > "$e/README.txt" <<EOF
 intel-gpu-macos-driver $VER: the OpenCore pieces (the same for macOS 26 Tahoe and macOS 15 Sequoia)
 
 EFI/OC/Kexts/IntelXe.kext       -> EFI/OC/Kexts/, config.plist Kernel > Add
+EFI/OC/Kexts/HybridPM.kext      optional, for 12th-14th gen Core CPUs with P- and E-cores: -> EFI/OC/Kexts/,
+                                Kernel > Add after Lilu.kext (it needs Lilu, which is not included); see
+                                "Hybrid Intel CPUs" in README-INSTALL.md
 EFI/OC/ACPI/SSDT-ARCOFF.aml     -> EFI/OC/ACPI/, config.plist ACPI > Add (check the ACPI path first)
 EFI/OC/ACPI/SSDT-ARCOFF.dsl     its source, to adapt with iasl when your board's path differs
 IntelXe-EFI.ps1                 on Windows: makes stages 2 and 4 in the EFI folder you choose, with a
