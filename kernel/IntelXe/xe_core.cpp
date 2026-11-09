@@ -41,6 +41,7 @@
 #include "uapi/intelxe_drm.h"
 #include "uapi/intelxe_surfvram_kabi.h"
 #include "xe_fd.h"
+#include "xe_uapi_args.h"
 
 static IOLock *gResLock, *gSchedLock, *gClientsLock, *gTlbLock, *gWaitLock;
 static IOLock *gFaultLock;   // rb7j: gFaultVms, every XeVm::faults, gFaultRing (taken alone, never with another lock)
@@ -7348,25 +7349,10 @@ static int queueProps(uint64_t ext, uint16_t cls, QueueProps *p) {
 // has no has_pxp, so xe_pxp_init leaves it NULL; DEVICE_QUERY_PXP_STATUS and the exec queue PXP_TYPE answer the same);
 // any other value EINVAL. Mesa ANV only chains it for protected memory, which it offers only when the PXP status query
 // succeeds, so on Linux B580 ANV never sends it, and neither does it here.
-static int gemCreateExts(uint64_t ext) {
-	for (uint32_t n = 0; ext; n++) {
-		if (n >= 16) return E2BIG;
-		drm_xe_user_extension u;
-		if (getUser(ext, &u, sizeof(u))) return EFAULT;
-		if (u.pad || u.name >= 1) return EINVAL;   // gem_create_user_extension_funcs has one entry
-		drm_xe_ext_set_property sp;
-		if (getUser(ext, &sp, sizeof(sp))) return EFAULT;
-		// xe's three tests: below ARRAY_SIZE(gem_create_set_property_funcs), pad 0, and equal to the extension's name
-		if (sp.property >= 1 || sp.pad || sp.property != DRM_XE_GEM_CREATE_EXTENSION_SET_PROPERTY) return EINVAL;
-		switch (sp.property) {
-			case DRM_XE_GEM_CREATE_SET_PROPERTY_PXP_TYPE:   // gem_create_set_pxp_type
-				if (sp.value == DRM_XE_PXP_TYPE_NONE) break;
-				return sp.value == DRM_XE_PXP_TYPE_HWDRM ? ENODEV : EINVAL;   // xe_pxp_key_assign without PXP; other types
-		}
-		ext = u.next_extension;
-	}
-	return 0;
-}
+// DRM_XE_GEM_CREATE_EXTENSION_SET_PROPERTY chain (xe_uapi_args.cpp xeGemCreateExtensions: gem_create_user_extensions,
+// gem_create_user_ext_set_property, gem_create_set_pxp_type without PXP), read with copyin
+static int userRead(void *, uint64_t addr, void *dst, size_t len) { return getUser(addr, dst, len); }
+static int gemCreateExts(uint64_t ext) { return xeGemCreateExtensions(ext, userRead, nullptr); }
 
 // rb7r: DRM_IOCTL_XE_MADVISE (xe_vm_madvise.c xe_vm_madvise_ioctl), in xe's order: the VM (EINVAL), madvise_args_are_sane
 // (start and range 4 KB aligned, range >= 4 KB; per type: PREFERRED_LOC devmem_fd >= -1, region_instance 0 unless
