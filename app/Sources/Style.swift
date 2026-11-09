@@ -108,3 +108,15 @@ extension View {
 
 /// The colour for a neutral card or state: grey that keeps its contrast on both appearances.
 let neutralTint = Color(nsColor: .systemGray)
+
+/// The accent button style, or the plain bordered one when another button on the page matters more now.
+struct ProminentUnless: PrimitiveButtonStyle {
+    let plain: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if plain {
+            Button(role: configuration.role, action: configuration.trigger) { configuration.label }.buttonStyle(.bordered)
+        } else {
+            Button(role: configuration.role, action: configuration.trigger) { configuration.label }.buttonStyle(.borderedProminent)
+        }
+    }
+}

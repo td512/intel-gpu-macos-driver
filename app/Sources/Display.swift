@@ -95,8 +95,8 @@ struct DisplayView: View {
         let status = manager.hidpi
         Form {
             Section2(title: "HiDPI modes", symbol: "display") {
-                Text("Optional. Like display scaling on Windows: System Settings > Displays offers \"looks like\" sizes (Larger Text ... More Space) that draw text and windows sharp at a larger size, at the monitor's full refresh rate. They are scaled on the GPU.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Caption("Optional: sharp \"looks like\" sizes in System Settings > Displays, at the full refresh rate.",
+                        detail: "Optional. Like display scaling on Windows: System Settings > Displays offers \"looks like\" sizes (Larger Text ... More Space) that draw text and windows sharp at a larger size, at the monitor's full refresh rate. They are scaled on the GPU.")
                 if status.known {
                     LabeledContent("Monitor") { Text(monitorText(status)).textSelection(.enabled) }
                     LabeledContent("HiDPI modes") { Text(stateText(status)) }
@@ -114,13 +114,13 @@ struct DisplayView: View {
                     } else {
                         Button(HiDPIAction.on.title) { manager.performHiDPI(.on) }.disabled(!status.supported || status.foreignOverride)
                     }
-                    Text("It takes effect after a restart. Then choose a size in System Settings > Displays. Turning them off takes back only what was written here, and a chosen HiDPI size goes back to the monitor's own.")
-                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Caption("It takes effect after a restart.",
+                            detail: "It takes effect after a restart. Then choose a size in System Settings > Displays. Turning them off takes back only what was written here, and a chosen HiDPI size goes back to the monitor's own.")
                 }
             }
             Section2(title: "Variable refresh (Adaptive-Sync)", symbol: "speedometer") {
-                Text("System Settings > Displays lists a Variable refresh rate for monitors that support Adaptive-Sync: the monitor then waits for each new frame, so games and video run without tearing or stutter below the maximum rate. On by default; turn it off if the monitor flickers in Variable mode.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Caption("For Adaptive-Sync monitors: no tearing or stutter below the maximum rate.",
+                        detail: "System Settings > Displays lists a Variable refresh rate for monitors that support Adaptive-Sync: the monitor then waits for each new frame, so games and video run without tearing or stutter below the maximum rate. On by default; turn it off if the monitor flickers in Variable mode.")
                 LabeledContent("Variable modes") {
                     Text(manager.vrrWanted == manager.vrrActive ? (manager.vrrActive ? String(localized: "On") : String(localized: "Off"))
                          : (manager.vrrWanted ? String(localized: "On after a restart") : String(localized: "Off after a restart")))

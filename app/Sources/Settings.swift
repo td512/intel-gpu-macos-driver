@@ -91,7 +91,8 @@ struct SettingsView: View {
                     Text("Performance (at least 2400 MHz: lowest latency, more power)").tag(2)
                 }
                 Text("Applied at the next start.").font(.caption).foregroundStyle(.secondary)
-                CaptionedToggle(title: "Fast GPU response for apps", caption: "Keeps the GPU clock up while an app's GPU work runs, instead of letting short bursts run at the lowest clock: games, Metal and OpenCL apps and benchmarks respond faster (Geekbench 4-6 percent higher). The desktop itself is not affected; an idle GPU sleeps either way. Applies to apps started afterwards.", isOn: $st.edit.fastResponse)
+                CaptionedToggle(title: "Fast GPU response for apps", caption: "Keeps the GPU clock up while an app's GPU work runs.",
+                                detail: "Keeps the GPU clock up while an app's GPU work runs, instead of letting short bursts run at the lowest clock: games, Metal and OpenCL apps and benchmarks respond faster (Geekbench 4-6 percent higher). The desktop itself is not affected; an idle GPU sleeps either way. Applies to apps started afterwards.", isOn: $st.edit.fastResponse)
             }
             Section2(title: "Diagnostics", symbol: "stethoscope") {
                 CaptionedToggle(title: "GPU timing in the driver's log", caption: "For performance reports; test builds of the Metal driver only.", isOn: $st.edit.gpuTiming)
@@ -107,7 +108,8 @@ struct SettingsView: View {
                     do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {}
                     st.loginItem = SMAppService.mainApp.status == .enabled
                 }))
-                CaptionedToggle(title: "Check the driver at login", caption: "Without opening the app: after each login, a dialog only when something needs attention, such as a macOS update that removed the system-volume copy. Applies from the next login.", isOn: Binding(get: { st.loginCheck }, set: { setLoginCheck($0); st.loginCheck = loginCheckEnabled() }))
+                CaptionedToggle(title: "Check the driver at login", caption: "After each login, a dialog only when something needs attention.",
+                                detail: "Without opening the app: after each login, a dialog only when something needs attention, such as a macOS update that removed the system-volume copy. Applies from the next login.", isOn: Binding(get: { st.loginCheck }, set: { setLoginCheck($0); st.loginCheck = loginCheckEnabled() }))
                 CaptionedToggle(title: "Check for a new release at start", caption: "Asks GitHub for the latest release when the app opens.", isOn: $autoUpdateCheck)
             }
         }
@@ -135,7 +137,7 @@ struct DisplayTroubleshootingView: View {
                     Text("Applied at once and kept for the next starts.").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Revert") { st.edit = st.saved }.disabled(st.edit == st.saved)
-                    Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved)
+                    Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved).keyboardShortcut(.defaultAction)
                 }
             }
         .task {
@@ -148,12 +150,17 @@ struct DisplayTroubleshootingView: View {
 struct CaptionedToggle: View {
     let title: LocalizedStringKey
     let caption: LocalizedStringKey
+    /// the longer explanation, behind an (i) button after the caption
+    var detail: LocalizedStringKey?
     @Binding var isOn: Bool
     var body: some View {
         Toggle(isOn: $isOn) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                Text(caption).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(caption).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let detail { InfoButton(detail).controlSize(.small) }
+                }
             }
         }
     }

@@ -73,13 +73,17 @@ struct EFIView: View {
 
     var partition: some View {
         Section2(title: "EFI partition", symbol: "internaldrive") {
-            Text("For a Mac installed with a plain OpenCore EFI (stage 1 of the install guide): this page does stages 2 and 4 on the EFI that OpenCore booted from, or on an EFI folder you choose, such as a USB stick's.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Caption("Stages 2 and 4 of the install guide, on your OpenCore EFI.",
+                    detail: "For a Mac installed with a plain OpenCore EFI (stage 1 of the install guide): this page does stages 2 and 4 on the EFI that OpenCore booted from, or on an EFI folder you choose, such as a USB stick's.")
             if !efi.known {
                 Text(manager.probing ? String(localized: "Checking…") : "–").foregroundStyle(.secondary)
             } else {
                 if efi.found {
-                    LabeledContent(LocalizedStringKey(efi["efi_source"] == "folder" ? "Folder" : "Disk")) { Text(diskText).textSelection(.enabled).multilineTextAlignment(.trailing) }
+                    if efi["efi_source"] == "folder" {
+                        PathRow(title: "Folder", path: diskText)
+                    } else {
+                        LabeledContent("Disk") { Text(diskText).textSelection(.enabled).multilineTextAlignment(.trailing) }
+                    }
                     if !efi["efi_device"].isEmpty {
                         LabeledContent("Partition") { Text("\(efi["efi_device"]) · \(efi["efi_partition"])").textSelection(.enabled) }
                     }
@@ -98,8 +102,8 @@ struct EFIView: View {
                     }
                 }
                 if efi["efi_source"] == "none" || efi["efi_source"] == "chosen" {
-                    Text("OpenCore did not record which EFI it booted from (Misc > Security > ExposeSensitiveData without 1). Choose the partition by its disk. The changes below turn that record on for the next boot.")
-                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Caption("OpenCore did not record which EFI it booted from: choose it by its disk.",
+                            detail: "OpenCore did not record which EFI it booted from (Misc > Security > ExposeSensitiveData without 1). Choose the partition by its disk. The changes below turn that record on for the next boot.")
                     if efi.candidates.isEmpty {
                         Text("No EFI partition found.").foregroundStyle(.secondary)
                     } else {
@@ -137,8 +141,8 @@ struct EFIView: View {
 
     var settings: some View {
         Section2(title: "Settings (stage 2)", symbol: "slider.horizontal.3") {
-            Text("SIP (csr-active-config), the boot-args amfi_get_out_of_my_way=0x1 and intelxe_surfvram=2, ResizeAppleGpuBars, DisableIoMapper and ReconnectGraphicsOnConnect, as stage 2 of the install guide sets them. Separate from the files above; your other settings stay as they are.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Caption("SIP, the AMFI boot-arg and the GPU quirks, as stage 2 sets them.",
+                    detail: "SIP (csr-active-config), the boot-args amfi_get_out_of_my_way=0x1 and intelxe_surfvram=2, ResizeAppleGpuBars, DisableIoMapper and ReconnectGraphicsOnConnect, as stage 2 of the install guide sets them. Separate from the files above; your other settings stay as they are.")
             planOrHint(.settings)
             applyButton(.settings)
         }
@@ -147,8 +151,8 @@ struct EFIView: View {
     /// only for the system-volume copy (Driver page, Safari and WebKit)
     var safari: some View {
         Section2(title: "Safari on the GPU (optional)", symbol: "safari") {
-            Text("The system-volume copy of the Metal driver (Driver page) changes the system volume's seal. OpenCore's Apple Secure Boot (Misc > Security > SecureBootModel) refuses to start macOS from such a volume, so it must be Disabled first. Only for the system-volume copy: without it, leave it as it is.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Caption("Only for the system-volume copy of the Metal driver (Driver page).",
+                    detail: "The system-volume copy of the Metal driver (Driver page) changes the system volume's seal. OpenCore's Apple Secure Boot (Misc > Security > SecureBootModel) refuses to start macOS from such a volume, so it must be Disabled first. Only for the system-volume copy: without it, leave it as it is.")
             LabeledContent("SecureBootModel") { Text(efi["secure_boot_model"].isEmpty ? "–" : efi["secure_boot_model"]) }
             planOrHint(.safari)
             applyButton(.safari)
@@ -157,16 +161,18 @@ struct EFIView: View {
 
     var undo: some View {
         Section2(title: "Undo", symbol: "arrow.uturn.backward") {
-            LabeledContent("Last backup") {
-                Text(efi.backup.map { "\($0) (\(efi["backup_kind"]))" } ?? String(localized: "None"))
-                    .textSelection(.enabled).lineLimit(3).truncationMode(.middle)
+            if let backup = efi.backup {
+                PathRow(title: "Last backup", path: backup)
+            } else {
+                LabeledContent("Last backup") { Text("None") }
             }
             HStack {
-                if let backup = efi.backup {
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: backup)]) }
+                if efi.backup != nil && !efi["backup_kind"].isEmpty {
+                    Text(verbatim: "(\(efi["backup_kind"]))").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(EFIAction.undo.title + "…", role: .destructive) { page.confirming = .undo }
+                    .foregroundStyle(.red)
                     .disabled(efi.backup == nil || !(manager.efiPlans[.undo]?.changes ?? false))
             }
         }
@@ -181,11 +187,17 @@ struct EFIView: View {
             }
             Spacer()
             if changes {
-                Button(action.title + "…") { page.confirming = action }.buttonStyle(.borderedProminent)
+                // one accent button on the page: the first change in the install guide's order (stage 2, then 4);
+                // Apple Secure Boot is optional and never the accent one
+                Button(action.title + "…") { page.confirming = action }.buttonStyle(ProminentUnless(plain: action != prominentAction))
             } else {
                 Button(action.title + "…") { page.confirming = action }.disabled(true)
             }
         }
+    }
+
+    var prominentAction: EFIAction? {
+        [EFIAction.settings, .apply].first { manager.efiPlans[$0]?.changes ?? false }
     }
 
     @ViewBuilder func planOrHint(_ action: EFIAction) -> some View {

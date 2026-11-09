@@ -63,13 +63,16 @@ struct ReportView: View {
     var body: some View {
         Form {
             Section2(title: "Diagnostics report", symbol: "doc.text.magnifyingglass") {
-                Text("Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop.")
-                    .font(.callout).foregroundStyle(.secondary)
+                Caption("Changes and uploads nothing; private details are removed. About a minute.",
+                        detail: "Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop.")
                 CaptionedToggle(title: "Administrator mode", caption: "Asks for your password. Adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock.", isOn: $admin)
                 CaptionedToggle(title: "ACPI tables", caption: "The DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence.", isOn: $acpi)
                 CaptionedToggle(title: "Staged-probe results", caption: "Only for a GPU that is not supported yet.", isOn: $probe)
-                Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
-                    .keyboardShortcut(.defaultAction)
+                HStack {
+                    Spacer()
+                    Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
+                        .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                }
             }
             if let id = manager.reportID {
                 Section2(title: "Last report", symbol: "doc.text") {
@@ -77,6 +80,7 @@ struct ReportView: View {
                     HStack {
                         if let file = manager.reportFile {
                             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)]) }
+                                .help(displayPath(file))
                         }
                         Button("Copy the ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(id, forType: .string) }
                         Spacer()
@@ -125,10 +129,10 @@ struct TestsView: View {
     var body: some View {
         Form {
             Section2(title: "GPU test", symbol: "checkmark.seal") {
-                Text("About 25 seconds: checks that the GPU computes and draws correctly, checks the features apps use and video decoding and encoding, measures its compute rate, bandwidth and latency, and at the end opens a small window for 5 seconds to measure smoothness. Close games and other GPU-heavy apps first.")
-                    .font(.callout).foregroundStyle(.secondary)
+                Caption("About 25 seconds. Close games and other GPU-heavy apps first.",
+                        detail: "About 25 seconds: checks that the GPU computes and draws correctly, checks the features apps use and video decoding and encoding, measures its compute rate, bandwidth and latency, and at the end opens a small window for 5 seconds to measure smoothness. Close games and other GPU-heavy apps first.")
                 HStack {
-                    Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil)
+                    Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil).buttonStyle(.borderedProminent)
                     Button("Long test (about 2 minutes)") { manager.runTest(long: true) }.disabled(manager.testing != nil)
                         .help(String(localized: "Checks most of the video memory twice and keeps the GPU at full load for a minute, watching for errors, the clock and the temperature."))
                     if let step = manager.testing { ProgressView().controlSize(.small); Text(step).foregroundStyle(.secondary) }

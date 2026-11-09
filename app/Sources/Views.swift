@@ -317,6 +317,25 @@ extension DriverAction {
         case .uninstall: return String(localized: "Removes the kexts and the Metal driver from /Library. Backups stay. Remove IntelXe.kext from your EFI before you restart, or macOS comes up without the driver.")
         }
     }
+    /// one short line for the Driver page; the explanation is behind its (i) button
+    var caption: String {
+        switch self {
+        case .check: return String(localized: "Checks the system and the package; changes nothing.")
+        case .install: return String(localized: "Backs up, copies into /Library and rebuilds the kernel collection: a few minutes.")
+        case .repair: return String(localized: "Puts back installed files that differ from this package.")
+        case .undo: return String(localized: "Puts the last backup back.")
+        case .uninstall: return String(localized: "Removes the driver from /Library; backups stay.")
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .check: return "checkmark.shield"
+        case .install: return "arrow.down.circle"
+        case .repair: return "wrench.and.screwdriver"
+        case .undo: return "arrow.uturn.backward"
+        case .uninstall: return "trash"
+        }
+    }
     var confirms: Bool { self != .check }
     var destructive: Bool { self == .undo || self == .uninstall }
 }
@@ -778,7 +797,7 @@ struct DriverView: View {
         Form {
             Section2(title: "Package", symbol: "shippingbox") {
                 if let package = manager.package {
-                    LabeledContent("Folder") { Text(package.directory.path).textSelection(.enabled).lineLimit(2).truncationMode(.middle) }
+                    PathRow(title: "Folder", path: package.directory.path)
                     LabeledContent("Version") { Text(manager.packageStatus["package_version"] ?? "–") }
                     LabeledContent("Compared with what is installed") { Text(stateText) }
                     if !changedItems.isEmpty {
@@ -793,25 +812,32 @@ struct DriverView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    if let release = manager.release {
-                        Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: false) } }
-                    } else if let error = manager.releaseError {
-                        Text(error).foregroundStyle(.secondary)
+                    Caption("Downloads are checked against the release's published hashes.",
+                            detail: "The download is compared with the hashes published with the release. That finds a damaged file; it does not prove who made the release.")
+                    Spacer(minLength: 12)
+                    if let error = manager.releaseError, manager.release == nil {
+                        Text(error).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Button("Use a folder…") { manager.pickFolder(zink: false) }
+                    Button("Use a folder…") { manager.pickFolder(zink: false) }.fixedSize()
+                    if let release = manager.release {
+                        // the first thing to do on a machine without a package
+                        if manager.package == nil {
+                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: false) } }.buttonStyle(.borderedProminent).fixedSize()
+                        } else {
+                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: false) } }.fixedSize()
+                        }
+                    }
                 }
-                Text("The download is compared with the hashes published with the release. That finds a damaged file; it does not prove who made the release.")
-                    .font(.callout).foregroundStyle(.secondary)
             }
             if manager.package != nil {
                 Section2(title: "Install", symbol: "arrow.down.circle") {
-                    ActionRow(action: .install, enabled: enabled(.install), prominent: installRecommended) { page.confirming = .install }
+                    ActionRow(action: .install, enabled: enabled(.install), prominent: manager.installRecommended) { page.confirming = .install }
                     ActionRow(action: .repair, enabled: enabled(.repair)) { page.confirming = .repair }
                     ActionRow(action: .check, enabled: enabled(.check)) { manager.perform(.check) }
                 }
                 Section2(title: "Go back", symbol: "arrow.uturn.backward") {
                     ActionRow(action: .undo, enabled: enabled(.undo)) { page.confirming = .undo }
-                    ActionRow(action: .uninstall, enabled: enabled(.uninstall), destructive: true) { page.confirming = .uninstall }
+                    ActionRow(action: .uninstall, enabled: enabled(.uninstall)) { page.confirming = .uninstall }
                 }
             }
             SSVSection()
@@ -843,8 +869,6 @@ struct DriverView: View {
         let missing = (st["items_missing"] ?? "").split(separator: ",").map { String($0) + "  " + String(localized: "(missing)") }
         return st["installed_state"] == "absent" ? [] : differ + missing
     }
-    var installRecommended: Bool { ["different", "partial", "absent"].contains(manager.packageStatus["installed_state"] ?? "") }
-
     var stateText: String {
         switch manager.packageStatus["installed_state"] {
         case "same": return String(localized: "The same")
@@ -856,19 +880,26 @@ struct DriverView: View {
     }
 }
 
+extension Manager {
+    /// the chosen package differs from what is installed: installing it is what the Driver page is for now
+    var installRecommended: Bool { package != nil && ["different", "partial", "absent"].contains(packageStatus["installed_state"] ?? "") }
+}
+
+/// A Driver page action: its symbol, one short line with the explanation behind (i), and its button (accent when it is
+/// the one that matters now, red when it takes something away).
 struct ActionRow: View {
     let action: DriverAction
     let enabled: Bool
     var prominent = false
-    var destructive = false
     let perform: () -> Void
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(action.explanation).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Spacer()
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: action.symbol).foregroundStyle(action.destructive ? Color.red : Color.accentColor).frame(width: 20)
+            Caption(text: Text(action.caption), detail: Text(action.explanation))
+            Spacer(minLength: 12)
             if prominent {
                 Button(action.title, action: perform).disabled(!enabled).fixedSize().buttonStyle(.borderedProminent)
-            } else if destructive {
+            } else if action.destructive {
                 Button(action.title, role: .destructive, action: perform).disabled(!enabled).fixedSize().foregroundStyle(.red)
             } else {
                 Button(action.title, action: perform).disabled(!enabled).fixedSize()
@@ -883,8 +914,8 @@ struct ZinkView: View {
         let f = manager.facts, ready = manager.zinkPackage != nil
         Form {
             Section2(title: "Zink", symbol: "gamecontroller") {
-                Text("Optional. LWJGL 3 Java games such as Minecraft render through Mesa's Zink straight to Vulkan, instead of Apple's OpenGL. Native applications stay on Apple's OpenGL.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Caption("Optional: Minecraft and other LWJGL 3 Java games through Mesa's Zink, straight to Vulkan.",
+                        detail: "Optional. LWJGL 3 Java games such as Minecraft render through Mesa's Zink straight to Vulkan, instead of Apple's OpenGL. Native applications stay on Apple's OpenGL.")
                 LabeledContent("Installed") {
                     Label(f.zinkInstalled ? String(localized: "Yes") : String(localized: "No"), systemImage: f.zinkInstalled ? "checkmark.circle.fill" : "circle.dashed")
                         .foregroundStyle(f.zinkInstalled ? .green : .secondary)
@@ -894,26 +925,29 @@ struct ZinkView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(f.zinkGlobal ? "On: LWJGL 3 applications use Zink." : "Off: they use Apple's OpenGL.")
-                        Text("It applies to applications started afterwards. Running ones must be restarted. A single game can use Zink without this, through its launcher's Java arguments.")
-                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Caption("It applies to applications started afterwards. Running ones must be restarted.",
+                                detail: "It applies to applications started afterwards. Running ones must be restarted. A single game can use Zink without this, through its launcher's Java arguments.")
                     }
                     Spacer()
                     if f.zinkGlobal {
                         Button(ZinkAction.globalOff.title) { manager.performZink(.globalOff) }.fixedSize()
+                    } else if f.zinkInstalled {
+                        // installed and not used yet: turning it on is what this page is for now
+                        Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.fixedSize().buttonStyle(.borderedProminent)
                     } else {
-                        Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.fixedSize().disabled(!f.zinkInstalled)
+                        Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.fixedSize().disabled(true)
                     }
                 }
             }
             Section2(title: "Install", symbol: "arrow.down.circle") {
                 if let package = manager.zinkPackage {
-                    LabeledContent("Package") { Text(package.directory.path).lineLimit(2).truncationMode(.middle).textSelection(.enabled) }
+                    PathRow(title: "Package", path: package.directory.path)
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 14) {
                         Text("Installing, the self-test and removing need the Zink package.").foregroundStyle(.secondary)
                         Spacer()
                         if let release = manager.release, release.asset("-zink-gl.zip") != nil {
-                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: true) } }.fixedSize()
+                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: true) } }.fixedSize().buttonStyle(.borderedProminent)
                         } else if manager.release != nil {
                             Text("The latest release has no Zink package.").foregroundStyle(.secondary)
                         }

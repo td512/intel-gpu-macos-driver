@@ -541,3 +541,25 @@
 "Release %@ is out." = "%@ sürümü çıktı.";
 "Installed and loaded." = "Kurulu ve yüklü.";
 "Metal runs on %@." = "Metal, %@ üzerinde çalışıyor.";
+
+/* Look and feel: one short line per row, the rest behind (i) */
+"Checks the system and the package; changes nothing." = "Sistemi ve paketi denetler; hiçbir şeyi değiştirmez.";
+"Backs up, copies into /Library and rebuilds the kernel collection: a few minutes." = "Yedekler, /Library'ye kopyalar ve kernel collection'ı yeniden oluşturur: Birkaç dakika sürer.";
+"Puts back installed files that differ from this package." = "Kurulu dosyalardan bu paketle uyuşmayanları yeniden kopyalar.";
+"Puts the last backup back." = "Son yedeği geri koyar.";
+"Removes the driver from /Library; backups stay." = "Sürücüyü /Library'den siler; yedekler kalır.";
+"Downloads are checked against the release's published hashes." = "İndirilen dosyalar, sürümle yayımlanan özetlerle karşılaştırılır.";
+"Optional: Minecraft and other LWJGL 3 Java games through Mesa's Zink, straight to Vulkan." = "İsteğe bağlı: Minecraft ve diğer LWJGL 3 Java oyunları Mesa'nın Zink'iyle doğrudan Vulkan üzerinden çizer.";
+"Safari on the GPU needs a second copy of the Metal driver on the system volume." = "Safari'nin GPU'yu kullanması için Metal sürücüsünün sistem diskinde ikinci bir kopyası gerekir.";
+"A macOS update replaces the system volume, and this copy with it." = "macOS güncellemesi sistem diskini, onunla birlikte bu kopyayı da değiştirir.";
+"Keeps the GPU clock up while an app's GPU work runs." = "Bir uygulamanın GPU işi sürerken GPU saat hızını yüksek tutar.";
+"After each login, a dialog only when something needs attention." = "Her girişten sonra, yalnızca ilgilenilmesi gereken bir şey varsa bir pencere.";
+"Stages 2 and 4 of the install guide, on your OpenCore EFI." = "Kurulum rehberinin 2. ve 4. aşamaları, OpenCore EFI'niz üzerinde.";
+"OpenCore did not record which EFI it booted from: choose it by its disk." = "OpenCore hangi EFI'den açıldığını kaydetmemiş: Diskine bakarak seçin.";
+"SIP, the AMFI boot-arg and the GPU quirks, as stage 2 sets them." = "SIP, AMFI boot-arg'ı ve GPU quirk'leri, 2. aşamanın ayarladığı gibi.";
+"Only for the system-volume copy of the Metal driver (Driver page)." = "Yalnızca Metal sürücüsünün sistem diski kopyası için (Sürücü sayfası).";
+"Optional: sharp \"looks like\" sizes in System Settings > Displays, at the full refresh rate." = "İsteğe bağlı: Sistem Ayarları > Ekranlar'da tam yenileme hızında, keskin \"gibi görünür\" boyutlar.";
+"It takes effect after a restart." = "Yeniden başlattıktan sonra geçerli olur.";
+"For Adaptive-Sync monitors: no tearing or stutter below the maximum rate." = "Adaptive-Sync monitörler için: En yüksek hızın altında yırtılma ve takılma olmaz.";
+"About 25 seconds. Close games and other GPU-heavy apps first." = "Yaklaşık 25 saniye. Önce oyunları ve GPU'yu yoğun kullanan diğer uygulamaları kapatın.";
+"Changes and uploads nothing; private details are removed. About a minute." = "Hiçbir şeyi değiştirmez ve yüklemez; kişisel bilgiler çıkarılır. Yaklaşık bir dakika sürer.";
