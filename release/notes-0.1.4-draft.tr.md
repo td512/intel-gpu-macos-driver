@@ -1,6 +1,6 @@
 <!-- 0.1.4 TASLAĞI (9 Kasım 2026). Yayından önce: paket listesini package.sh'in çıktısıyla, yükseltme adımlarını
-release/README-INSTALL.tr.md'nin "Yükseltme" bölümüyle karşılaştırın (NMXAccel yeniden mi derlendi, yalnız plist'i mi
-değişti?); B570 satırları hâlâ "test edilmedi" demeli. -->
+release/README-INSTALL.tr.md'nin "Yükseltme" bölümüyle karşılaştırın; B570 satırları hâlâ "test edilmedi" demeli;
+Windows EFI aracının HybridPM satırına bakın (başka bir dal ekliyor). -->
 Hesaplamayı hızlandıran sürüm: Metal ve OpenCL işleri sürücüden komut arabelleği başına daha az kilitle geçiyor ve bir
 çevirici düzeltmesi bir matris çekirdeğinin hızını ikiye katlıyor. Ayrıca: katkıyla gelen bir aygıt kimliğiyle **Arc
 B570** (bizim tarafımızda test edilmedi), 12-14. nesil hibrit Intel işlemciler için **HybridPM** ve yeni macOS
@@ -43,6 +43,10 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
   gerektirdiği OpenCore `SecureBootModel = Disabled` ayarını yapıyor (yedekli, geri alınabilir).
 - **Oturum açılışında denetim (isteğe bağlı):** yalnız ilgilenilmesi gereken bir şey varsa, örneğin bir macOS
   güncellemesi sistem birimi kopyasını sildiyse, tek bir pencere.
+- **Yerel OpenGL uygulamaları tek tek Zink üzerinden (deneysel).** Zink paketindeki `cglzink-app.sh`,
+  CGL/NSOpenGL kullanan bir uygulamayı OpenGL'i Zink'te çalışacak biçimde başlatan `~/Applications/X (zink).app`'i
+  oluşturuyor: GZDoom (MAP01, sınırsız) Apple'ın OpenGL'inde ~1600, cglzink ile ~1910 fps. Bütün uygulamalar için bir
+  anahtar yok.
 - **SSDT-ARCOFF kendini kartınıza uyarlıyor.** Kartın ACPI yolu paketle gelen tablonunkinden farklıysa `efi.sh` ve
   uygulama yolunuzu tablonun bir kopyasına yazıyor: düzenlenecek `.dsl` ya da `iasl` yok.
 - **Neyin yanlış olduğunu söyleyen raporlar.** Tanı raporu uyarılarla ve her birinde ne yapılacağıyla başlıyor;
@@ -64,6 +68,10 @@ kapalı. "0.1.3" sütunu 0.1.3'ün Metal sürücüsünün aynı gün ölçümü.
 | Arka arkaya komut arabellekleri | her biri 18,2 µs | her biri 11,1 µs | | |
 | Küçük bir iş, exec -> sinyal | | 46-52 µs | 15-17 µs | |
 
+GuC düşük gecikme ipucu açıkken 0.1.4'ün daha önceki bir test derlemesi (lock V2'den önce) Geekbench 7 Metal 97,7k ve
+OpenCL 90,1k-92,5k aldı: ipucunun varsayılan olarak kapalı olması (Bilinen sorunlar) biraz hıza mal oluyor; doğrudan
+gönderim (isteğe bağlı) OpenCL'i 92,9k'ye geri getiriyor.
+
 Geekbench skorları oturumdan oturuma birkaç yüzde oynuyor (0.1.3'ün README'si 5 Kasım'dan Metal 92,9k / OpenCL 86,9k
 veriyordu); farklı günlerin sayılarını değil, bir tablonun sütunlarını karşılaştırın.
 
@@ -77,7 +85,8 @@ veriyordu); farklı günlerin sayılarını değil, bir tablonun sütunlarını 
   işlemci güç yönetimi bu işlemcilerin P çekirdeklerini sınırlıyor ve tam yüklü çekirdekleri 800 MHz'de tutabiliyor;
   GPU sürücüsü komut arabelleği başına çok CPU işi yaptığı için GPU da yavaş görünüyor. Test makinesinde (i7-14700K)
   tek bir CPU iş parçacığı iki kattan fazla hızlandı, Geekbench'in GPU skorları yaklaşık üçte bir arttı. İsteğe bağlı;
-  `-efi.zip`'te ve macOS paketinde. Bir Lilu eklentisi; Core Ultra'ya, E çekirdeği olmayan ve daha eski işlemcilere
+  `-efi.zip`'te ve macOS paketinde; işlemci gerektiriyorsa uygulamanın EFI sayfası ve `efi.sh` onu 4. aşamada ekliyor.
+  Bir Lilu eklentisi (Lilu pakette yok); Core Ultra'ya, E çekirdeği olmayan ve daha eski işlemcilere
   dokunmuyor (yalnız nedenini günlüğe yazıyor). Paketteki `hpmstat` çekirdek başına saatleri ve paket gücünü gösteriyor.
 
 ### Paketler
@@ -88,7 +97,7 @@ veriyordu); farklı günlerin sayılarını değil, bir tablonun sütunlarını 
 | `intel-gpu-macos-driver-0.1.4-tahoe.zip` | macOS 26 Tahoe (26.7.1'de test edildi) | macOS |
 | `intel-gpu-macos-driver-0.1.4-sequoia.zip` | macOS 15 Sequoia (aynı kaynaklar; Sequoia'da yeniden test edilmedi) | macOS |
 | `intel-gpu-macos-driver-0.1.4-efi.zip` | OpenCore parçaları: `IntelXe.kext` (yeni), `SSDT-ARCOFF`, `HybridPM.kext` (yeni, isteğe bağlı), Windows için `IntelXe-EFI.ps1` | her sistem |
-| `intel-gpu-macos-driver-0.1.4-zink-gl.zip` | isteğe bağlı: LWJGL 3 oyunları (Minecraft Java) için Mesa'nın Zink'i üzerinden OpenGL; 0.1.3'tekiyle aynı | macOS |
+| `intel-gpu-macos-driver-0.1.4-zink-gl.zip` | isteğe bağlı: LWJGL 3 oyunları (Minecraft Java) için Mesa'nın Zink'i üzerinden OpenGL; yeni: yerel OpenGL uygulamaları için `cglzink-app.sh` (deneysel) | macOS |
 
 Sağlama toplamları: `intel-gpu-macos-driver-0.1.4.sha256`. Kurulum kılavuzu: her macOS paketinde `README-INSTALL.tr.md`
 ve [depoda](https://github.com/yusufklncc/intel-gpu-macos-driver/blob/v0.1.4/release/README-INSTALL.tr.md)
@@ -97,23 +106,25 @@ ve [depoda](https://github.com/yusufklncc/intel-gpu-macos-driver/blob/v0.1.4/rel
 ### 0.1.3'ten yükseltme
 
 1. Paketi kurun (uygulamada v0.1.4'ü indirin, ardından *Bu paketi kur*; ya da `sudo ./install.sh --apply`).
-   `IntelXeFB.kext`, `NMXAccel.kext` ve Metal sürücüsü yeni; Mesa ve video kodekleri 0.1.3'ünkiler.
+   `IntelXeFB.kext`, `NMXAccel.kext` (`Info.plist`'i: B570'in kimliği) ve Metal sürücüsü yeni; Mesa ve video kodekleri
+   0.1.3'ünkiler.
 2. Yeniden başlatmadan önce **EFI'deki `IntelXe.kext`'i değiştirin** (uygulamanın EFI sayfası, macOS'ta
    `sudo ./efi.sh --apply`, Windows'ta `IntelXe-EFI.ps1` ya da elle; `config.plist` girdisi olduğu gibi kalır). B570'in
    kimliğini, GPU saati ve sıcaklık okumalarını, uygulamanın Güç sayfasının yazdığı ayarları ve doğrudan gönderimi
    getiriyor.
-3. **Hibrit Intel işlemci mi (E çekirdekli 12-14. nesil)?** `HybridPM.kext`'i `EFI/OC/Kexts/`'e ve `Kernel > Add`'e
-   **`Lilu.kext`'in altına** ekleyin. HybridPM Lilu gerektirir, bu sürümde Lilu yok: çoğu EFI'de VirtualSMC için zaten
-   var; yoksa [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases)'dan alın. HybridPM'i ne uygulama ne de
-   `efi.sh` ekliyor; kılavuzun *Hibrit Intel işlemciler* bölümünde girdisi ve nasıl denetleneceği
+3. **Hibrit Intel işlemci mi (E çekirdekli 12-14. nesil)?** Uygulamanın EFI sayfası ve `efi.sh`, 2. adımda
+   `HybridPM.kext`'i ekliyor; `Kernel > Add` girdisi **`Lilu.kext`'in altına** giriyor. HybridPM Lilu gerektirir, bu
+   sürümde Lilu yok: çoğu EFI'de VirtualSMC için zaten var; yoksa
+   [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases)'dan alıp 2. adımı yeniden yapın. `IntelXe-EFI.ps1`
+   onu henüz eklemiyor; elle eklemek için kılavuzun *Hibrit Intel işlemciler* bölümünde girdisi ve nasıl denetleneceği
    (`sysctl debug.hybridpm.why`) var.
 4. Safari için sistem birimi kopyasını kurduysanız bu paketinkini de kurun (uygulamanın Sürücü sayfası, *Safari ve
    WebKit*; ya da `sudo ./system-volume/ssv-install.sh --apply`), Safari yeni Metal sürücüsünü alsın.
 5. Yeniden başlatın.
 
 0.1.4'ün ilk test derlemelerinin açtığı GuC düşük gecikme ipucu isteğe bağlı: uygulamanın *Güç ve uygulama* sayfası
-(*Uygulamalar için hızlı GPU yanıtı*) ya da `/Library/GPUBundles/NVMTLDriver.low-latency`. Geekbench'te %2-5
-kazandırıyor; Bilinen sorunlar'a bakın.
+(*Uygulamalar için hızlı GPU yanıtı*) ya da `/Library/GPUBundles/NVMTLDriver.low-latency`. Ne kazandırdığı Performans'ta,
+neden kapalı olduğu Bilinen sorunlar'da.
 
 0.1.2 ya da daha eskisinden geliyorsanız önce kılavuzun yükseltme bölümünü izleyin.
 
@@ -131,6 +142,8 @@ kazandırıyor; Bilinen sorunlar'a bakın.
   yapmayan bir GuC'den ayırmak için.
 - `debug.intelxe.jobtime` (varsayılan kapalı): her işin aşamaları GPU zaman damgalarıyla. `debug.intelxe.sensors`:
   GT saati, paket ve VRAM sıcaklıkları, herkes okuyabilir.
+- Çevirici, gevşek (relaxed) bir threadgroup atomiğini (add, min, max, and, or, xor) gevşek olarak yazıyor; Mesa artık
+  her birinin çevresinde paylaşılan yerel belleği çitlemiyor (clbench `hist256` döngüsü artık IGC'ninkiyle aynı).
 - Testler: `mtl_order_stress` (kuyruklar ve iş parçacıkları arasında komut arabelleği sırası), `direct_lat`,
   `mtl_lat split`.
 
@@ -142,9 +155,12 @@ kazandırıyor; Bilinen sorunlar'a bakın.
   kapalı. Nedeni henüz bilinmiyor; yeni motor dökümü onu bulmak için. Görürseniz lütfen bir rapor gönderin.
 - **Doğrudan gönderim varsayılan olarak kapalı**; daha uzun gözetimsiz çalışmalardan (güç, boşta kalma, uyku) sonra
   açılacak. Yalnız bir sysctl, bu yüzden bir sonraki yeniden başlatmada kapanır.
+- **Geekbench'in Background Blur ve Super Resolution testleri** GPU saatine duyarlı: ipucu kapalıyken açık olduğundan
+  düşük puan alıyorlar.
+- **Windows EFI aracı `HybridPM.kext`'i henüz eklemiyor**; Windows'ta elle ekleyin.
 - **B570 test edilmedi**, yukarıdaki gibi.
-- **Zink üzerinden yerel OpenGL uygulamaları** (CGL/NSOpenGL) bu sürümde yok: Zink paketi hâlâ yalnız GLFW/EGL
-  uygulamalarına (LWJGL 3 oyunları) hizmet ediyor.
+- **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel ve uygulama başına: bütün uygulamalar için
+  bir anahtar yok; IOSurface'e çizim (tarayıcılar) ve CGL pbuffer'ları henüz desteklenmiyor.
 - Giriş ekranında ve kilit ekranında macOS parola alanının imlecini ve cam malzemesini her karede yeniden çiziyor; 180
   Hz bir monitörde saniyede yaklaşık 140 kare. Bu macOS'un kendi animasyonu; GPU zamanını yalnız o ekran açıkken
   harcıyor (ölçümleri oturum açıkken yapın).
