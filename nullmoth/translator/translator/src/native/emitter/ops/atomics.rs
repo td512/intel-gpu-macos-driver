@@ -46,6 +46,24 @@ impl Emitter {
         }
     }
 
+    /// Semantics of an AIR integer read-modify-write. AIR passes the Metal memory order as the third operand, and
+    /// 0 is memory_order_relaxed (Metal's only order for these, and OpenCL 1.2's atomic_inc/atomic_add): a relaxed
+    /// threadgroup add/sub/min/max/and/or/xor needs no ordering, so it is emitted Relaxed like the device ones
+    /// already are. AcquireRelease made Mesa fence SLM and wait for the atomic to complete on every one: clbench's
+    /// hist256 loop had a fence.slm and a wait per atomic_inc that IGC's has not. Exchange keeps AcquireRelease
+    /// (threadgroup spin locks are built on it), and so does any order that is not a literal 0.
+    pub(in crate::native::emitter) fn atomic_rmw_memory_semantics(
+        op: Op,
+        scope: Scope,
+        order: Option<i64>,
+    ) -> MemorySemantics {
+        if order == Some(0) && op != Op::AtomicExchange {
+            MemorySemantics::RELAXED
+        } else {
+            Self::atomic_i32_memory_semantics(scope, MemorySemantics::ACQUIRE_RELEASE)
+        }
+    }
+
     pub(in crate::native::emitter) fn atomic_i32_pointer_id(
         &mut self,
         ptr_arg: &TypedValue,
