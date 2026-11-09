@@ -84,38 +84,10 @@ static constexpr uint32_t MI_STORE_DATA_IMM = 0x20u << 23, MI_SDI_GGTT = 1u << 2
 static constexpr uint32_t MI_LRI_LRM_CS_MMIO = 1u << 19, MI_LRI_FORCE_POSTED = 1u << 12;
 static constexpr uint32_t CTX_CONTEXT_CONTROL = 3, CTX_RING_HEAD = 5, CTX_RING_TAIL = 7, CTX_RING_START = 9, CTX_RING_CTL = 11;
 
-// ─── families (xe_pci.c, xe_uc_fw.c, xe_wopcm.c, xe_mocs.c) ──────────────────────────────────────────────────────
-#include "xe_probe_ids.inc"   // kIds<FAMILY>[]: device ids from Linux include/drm/intel/pciids.h
-struct XpFamily {
-	const char *name;
-	const uint16_t *ids;
-	uint32_t nIds;
-	uint16_t gfx, media;     // verx100 for families without GMD_ID; 0 = read GMD_ID
-	bool dgfx;
-	uint32_t wopcm;          // xe_wopcm_size
-	const char *guc;         // XE_GUC_FIRMWARE_DEFS file stem: <stem>_guc_70.bin
-	uint8_t mocsUc;          // xe_mocs uc_index (GuC shim MOCS field on graphics >= 20)
-};
-#define XP_IDS(a) a, sizeof(a) / sizeof(a[0])
-static const XpFamily kFamilies[] = {
-	{"TGL", XP_IDS(kIdsTGL), 1200, 1200, false, 2u << 20, "tgl", 3},
-	{"RKL", XP_IDS(kIdsRKL), 1200, 1200, false, 2u << 20, "tgl", 3},
-	{"ADL-S", XP_IDS(kIdsADLS), 1200, 1200, false, 2u << 20, "tgl", 3},
-	{"RPL-S", XP_IDS(kIdsRPLS), 1200, 1200, false, 2u << 20, "tgl", 3},
-	{"ADL-P", XP_IDS(kIdsADLP), 1200, 1200, false, 2u << 20, "adlp", 3},
-	{"RPL-U", XP_IDS(kIdsRPLU), 1200, 1200, false, 2u << 20, "adlp", 3},
-	{"RPL-P", XP_IDS(kIdsRPLP), 1200, 1200, false, 2u << 20, "adlp", 3},
-	{"ADL-N", XP_IDS(kIdsADLN), 1200, 1200, false, 2u << 20, "tgl", 3},
-	{"DG1", XP_IDS(kIdsDG1), 1210, 1200, true, 4u << 20, "dg1", 1},
-	{"DG2", XP_IDS(kIdsDG2), 1255, 1255, true, 4u << 20, "dg2", 1},
-	{"ATS-M", XP_IDS(kIdsATSM), 1255, 1255, true, 4u << 20, "dg2", 1},
-	{"MTL", XP_IDS(kIdsMTL), 0, 0, false, 4u << 20, "mtl", 9},
-	{"ARL", XP_IDS(kIdsARL), 0, 0, false, 4u << 20, "mtl", 9},   // mtl_desc: platform METEORLAKE
-	{"LNL", XP_IDS(kIdsLNL), 0, 0, false, 8u << 20, "lnl", 3},
-	{"BMG", XP_IDS(kIdsBMG), 0, 0, true, 8u << 20, "bmg", 3},
-	{"PTL", XP_IDS(kIdsPTL), 0, 0, false, 8u << 20, "ptl", 3},
-	{"WCL", XP_IDS(kIdsWCL), 0, 0, false, 8u << 20, "ptl", 3},
-};
+// ─── families (xe_platform.cpp: xe_pci.c, xe_uc_fw.c, xe_wopcm.c, xe_mocs.c) ─────────────────────────────────────
+// The probe takes any entry, supported or not. It reads name, preGmdid* (IP versions of families without GMD_ID; 0 =
+// read GMD_ID), isDgfx, wopcmBytes, gucStem and mocsUcIndex.
+#include "xe_platform.h"
 
 // ─── state ───────────────────────────────────────────────────────────────────────────────────────────────────────
 enum { XP_NOTRUN = 0, XP_OK, XP_FAILED, XP_REFUSED, XP_STALLED, XP_RUNNING };
@@ -160,7 +132,7 @@ public:
 	IOMemoryMap *bar0 = nullptr;
 	volatile uint64_t *gsm = nullptr;
 	uint16_t devId = 0, revId = 0;
-	const XpFamily *fam = nullptr;
+	const XePlatformDesc *fam = nullptr;
 	uint32_t gfx = 0, media = 0, disp = 0;   // verx100
 	bool dgfx = false, mediaGt = false;
 	uint64_t ggttSize = 0, bar2Len = 0;
@@ -508,13 +480,8 @@ int XeProbe::stageIdentity(XpResult &r) {
 	}
 	if (IODeviceMemory *b2 = pci->getDeviceMemoryWithRegister(kIOPCIConfigBaseAddress2)) bar2Len = b2->getLength();
 
-	fam = nullptr;
-	for (const XpFamily &f : kFamilies)
-		for (uint32_t i = 0; i < f.nIds && !fam; i++)
-			if (f.ids[i] == devId) fam = &f;
-	if (!fam && gXpFamily[0])
-		for (const XpFamily &f : kFamilies)
-			if (!strcmp(f.name, gXpFamily)) fam = &f;
+	fam = xePlatformFind(devId);
+	if (!fam && gXpFamily[0]) fam = xePlatformByName(gXpFamily);
 	detail(r, "8086:%04x rev %02x %s", devId, revId, fam ? fam->name : "unknown family");
 
 	if (!(cmd & kIOPCICommandMemorySpace)) {
@@ -537,12 +504,12 @@ int XeProbe::stageIdentity(XpResult &r) {
 		media = (m && m != ~0u) ? ver(m) : 0;
 		mediaGt = media >= 1300;
 	} else if (fam) {
-		gfx = fam->gfx;
-		media = fam->media;
+		gfx = fam->preGmdidGraphics;
+		media = fam->preGmdidMedia;
 		mediaGt = false;
 	}
 	disp = (d && d != ~0u) ? ver(d) : 0;
-	dgfx = fam ? fam->dgfx : bar2Len > 0;
+	dgfx = fam ? fam->isDgfx : bar2Len > 0;
 	say("GMD_ID graphics 0x%08x media 0x%08x display 0x%08x -> graphics %u.%02u media %u.%02u%s display %u.%02u, %s\n", g, m,
 		d, gfx / 100, gfx % 100, media / 100, media % 100, mediaGt ? " (own GT)" : "", disp / 100, disp % 100,
 		dgfx ? "discrete" : "integrated");
@@ -673,14 +640,14 @@ int XeProbe::stageForcewake(XpResult &r) {
 
 // ─── stage 3: GuC ────────────────────────────────────────────────────────────────────────────────────────────────
 const uint8_t *XeProbe::gucImage(uint32_t *size, const char **name) {
-	*name = fam ? fam->guc : "?";
+	*name = fam ? fam->gucStem : "?";
 	if (!fam) return nullptr;
 	for (uint32_t i = 0; i < kXpFwCount; i++)
-		if (!strcmp(kXpFw[i].name, fam->guc)) {
+		if (!strcmp(kXpFw[i].name, fam->gucStem)) {
 			*size = kXpFw[i].size;
 			return kXpFw[i].data;
 		}
-	if (!strcmp(fam->guc, "bmg")) return intelxeGucImage(size);
+	if (!strcmp(fam->gucStem, "bmg")) return intelxeGucImage(size);
 	return nullptr;
 }
 
@@ -771,7 +738,7 @@ int XeProbe::stageGuc(XpResult &r) {
 		say("WOPCM locked: base 0x%x size 0x%x\n", wbase, wsize);
 	} else {
 		wbase = 16u << 10;
-		wsize = (fam->wopcm - (36u << 10) - wbase) & 0xfffff000;
+		wsize = (fam->wopcmBytes - (36u << 10) - wbase) & 0xfffff000;
 		wr(GUC_WOPCM_SIZE, wsize);
 		wr(DMA_GUC_WOPCM_OFFSET, wbase);
 		rs = rd(GUC_WOPCM_SIZE);
@@ -859,7 +826,7 @@ int XeProbe::stageGuc(XpResult &r) {
 	for (uint32_t i = 0; i < GUC_CTL_MAX_DWORDS; i++) wr(SOFT_SCRATCH0 + 4 * (1 + i), params[i]);
 	uint32_t shim = 1u << 1 | 1u << 9 | 1u << 10 | 1u << 15;   // READ_CACHE_LOGIC, SRAM/WOPCM read cache, MIA clock gating
 	if (gfx < 1250) shim |= 1u << 0 | 1u << 2;                 // DISABLE_SRAM_INIT_TO_ZEROES, MIA_CACHING
-	if (gfx >= 2000) shim |= (uint32_t)fam->mocsUc << 24;       // GUC_MOCS_INDEX
+	if (gfx >= 2000) shim |= (uint32_t)fam->mocsUcIndex << 24;  // GUC_MOCS_INDEX
 	wr(GUC_SHIM_CONTROL, shim);
 	wr(GT_PM_CONFIG, 1);                                       // GT_DOORBELL_ENABLE
 	wr(PMINTRMSK, rd(PMINTRMSK) & ~(1u << 9));                 // ARAT_EXPIRED_INTRMSK
