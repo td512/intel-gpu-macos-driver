@@ -3729,7 +3729,7 @@ static int vramClear(XeBo *bo) {
 			cmd[n++] = 0x1000 - 1;                                     // pitch - 1
 			cmd[n++] = (uint32_t)va;
 			cmd[n++] = (uint32_t)(va >> 32);
-			cmd[n++] = 3u << 3;                                        // XE2_MEM_SET_MOCS_INDEX: uc_index 3
+			cmd[n++] = (uint32_t)gXePlat->mocsUcIndex << 3;           // XE2_MEM_SET_MOCS_INDEX: uc_index
 			off += chunk;
 			if (n + 7 > kMax || (!b->link && off >= vblockSize(b))) {
 				err = queueSubmitKernel(gMigQ, 0, &bo->clear, cmd, n);
@@ -3840,7 +3840,7 @@ static int vramCopy(VBlock *src, VBlock *dst, uint64_t size, XeFence *out, bool 
 		cmd[n++] = (uint32_t)(sva >> 32);
 		cmd[n++] = (uint32_t)dva;
 		cmd[n++] = (uint32_t)(dva >> 32);
-		cmd[n++] = 3u << 28 | 3u << 3;                                  // source and destination MOCS: uc_index 3
+		cmd[n++] = (uint32_t)gXePlat->mocsUcIndex << 28 | (uint32_t)gXePlat->mocsUcIndex << 3;   // src, dst MOCS: uc_index
 		left -= chunk;
 		if ((so += chunk) == vblockSize(s)) s = s->link, so = 0;
 		if ((dof += chunk) == vblockSize(d)) d = d->link, dof = 0;
@@ -4680,11 +4680,12 @@ static int deviceQuery(drm_xe_device_query *q) {
 			// HAS_DISABLE_STATE_CACHE_PERF_FIX (the render queue property), as xe reports them. rb7r: + HAS_PURGING_SUPPORT,
 			// which xe sets unconditionally (xe_query.c query_config): DRM_IOCTL_XE_MADVISE purgeable state (vmMadvise).
 			// Not HAS_CPU_ADDR_MIRROR (no SVM / fault mode).
-			r.info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM | DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |
+			r.info[DRM_XE_QUERY_CONFIG_FLAGS] = (gXePlat->isDgfx ? DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM : 0) |
+				DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |
 				DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY | DRM_XE_QUERY_CONFIG_FLAG_HAS_DISABLE_STATE_CACHE_PERF_FIX |
 				DRM_XE_QUERY_CONFIG_FLAG_HAS_PURGING_SUPPORT;
 			r.info[DRM_XE_QUERY_CONFIG_MIN_ALIGNMENT] = 0x1000;
-			r.info[DRM_XE_QUERY_CONFIG_VA_BITS] = 48;
+			r.info[DRM_XE_QUERY_CONFIG_VA_BITS] = gXePlat->vaBits;
 			r.info[DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY] = 1;
 			return answer(q, &r, sizeof(r));
 		}
@@ -4695,14 +4696,14 @@ static int deviceQuery(drm_xe_device_query *q) {
 			r.g[0].reference_clock = gRefClock;
 			r.g[0].near_mem_regions = 1u << 1;
 			r.g[0].far_mem_regions = 1u << 0;
-			r.g[0].ip_ver_major = 20;
-			r.g[0].ip_ver_minor = 1;
-			if (gVideoWanted && gDev->mediaUp()) {   // the standalone media GT 13.01 (xe_query.c query_gt_list)
+			r.g[0].ip_ver_major = gXePlat->graphicsVerx100 / 100;   // xe reads GMD_ID; the descriptor's IP (20.01)
+			r.g[0].ip_ver_minor = gXePlat->graphicsVerx100 % 100;
+			if (gVideoWanted && gDev->mediaUp()) {   // the standalone media GT (xe_query.c query_gt_list), 13.01
 				r.g[1] = r.g[0];
 				r.g[1].type = DRM_XE_QUERY_GT_TYPE_MEDIA;
 				r.g[1].gt_id = 1;
-				r.g[1].ip_ver_major = 13;
-				r.g[1].ip_ver_minor = 1;
+				r.g[1].ip_ver_major = gXePlat->mediaVerx100 / 100;
+				r.g[1].ip_ver_minor = gXePlat->mediaVerx100 % 100;
 				r.g[1].ip_ver_rev = 1;
 				r.h.num_gt = 2;
 			}
@@ -5040,13 +5041,13 @@ static int vmBindRange(XeVm *vm, XeBo *bo, uint64_t off, uint64_t addr, uint64_t
 // compression. WAS: MAP only, 16-19 and 32+ refused, so 28-31 reached the PTEs, entries this driver (as xe) never
 // programs (IntelXe::programPatMocs writes 28). Mesa uses 0, 1, 6, 9 and 11 (intel_device_info XE2_PAT_ENTRIES; host
 // pointers: 1, cached-coherent), the same index for an unbind as for its bind.
-static constexpr uint32_t kPatEntries = 28;
 static constexpr uint32_t kPatComp = 0x0220de00u;                 // XE2_COMP_EN: 9-12, 14, 15, 21, 25
 static constexpr uint32_t kPatReserved = 0x000f0000u;             // 16-19: coh_mode 0
 static constexpr uint32_t kPatCoherent = 0x0cc000b6u;             // coh_mode 1-way or 2-way: 1, 2, 4, 5, 7, 22, 23, 26, 27
+// n_entries: gXePlat->patEntries. The three masks are xe2_pat_table's (graphics 20).
 static int patCheck(const drm_xe_vm_bind_op &op) {
 	const uint32_t bit = op.pat_index < 32 ? 1u << op.pat_index : 0;
-	if (op.pat_index >= kPatEntries || (bit & kPatReserved)) return EINVAL;
+	if (op.pat_index >= gXePlat->patEntries || (bit & kPatReserved)) return EINVAL;
 	const bool comp = bit & kPatComp;
 	if ((op.flags & DRM_XE_VM_BIND_FLAG_DECOMPRESS) && comp) return EINVAL;
 	if (op.op == DRM_XE_VM_BIND_OP_MAP_USERPTR && (!(bit & kPatCoherent) || comp)) return EINVAL;   // XE_COH_NONE, comp_en
@@ -5082,8 +5083,8 @@ static int bindOpCheck(const drm_xe_vm_bind_op &op) {
 		return EINVAL;
 	// xe_vm_bind_ioctl: range > vm->size || addr > vm->size - range (vm->size = 1 << va_bits, 48 as the query says).
 	// WAS missing: the page walk masks each level's index, so an address at or above 2^48 aliased a low one.
-	constexpr uint64_t kVmSize = 1ull << 48;
-	if (op.range > kVmSize || op.addr > kVmSize - op.range) return EINVAL;
+	const uint64_t vmSize = xePlatformVmSize(gXePlat);
+	if (op.range > vmSize || op.addr > vmSize - op.range) return EINVAL;
 	if (decomp) return EOPNOTSUPP;
 	return 0;
 }
@@ -5567,7 +5568,7 @@ static void pinChange(XeBo *bo, SInt32 d) {
 // needed (nothing pinned). runs == nullptr (v1): the range must be one physical run (*dpa).
 int xeScanoutPin(void *task, uint64_t va, uint64_t size, uint64_t *dpa, void **pin, IntelXeDpaRun *runs, uint32_t maxRuns,
 	uint32_t *nRuns) {
-	va &= (1ull << 48) - 1;   // vkGetBufferDeviceAddress is canonical (intel_canonical_address); binds are not
+	va &= xePlatformVmSize(gXePlat) - 1;   // vkGetBufferDeviceAddress is canonical (intel_canonical_address); binds are not
 	if (!task || !size || (va & 0xfff)) return EINVAL;
 	int err = ENOENT;
 	IOLockLock(gClientsLock);
@@ -5745,7 +5746,7 @@ static int pmCopyAll(bool toSys) {
 				cmd[n++] = 0x1000 - 1;                                     // pitch - 1
 				cmd[n++] = (uint32_t)sva;
 				cmd[n++] = (uint32_t)(sva >> 32);
-				cmd[n++] = 3u << 3;                                        // XE2_MEM_SET_MOCS_INDEX: uc_index 3
+				cmd[n++] = (uint32_t)gXePlat->mocsUcIndex << 3;           // XE2_MEM_SET_MOCS_INDEX: uc_index
 				o += chunk;
 				off += chunk;
 				if (n + 7 > kMax) {
@@ -6502,13 +6503,13 @@ static uint32_t svBlockCopy(uint32_t *cmd, const SvLayout &l, bool toSys, uint64
 	const uint32_t align = halign | 1u << 3;                                // VALIGN_4
 	uint32_t n = 0;
 	cmd[n++] = 2u << 29 | 0x41u << 22 | bpp << 19 | (22 - 2);
-	cmd[n++] = dstTile << 30 | 3u << 24 | dstPitch;
+	cmd[n++] = dstTile << 30 | (uint32_t)gXePlat->mocsUcIndex << 24 | dstPitch;   // MOCS index: uc_index
 	cmd[n++] = 0;                                     // dst X1, Y1
 	cmd[n++] = l.height << 16 | l.width;              // dst X2, Y2 (exclusive)
 	cmd[n++] = (uint32_t)dst; cmd[n++] = (uint32_t)(dst >> 32);
 	cmd[n++] = dstMem << 31;                          // dst X/Y offset 0, target memory
 	cmd[n++] = 0;                                     // src X1, Y1
-	cmd[n++] = srcTile << 30 | 3u << 24 | srcPitch;
+	cmd[n++] = srcTile << 30 | (uint32_t)gXePlat->mocsUcIndex << 24 | srcPitch;
 	cmd[n++] = (uint32_t)src; cmd[n++] = (uint32_t)(src >> 32);
 	cmd[n++] = srcMem << 31;
 	cmd[n++] = 0; cmd[n++] = 0;                       // src compression format / clear address: none
@@ -7390,7 +7391,7 @@ static int vmMadvise(XeClientState *c, const drm_xe_madvise &a) {
 	if ((a.start & 0xfff) || (a.range & 0xfff) || a.range < 0x1000) return EINVAL;
 	// ATOMIC and PAT: xe's checks (each on one line with its error, so tools/parity/uapi.py reads them as refused)
 	if (a.type == DRM_XE_MEM_RANGE_ATTR_ATOMIC && (a.atomic.val > DRM_XE_ATOMIC_CPU || a.atomic.pad || a.atomic.reserved)) return EINVAL;
-	if (a.type == DRM_XE_MEM_RANGE_ATTR_PAT && (a.pat_index.val >= 28 || (a.pat_index.val >= 16 && a.pat_index.val <= 19))) return EINVAL;
+	if (a.type == DRM_XE_MEM_RANGE_ATTR_PAT && (a.pat_index.val >= gXePlat->patEntries || (a.pat_index.val >= 16 && a.pat_index.val <= 19))) return EINVAL;
 	if (a.type == DRM_XE_MEM_RANGE_ATTR_PAT && (a.pat_index.pad || a.pat_index.reserved)) return EINVAL;
 	switch (a.type) {
 		case DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC: {
@@ -7420,8 +7421,9 @@ static int vmMadvise(XeClientState *c, const drm_xe_madvise &a) {
 		if (r) return EINVAL;
 	}
 	if (a.type == DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC && (int32_t)a.preferred_mem_loc.devmem_fd > 0) return ENOENT;
-	const uint64_t start = a.start & ((1ull << 48) - 1), end = start + a.range;   // xe_device_uncanonicalize_addr
-	if (end < start || end > 1ull << 48) return EINVAL;
+	const uint64_t vmSize = xePlatformVmSize(gXePlat);
+	const uint64_t start = a.start & (vmSize - 1), end = start + a.range;   // xe_device_uncanonicalize_addr
+	if (end < start || end > vmSize) return EINVAL;
 	bool any = false, purged = false;
 	for (uint32_t k = 0; k < vm->nBinds; k++) {
 		XeBinding &b = vm->binds[k];
