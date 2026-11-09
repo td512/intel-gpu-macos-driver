@@ -5,8 +5,10 @@
  */
 
 void nvmtl_texture_demote(NVMTLTexture *t);   // NVMTLObjects.m (rb7f)
+#include "nvmtl_plock.h"
 
-@interface NVMTLQueueReservation : NSObject { @public __weak NVMTLCommandBuffer *buffer; } @end
+// v2allAhead (NVMTL_LOCK_V2): every part of its command buffer has gone ahead, the pass no longer needs to look at it
+@interface NVMTLQueueReservation : NSObject { @public __weak NVMTLCommandBuffer *buffer; int v2allAhead; } @end
 @implementation NVMTLQueueReservation @end
 @interface NVMTLSubmissionPart : NSObject {
 @public
@@ -34,8 +36,25 @@ void nvmtl_texture_demote(NVMTLTexture *t);   // NVMTLObjects.m (rb7f)
     // B580 VRAM-shared surfaces this part writes (nvmtl_vk_anv_vram): no copy; their fences are attached and they are
     // marked newest (a CPU lock pages them off, readers see the new VRAM tag) when the part is submitted
     __unsafe_unretained NVMTLTexture *vpub[8]; unsigned nVpub; BOOL vpubDone;
+    int v2state;   // NVMTL_LOCK_V2: the pass / worker hand-off (NVMTL_PART_*, nvmtl_plock.h) that `claimed` was under the class lock
 }
 @end
+static BOOL nvmtl_async_commit_on(void);
+/* NVMTL_LOCK_V2=1 (nvmtl_plock.h): commit and the execution worker without the process-wide class lock. Per process,
+   from its own environment only (never the conf file: WindowServer keeps the class lock unless its own environment asks),
+   and only with the asynchronous worker (NVMTL_ASYNC_COMMIT=0 keeps the synchronous pump, under the class lock). */
+int nvmtl_lock_v2(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("NVMTL_LOCK_V2");
+        int v = nvmtl_plock_rule(e, getenv("NVMTL_CONF_SET"));
+        if (v && !nvmtl_async_commit_on()) v = 0;
+        on = v;
+        nvlog("commit: locking %s (NVMTL_LOCK_V2=%s, build default %d)", on ? "V2 - state lock, submit-ahead combiner, per-part hand-off; no class lock"
+              : "the command-buffer class lock", e ? e : "unset", NVMTL_LOCK_V2_DEFAULT);
+    }
+    return on;
+}
 /* SCHEDCENSUS (gpuperf, root- or user-owned /tmp/nvmtl-schedcensus): why a commit is scheduled late. Each refusal of the
    submit-ahead pass for the first part it cannot submit is counted by reason; waitUntilScheduled waits are timed and
    split by who scheduled the command buffer (the commit-time pass or the execution worker after it advanced to it); the
@@ -105,9 +124,22 @@ static NSMapTable *nvmtl_surface_writers;
 static id nvmtl_surface_writer_key(NVMTLTexture *t) {
     return @(((unsigned long long)IOSurfaceGetID(t->_surf) << 8) | ((unsigned long long)t->_plane & 0xff));
 }
+// NVMTL_LOCK_V2: the map has a lock of its own (recursive, as the class lock was: a writer released by the lookup may
+// take it again from its dealloc), so the worker's per-command-buffer finish no longer queues behind a commit's submit
+static pthread_mutex_t nvmtl_surface_writers_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+static BOOL nvmtl_surface_pending_write_locked(NVMTLCommandBuffer *cb, NVMTLTexture *t);
 static BOOL nvmtl_surface_pending_write(NVMTLCommandBuffer *cb, NVMTLTexture *t) {
     if (!cb || !t || !t->_surf) return NO;
-    @synchronized ([NVMTLCommandBuffer class]) {
+    if (nvmtl_lock_v2()) {
+        pthread_mutex_lock(&nvmtl_surface_writers_lock);
+        const BOOL r = nvmtl_surface_pending_write_locked(cb, t);
+        pthread_mutex_unlock(&nvmtl_surface_writers_lock);
+        return r;
+    }
+    @synchronized ([NVMTLCommandBuffer class]) { return nvmtl_surface_pending_write_locked(cb, t); }
+}
+static BOOL nvmtl_surface_pending_write_locked(NVMTLCommandBuffer *cb, NVMTLTexture *t) {
+    {
         id key = nvmtl_surface_writer_key(t);
         for (id queue in nvmtl_surface_writers.keyEnumerator) {
             NSDictionary *writes = [nvmtl_surface_writers objectForKey:queue];
@@ -120,10 +152,24 @@ static BOOL nvmtl_surface_pending_write(NVMTLCommandBuffer *cb, NVMTLTexture *t)
         return NO;
     }
 }
+static void nvmtl_surface_register_writes_locked(NVMTLCommandBuffer *cb);
 static void nvmtl_surface_register_writes(NVMTLCommandBuffer *cb) {
+    if (nvmtl_lock_v2()) {
+        BOOL any = NO;   // most command buffers write no IOSurface: no lock for them
+        for (NVMTLSubmissionPart *part in cb->_parts)
+            if ([part isKindOfClass:[NVMTLSubmissionPart class]] && part->surfaces.count) { any = YES; break; }
+        if (!any) return;
+        pthread_mutex_lock(&nvmtl_surface_writers_lock);
+        nvmtl_surface_register_writes_locked(cb);
+        pthread_mutex_unlock(&nvmtl_surface_writers_lock);
+        return;
+    }
     // The same lock as pending_write and finish_writes, taken here too: the map is shared with the completion thread, and
     // its one caller holding this (recursive) lock today must not be what keeps WindowServer's heap intact.
-    @synchronized ([NVMTLCommandBuffer class]) {
+    @synchronized ([NVMTLCommandBuffer class]) { nvmtl_surface_register_writes_locked(cb); }
+}
+static void nvmtl_surface_register_writes_locked(NVMTLCommandBuffer *cb) {
+    {
         if (!nvmtl_surface_writers) nvmtl_surface_writers = [NSMapTable weakToStrongObjectsMapTable];
         NSMutableDictionary *writes = [nvmtl_surface_writers objectForKey:cb->_queue];
         for (NVMTLSubmissionPart *part in cb->_parts) for (NVMTLTexture *t in part->surfaces) {
@@ -394,16 +440,23 @@ static void nvmtl_ws_mark_ready(NVMTLCommandBuffer *cb) {
     objc_setAssociatedObject(cb, nvmtl_ws_marks_key, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     (void)nvmtl_ws_publish_settled(settled, nil);
 }
+static void nvmtl_surface_finish_writes_locked(NVMTLCommandBuffer *cb) {
+    NSMutableDictionary *writes = [nvmtl_surface_writers objectForKey:cb->_queue];
+    for (id key in [writes.allKeys copy]) {
+        NVMTLPendingSurfaceWrite *write = writes[key];
+        if (!write->buffer || write->buffer == cb) [writes removeObjectForKey:key];
+    }
+    if (!writes.count) [nvmtl_surface_writers removeObjectForKey:cb->_queue];
+}
 static void nvmtl_surface_finish_writes(NVMTLCommandBuffer *cb) {
     nvmtl_ws_mark_ready(cb);
-    @synchronized ([NVMTLCommandBuffer class]) {
-        NSMutableDictionary *writes = [nvmtl_surface_writers objectForKey:cb->_queue];
-        for (id key in [writes.allKeys copy]) {
-            NVMTLPendingSurfaceWrite *write = writes[key];
-            if (!write->buffer || write->buffer == cb) [writes removeObjectForKey:key];
-        }
-        if (!writes.count) [nvmtl_surface_writers removeObjectForKey:cb->_queue];
+    if (nvmtl_lock_v2()) {
+        pthread_mutex_lock(&nvmtl_surface_writers_lock);
+        if (nvmtl_surface_writers.count) nvmtl_surface_finish_writes_locked(cb);
+        pthread_mutex_unlock(&nvmtl_surface_writers_lock);
+        return;
     }
+    @synchronized ([NVMTLCommandBuffer class]) { nvmtl_surface_finish_writes_locked(cb); }
 }
 
 // NVMTL_SURFOUT_FOLD=0: an app's IOSurface write is copied out after its part finishes, in a submission of its own that
@@ -576,6 +629,13 @@ static void nvmtl_fold_release(NVMTLSubmissionPart *part);
 static NSMutableArray<NVMTLCommandBuffer *> *nvmtl_pending_buffers;
 static BOOL nvmtl_pumping;
 static void nvmtl_pump_buffers(void);
+/* NVMTL_LOCK_V2 (nvmtl_plock.h). The state lock guards nvmtl_pending_buffers, nvmtl_pumping, nvmtl_pump_generation, every
+   queue's _reservations and each command buffer's _reservation and _v2pending. It is a leaf: nothing under it submits,
+   waits, takes another of these locks, or lets go of the last reference to a command buffer (their dealloc takes it):
+   command buffers read from a weak reservation under it are __autoreleasing, released when an outer pool drains. The
+   submit-ahead pass runs under the combiner (gV2Ahead), which nobody waits for. */
+static os_unfair_lock gV2State = OS_UNFAIR_LOCK_INIT;
+static nvmtl_combiner gV2Ahead = NVMTL_COMBINER_INIT;
 static BOOL nvmtl_async_commit_on(void) {
     static int on = -1;
     if (on < 0) { const char *e = getenv("NVMTL_ASYNC_COMMIT"); on = !(e && e[0] == '0');
@@ -744,6 +804,8 @@ static int nvmtl_skip_empty_on(void) {
     }
 }
 - (void)nvmtlFinishExecution:(NSError *)error {
+    // V2: no submit-ahead pass is inside this command buffer from here on (its parts are released below)
+    if (nvmtl_lock_v2()) nvmtl_cb_finish_gate(&_v2busy, &_v2fin);
     if (_scheduleAfterPublish) { _scheduleAfterPublish = NO; [self nvmtlMarkScheduled]; }
     for (NSUInteger i = _nextPart; i < _parts.count; i++) {
         NVMTLSubmissionPart *p = _parts[i];
@@ -995,6 +1057,82 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
     }
     return YES;
 }
+// NVMTL_LOCK_V2: the same pass for one command buffer, under the combiner instead of the class lock. The worker may claim
+// a part at any time, so each part is taken first (FREE -> SUBMITTING) and let go as AHEAD once the pass has done with it
+// (or FREE if it left it as it was); the command buffer's _parts are touched only inside the gate (enter/leave), which
+// nvmtlFinishExecution closes before it releases them. Returns YES when nothing of it holds back the queue's later
+// command buffers: all its parts have gone ahead, or it has finished.
+- (BOOL)nvmtlSubmitAheadV2Inside {
+    if (_cbError || !__atomic_load_n(&_committed, __ATOMIC_ACQUIRE) || __atomic_load_n(&_commitMarking, __ATOMIC_ACQUIRE)) {
+        nvmtl_sc_refuse(__atomic_load_n(&_commitMarking, __ATOMIC_RELAXED) ? SC_MARKING : SC_NOTCOMMITTED); return NO; }
+    const NSUInteger done = __atomic_load_n(&_nextPart, __ATOMIC_ACQUIRE);
+    if (_nextSubmit < done) _nextSubmit = done;
+    while (_nextSubmit < _parts.count) {
+        if (atomic_load(&gsub_inflight) >= nvmtl_gsub_cap()) { nvmtl_sc_refuse(SC_CAP); return NO; }
+        NVMTLSubmissionPart *part = _parts[_nextSubmit];
+        if (![part isKindOfClass:[NVMTLSubmissionPart class]]) return NO;
+        const int was = nvmtl_part_take(&part->v2state);
+        if (was == NVMTL_PART_AHEAD) { _nextSubmit++; continue; }
+        if (was != NVMTL_PART_FREE) { nvmtl_sc_refuse(SC_CLAIMED); return NO; }   // the worker runs it
+        if (part->waitEvent) {
+            if (!nvmtl_evfold_on() || nvmtl_evfold_promised(part->waitEvent) < part->value) {
+                nvmtl_part_release(&part->v2state, NVMTL_PART_FREE); nvmtl_sc_refuse(SC_EVENT); return NO; }
+            part->waitFolded = YES; nvmtl_part_release(&part->v2state, NVMTL_PART_AHEAD);
+            _nextSubmit++; nvmtl_evfold_census(&gEvFold, "event waits ordered by the channel (no CPU hold)");
+            continue;
+        }
+        if (!part->commands.cb) { nvmtl_part_release(&part->v2state, NVMTL_PART_FREE); nvmtl_sc_refuse(SC_NOCMDS); return NO; }
+        if (!part->encoders && !part->resources.count && !part->surfaces.count && !part->scratch.count && nvmtl_skip_empty_on()) {
+            // as nvmtlSubmitAhead: an empty part is scheduled here even when it is the command buffer's last
+            static int last_ok = -1; if (last_ok < 0) { const char *e = getenv("NVMTL_EMPTY_AHEAD"); last_ok = !(e && e[0] == '0'); }
+            if (!nvmtl_evfold_on() || (!last_ok && _nextSubmit + 1 >= _parts.count)) { nvmtl_part_release(&part->v2state, NVMTL_PART_FREE); return NO; }
+            [self nvmtlMarkScheduled];
+            if (!_legacyKernelStart) _legacyKernelStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
+            nvmtl_vk_cmd_abandon(&part->commands);
+            part->aheadEmpty = YES;
+            nvmtl_evfold_promise_part(part);
+            nvmtl_part_release(&part->v2state, NVMTL_PART_AHEAD); _nextSubmit++;
+            nvmtl_evfold_census(&gEvFoldEmpty, "empty split parts retired by the ahead pass");
+            continue;
+        }
+        nvmtl_prepare_submission_copies(part);
+        {
+            static int hold = -1;
+            if (hold < 0) { const char *e = getenv("NVMTL_GSUB_HOSTPTR_LIFT"); hold = (e && *e && *e != '0') ? 0 : 1; }
+            if (hold && part->hasHostCopies) { nvmtl_part_release(&part->v2state, NVMTL_PART_FREE); nvmtl_sc_refuse(SC_HOSTCOPY); return NO; }
+        }
+        nvmtl_inflight *f = nvmtl_vk_inflight_new();
+        if (!f) { nvmtl_part_release(&part->v2state, NVMTL_PART_FREE); return NO; }
+        for (NVMTLBuffer *buffer in part->copyInputs) nvmtl_buffer_sync_in(buffer);
+        if (!part->isyncPublish) [self nvmtlMarkScheduled];   // else once its surfaces are published (on_submit)
+        if (!_legacyKernelStart) _legacyKernelStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
+        const int r = nvmtl_vk_submit_begin(&part->commands, f);
+        if (part->isyncPublish) [self nvmtlMarkScheduled];   // a failed submit is scheduled (and fails) all the same
+        _nextSubmit++;
+        if (r) {
+            nvmtl_vk_inflight_free(f);
+            part->aheadFailed = r;
+            nvmtl_part_release(&part->v2state, NVMTL_PART_AHEAD);
+            return NO;
+        }
+        part->inflight = f;
+        nvmtl_evfold_promise_part(part);   // before AHEAD: the worker may complete the part as soon as it sees it
+        nvmtl_part_release(&part->v2state, NVMTL_PART_AHEAD);
+        const unsigned long long n = atomic_fetch_add(&gsub_inflight, 1) + 1;
+        if (n > atomic_load(&gsub_peak)) atomic_store(&gsub_peak, n);
+        atomic_fetch_add(&gsub_ahead, 1);
+        nvmtl_gsub_census();
+    }
+    return YES;
+}
+- (BOOL)nvmtlSubmitAheadV2 {
+    if (!nvmtl_cb_enter(&_v2busy, &_v2fin)) return YES;   // finished (or finishing): nothing left of it to hold back
+    const BOOL all = [self nvmtlSubmitAheadV2Inside];
+    // the reservation stays while the gate is open (the worker lets it go only after nvmtlFinishExecution)
+    if (all) { NVMTLQueueReservation *r = _reservation; if (r) __atomic_store_n(&r->v2allAhead, 1, __ATOMIC_RELAXED); }
+    nvmtl_cb_leave(&_v2busy);
+    return all;
+}
 static void nvmtl_gsub_ahead_pass1(void);
 static void nvmtl_gsub_ahead_pass(void) {
     for (int round = 0; round < 64; round++) {
@@ -1016,12 +1154,61 @@ static void nvmtl_gsub_ahead_pass1(void) {
         }
     }
 }
+// NVMTL_LOCK_V2: one pass over the queues with pending command buffers. Under the state lock only the command buffers to
+// try are collected (no allocation, no submit): per queue, in reservation order, those whose parts have not all gone
+// ahead yet. They are tried after it, in the same order; a queue stops at the first one that holds it back.
+static void nvmtl_v2_ahead_pass1(void) { @autoreleasepool {
+    enum { MAXQ = 16, MAXB = 160, PERQ = 48 };
+    __unsafe_unretained NVMTLCommandBuffer *bufs[MAXB]; unsigned nb = 0;
+    __unsafe_unretained NVMTLCommandQueue *qs[MAXQ]; unsigned nq = 0;
+    nvmtl_plock_lock(&gV2State);
+    for (__unsafe_unretained NVMTLCommandBuffer *cb in nvmtl_pending_buffers) {
+        __unsafe_unretained NVMTLCommandQueue *q = cb->_queue;
+        if (!q) continue;
+        BOOL seen = NO;
+        for (unsigned k = 0; k < nq; k++) if (qs[k] == q) { seen = YES; break; }
+        if (seen) continue;
+        if (nq == MAXQ || nb + 1 >= MAXB) break;
+        qs[nq++] = q;
+        unsigned per = 0;
+        for (__unsafe_unretained NVMTLQueueReservation *r in q->_reservations) {
+            if (__atomic_load_n(&r->v2allAhead, __ATOMIC_RELAXED)) continue;
+            if (per == PERQ || nb + 1 >= MAXB) break;
+            __autoreleasing NVMTLCommandBuffer *b = r->buffer;   // kept by this pass's pool, never released under the lock
+            if (!b) continue;
+            bufs[nb++] = b; per++;
+        }
+        bufs[nb++] = nil;   // end of this queue
+    }
+    os_unfair_lock_unlock(&gV2State);
+    BOOL stop = NO;
+    for (unsigned i = 0; i < nb; i++) {
+        if (!bufs[i]) { stop = NO; continue; }
+        if (!stop && ![bufs[i] nvmtlSubmitAheadV2]) stop = YES;
+    }
+} }
+static void nvmtl_v2_ahead_pass(void *ctx) {
+    (void)ctx;
+    for (int round = 0; round < 64; round++) {   // as nvmtl_gsub_ahead_pass: again while event waits got folded
+        const unsigned long long before = atomic_load(&gEvFold);
+        nvmtl_v2_ahead_pass1();
+        if (atomic_load(&gEvFold) == before) break;
+    }
+}
+// run the pass here, or have the thread running it run it again; never waits
+static void nvmtl_v2_ahead(void) { nvmtl_combine(&gV2Ahead, nvmtl_v2_ahead_pass, NULL, 8); }
 - (BOOL)nvmtlAdvancePart {
     if (_executionDone) return NO;
     if (_cbError) { [self nvmtlFinishExecution:_cbError]; return YES; }
     if (_nextPart >= _parts.count) { [self nvmtlFinishExecution:nil]; return YES; }
     NVMTLSubmissionPart *part = _parts[_nextPart];
     BOOL ahead;   // claimed under the class lock: the commit-time pass stops at a claimed part
+    const BOOL v2 = nvmtl_lock_v2();
+    int v2took = NVMTL_PART_AHEAD;
+    if (v2) {   // V2: the per-part hand-off; a part the pass is submitting right now is waited for (one vkQueueSubmit)
+        v2took = nvmtl_part_claim(&part->v2state);
+        ahead = part->inflight || part->aheadFailed; part->claimed = YES;
+    } else
     @synchronized ([NVMTLCommandBuffer class]) { ahead = part->inflight || part->aheadFailed; part->claimed = YES; }
     if (part->waitEvent && !ahead && !part->waitFolded) {
         if (![part->waitEvent respondsToSelector:@selector(signaledValue)]) {
@@ -1030,7 +1217,10 @@ static void nvmtl_gsub_ahead_pass1(void) {
             return YES;
         }
         uint64_t have = ((uint64_t(*)(id,SEL))objc_msgSend)(part->waitEvent,@selector(signaledValue));
-        if (have < part->value) { @synchronized ([NVMTLCommandBuffer class]) { part->claimed = NO; } return NO; }
+        if (have < part->value) {
+            if (v2) { part->claimed = NO; if (v2took == NVMTL_PART_WORKER) nvmtl_part_unclaim(&part->v2state); return NO; }
+            @synchronized ([NVMTLCommandBuffer class]) { part->claimed = NO; } return NO;
+        }
     }
     if (!ahead && part->commands.cb && !part->encoders && !part->resources.count && !part->surfaces.count && !part->scratch.count && nvmtl_skip_empty_on()) {
         [self nvmtlMarkScheduled];
@@ -1104,12 +1294,51 @@ static void nvmtl_gsub_ahead_pass1(void) {
         }
         ((void(*)(id,SEL,uint64_t))objc_msgSend)(event, @selector(setSignaledValue:), [s[1] unsignedLongLongValue]);
     }
-    _parts[_nextPart++] = [NSNull null];
+    if (v2) { _parts[_nextPart] = [NSNull null]; __atomic_store_n(&_nextPart, _nextPart + 1, __ATOMIC_RELEASE); }   // the pass reads it
+    else _parts[_nextPart++] = [NSNull null];
     if (_nextPart == _parts.count) { nvtrace("COMPLETE cb %p t=%llu", (__bridge void *)self, (unsigned long long)(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000));
         [self nvmtlFinishExecution:nil]; }
     return YES;
 }
-- (void)nvmtlSubmitWithEvents { @autoreleasepool {   // the committing thread may have no pool of its own (see nvmtl_pump_buffers)
+// NVMTL_LOCK_V2 commit: the same steps as below, with the class lock's two sections replaced by short state-lock ones
+// (reserve + committed; marking off + pending) and nothing submitted under any lock. Until _commitMarking is cleared
+// (release, after the seal and the kernel marks) the pass refuses this command buffer, as the class lock made it wait.
+static void nvmtl_pump_v2(void);
+- (void)nvmtlSubmitWithEventsV2 { @autoreleasepool {
+    NVMTLQueueReservation *mine = nil;
+    if (!_reservation) { mine = [NVMTLQueueReservation new]; mine->buffer = self; }   // made outside the lock
+    nvmtl_plock_lock(&gV2State);
+    if (_committed) { os_unfair_lock_unlock(&gV2State); return; }
+    if (!_reservation && mine) {
+        if (!_queue->_reservations) _queue->_reservations = [NSMutableArray new];
+        [_queue->_reservations addObject:mine]; _reservation = mine;
+    }
+    __atomic_store_n(&_commitMarking, YES, __ATOMIC_RELAXED);
+    __atomic_store_n(&_committed, YES, __ATOMIC_RELEASE);
+    os_unfair_lock_unlock(&gV2State);
+    if (!__atomic_load_n(&_rep, __ATOMIC_ACQUIRE)) __atomic_store_n(&_rep, nvmtl_ep_enter(), __ATOMIC_RELEASE);
+    [_completionCondition lock]; _cbstatus = MTLCommandBufferStatusCommitted; [_completionCondition unlock];
+    [self nvmtlSealPartWithSignal:nil value:0 restart:NO];
+    if (_scheduleAfterPublish) for (NVMTLSubmissionPart *p in _parts)   // as below
+        if ([p isKindOfClass:[NVMTLSubmissionPart class]] && p->waitEvent) {
+            _scheduleAfterPublish = NO;
+            static _Atomic unsigned said; if (atomic_fetch_add(&said, 1) < 4)
+                nvlog("surface writes: a command buffer that waits for an event is scheduled at submission (its surfaces are published at completion)");
+            break;
+        }
+    nvmtl_ws_mark_pending(self);
+    nvmtl_ws_note_captures(self);
+    nvmtl_surface_register_writes(self);   // before the pass may submit it (marking still on)
+    nvmtl_plock_lock(&gV2State);
+    if (!nvmtl_pending_buffers) nvmtl_pending_buffers = [NSMutableArray new];
+    [nvmtl_pending_buffers addObject:self]; _v2pending = YES;
+    __atomic_store_n(&_commitMarking, NO, __ATOMIC_RELEASE);
+    os_unfair_lock_unlock(&gV2State);
+    nvmtl_pump_v2();
+} }
+- (void)nvmtlSubmitWithEvents {
+    if (nvmtl_lock_v2()) { [self nvmtlSubmitWithEventsV2]; return; }
+    @autoreleasepool {   // the committing thread may have no pool of its own (see nvmtl_pump_buffers)
     @synchronized ([NVMTLCommandBuffer class]) {
         if (_committed) return;
         [self nvmtlReserveQueue];
@@ -1139,7 +1368,8 @@ static void nvmtl_gsub_ahead_pass1(void) {
         [nvmtl_pending_buffers addObject:self];
         nvmtl_pump_buffers();
     }
-} }
+    }
+}
 @end
 
 static void nvmtl_pump_buffers_sync(void) {
@@ -1174,6 +1404,7 @@ static BOOL nvmtl_commit_ahead_on(void) {
     return on;
 }
 static void nvmtl_pump_buffers(void) {
+    if (nvmtl_lock_v2()) { nvmtl_pump_v2(); return; }
     static dispatch_once_t once; static dispatch_queue_t worker;
     const BOOL async = nvmtl_async_commit_on();
     if (async) dispatch_once(&once, ^{ worker = dispatch_queue_create("nvmtl.execution", DISPATCH_QUEUE_SERIAL); });
@@ -1234,6 +1465,93 @@ static void nvmtl_pump_buffers(void) {
             } }
         });
     }
+}
+
+/* NVMTL_LOCK_V2 execution worker. Per round: the submit-ahead pass (or a request to whoever runs it), then, under the
+   state lock, the head command buffer of each queue that has a pending one (only a head can be advanced: the queue's
+   first reservation); each is advanced outside any lock, and one that finished is let go under the lock (reservation,
+   pending list) before its callbacks are dispatched, on this one thread, so a queue's completions keep their order.
+   The worker stops when a round made no progress and nothing was committed or signalled meanwhile (the generation),
+   as the class-lock worker does. Command buffers read through weak reservations are autoreleased into the round's
+   pool: their last release happens after the lock, where their dealloc may take it. */
+static void nvmtl_v2_worker(void) {
+    for (;;) { @autoreleasepool {
+        nvmtl_vk_clock_refresh();
+        if (nvmtl_gsub_ahead_on()) nvmtl_v2_ahead();
+        enum { MAXH = 32 };
+        __unsafe_unretained NVMTLCommandBuffer *heads[MAXH]; unsigned nh = 0;
+        __unsafe_unretained NVMTLCommandQueue *seen[MAXH]; unsigned ns = 0;
+        uint64_t generation;
+        nvmtl_plock_lock(&gV2State);
+        generation = nvmtl_pump_generation;
+        for (__unsafe_unretained NVMTLCommandBuffer *cb in nvmtl_pending_buffers) {
+            __unsafe_unretained NVMTLCommandQueue *q = cb->_queue;
+            BOOL dup = NO;
+            for (unsigned k = 0; k < ns; k++) if (seen[k] == q) { dup = YES; break; }
+            if (dup) continue;
+            if (ns == MAXH) break;   // more queues than this: the rest next round (progress keeps the worker going)
+            seen[ns++] = q;
+            NSMutableArray *res = q->_reservations;
+            __autoreleasing NVMTLCommandBuffer *head = nil;
+            while (res.count) {   // reservations whose command buffer is gone (released uncommitted)
+                __unsafe_unretained NVMTLQueueReservation *first = res.firstObject;
+                head = first->buffer;
+                if (head) break;
+                [res removeObjectAtIndex:0];
+            }
+            if (head && head->_v2pending) heads[nh++] = head;
+        }
+        os_unfair_lock_unlock(&gV2State);
+        BOOL progress = NO;
+        for (unsigned i = 0; i < nh; i++) {
+            NVMTLCommandBuffer *cb = heads[i];
+            sc_on_worker = 1;
+            if ([cb nvmtlAdvancePart]) progress = YES;
+            sc_on_worker = 0;
+            if (!cb->_executionDone) continue;
+            nvmtl_plock_lock(&gV2State);
+            id r = cb->_reservation;
+            if (r) {
+                NSMutableArray *res = cb->_queue->_reservations;
+                if (res.firstObject == r) [res removeObjectAtIndex:0];
+                else [res removeObjectIdenticalTo:r];
+            }
+            const NSUInteger at = [nvmtl_pending_buffers indexOfObjectIdenticalTo:cb];
+            if (at != NSNotFound) [nvmtl_pending_buffers removeObjectAtIndex:at];   // heads[] keeps it (autoreleased)
+            cb->_v2pending = NO;
+            os_unfair_lock_unlock(&gV2State);
+            cb->_reservation = nil;   // the reservation's last reference, outside the lock (the worker alone writes it now)
+            r = nil;
+            [cb nvmtlFinishCallbacks];
+        }
+        if (progress) continue;
+        nvmtl_plock_lock(&gV2State);
+        const BOOL quit = generation == nvmtl_pump_generation;
+        if (quit) nvmtl_pumping = NO;
+        os_unfair_lock_unlock(&gV2State);
+        if (quit) return;
+    } }
+}
+static BOOL nvmtl_commit_ahead_idle_on(void) {
+    static int idle = -1;
+    if (idle < 0) { const char *e = getenv("NVMTL_COMMIT_AHEAD_IDLE"); idle = !(e && e[0] == '0');
+        nvlog("commit: an idle worker's first submit %s (NVMTL_COMMIT_AHEAD_IDLE=%s)", idle ? "is made at commit" : "waits for the worker", e ? e : "unset"); }
+    return idle;
+}
+/* NVMTL_LOCK_V2 pump: note the new work (generation) under the state lock, run the submit-ahead pass on this thread
+   (in a pool of its own: the committing thread may have none, see nvmtl_pump_buffers), and start the worker if it is
+   idle. The pass never blocks here: if another thread is running it, that thread runs it again for us. */
+static void nvmtl_pump_v2(void) {
+    static dispatch_once_t once; static dispatch_queue_t worker;
+    dispatch_once(&once, ^{ worker = dispatch_queue_create("nvmtl.execution", DISPATCH_QUEUE_SERIAL); });
+    nvmtl_plock_lock(&gV2State);
+    if (!nvmtl_pending_buffers.count) { os_unfair_lock_unlock(&gV2State); return; }
+    ++nvmtl_pump_generation;
+    const BOOL start = !nvmtl_pumping;
+    if (start) nvmtl_pumping = YES;
+    os_unfair_lock_unlock(&gV2State);
+    if (nvmtl_commit_ahead_on() && nvmtl_gsub_ahead_on() && (!start || nvmtl_commit_ahead_idle_on())) { @autoreleasepool { nvmtl_v2_ahead(); } }
+    if (start) dispatch_async(worker, ^{ nvmtl_v2_worker(); });
 }
 
 static uint64_t nvmtl_event_read(NSCondition *condition, uint64_t *storage) {

@@ -148,6 +148,9 @@ extern id gNVMTLMainDevice;
   NSUInteger _nextPart;
   NSUInteger _nextSubmit;
   id _reservation;
+  // NVMTL_LOCK_V2 (nvmtl_plock.h): the submit-ahead pass is inside this command buffer (busy) / it has finished or is
+  // finishing (fin); it is in nvmtl_pending_buffers (pending, under the state lock)
+  int _v2busy, _v2fin; BOOL _v2pending;
   NSCondition *_completionCondition;
   dispatch_group_t _callbackGroup, _scheduledGroup;
   BOOL _wasScheduled, _executionDone, _completionReady, _scheduleAfterPublish;
@@ -168,6 +171,7 @@ extern id gNVMTLMainDevice;
 - (void)nvmtlSubmitWithEvents;
 - (BOOL)nvmtlAdvancePart;
 - (BOOL)nvmtlSubmitAhead;
+- (BOOL)nvmtlSubmitAheadV2;
 - (void)nvmtlReleaseCapacity;
 - (void)nvmtlRecordEncodingError:(NSError *)error;
 - (void)nvmtlFinishCallbacks;
