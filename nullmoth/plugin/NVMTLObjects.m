@@ -6430,6 +6430,21 @@ destinationBytesPerImage:(NSUInteger)img options:(MTLBlitOption)opt {
     [_completionCondition unlock];
 }
 - (void)enqueue {
+    if (nvmtl_lock_v2()) {   // NVMTL_LOCK_V2: the queue's place under the state lock (NVMTLEventSync.m)
+        NVMTLQueueReservation *mine = _reservation ? nil : [NVMTLQueueReservation new];
+        if (mine) mine->buffer = self;
+        nvmtl_plock_lock(&gV2State);
+        _nEnqueue++;
+        if (!_reservation && mine && !_committed) {
+            if (!_queue->_reservations) _queue->_reservations = [NSMutableArray new];
+            [_queue->_reservations addObject:mine]; _reservation = mine;
+        }
+        os_unfair_lock_unlock(&gV2State);
+        [_completionCondition lock];
+        if (_cbstatus == MTLCommandBufferStatusNotEnqueued) _cbstatus = MTLCommandBufferStatusEnqueued;
+        [_completionCondition unlock];
+        return;
+    }
     @synchronized ([NVMTLCommandBuffer class]) {
         _nEnqueue++; [self nvmtlReserveQueue];
         [_completionCondition lock];
@@ -6468,6 +6483,21 @@ NVMTL_G4_FIX(nvmtl_uncommitted_handlers_on, "NVMTL_UNCOMMITTED_HANDLERS", "handl
     nvmtl_res2_cb_done(self);
     if (!_committed && _c.cb) nvmtl_vk_cmd_abandon(&_c);
     [self nvmtlReleaseCapacity];
+    if (nvmtl_lock_v2()) {
+        // NVMTL_LOCK_V2: a completed command buffer let go of its reservation on the worker, and nothing waits for it
+        // here: no lock and no pump (both were ~20% of the worker under cbcost, where the worker frees the command
+        // buffers). An enqueued one released uncommitted gives its place up and the queue moves on.
+        if (_reservation) {
+            nvmtl_plock_lock(&gV2State);
+            NSMutableArray *res = _queue->_reservations;
+            const NSUInteger at = [res indexOfObjectIdenticalTo:_reservation];
+            if (at != NSNotFound) [res removeObjectAtIndex:at];
+            os_unfair_lock_unlock(&gV2State);
+            _reservation = nil;
+            nvmtl_pump_buffers();
+        }
+        return;
+    }
     @synchronized ([NVMTLCommandBuffer class]) {
         [self nvmtlReleaseReservation];
         nvmtl_pump_buffers();
