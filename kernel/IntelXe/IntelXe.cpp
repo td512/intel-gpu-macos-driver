@@ -76,6 +76,8 @@ const uint8_t *intelxeGucImage(uint32_t *size) {
 OSDefineMetaClassAndStructors(IntelXe, IOService)
 
 IntelXe *gDev;
+const XePlatformDesc *gXePlat;
+uint16_t gXePlatId;
 IOLock *gDevLock, *gH2gLock[2], *gG2hLock[2], *gFwLock, *gSayLock, *gDispLock;
 XeEngine gEngines[8];
 uint32_t gNumEngines;
@@ -470,6 +472,30 @@ SYSCTL_PROC(_debug_intelxe, OID_AUTO, dump, CTLTYPE_STRING | CTLFLAG_RD | CTLFLA
 #define INTELXE_REG_OID(n) sysctl_register_oid(&sysctl__debug_intelxe_##n);
 #define INTELXE_UNREG_OID(n) sysctl_unregister_oid(&sysctl__debug_intelxe_##n);
 
+// xe_pci_probe: the device's descriptor (xe_platform.cpp), looked up once. The id comes from config space; a card that
+// does not answer yet (rb7u: 0xffff in the first seconds of a macOS 26 boot) is looked up by the PCI family's
+// "device-id", read at enumeration as Linux's pdev->device is. nullptr: no entry for either.
+static const XePlatformDesc *platformOf(IOPCIDevice *pci, uint16_t *id) {
+	*id = pci->configRead16(kIOPCIConfigDeviceID);
+	const XePlatformDesc *d = xePlatformFind(*id);
+	if (!d) {
+		OSData *p = OSDynamicCast(OSData, pci->getProperty("device-id"));
+		if (p && p->getLength() >= 2) {
+			*id = *static_cast<const uint16_t *>(p->getBytesNoCopy());
+			d = xePlatformFind(*id);
+		}
+	}
+	return d;
+}
+
+// xe_uc_fw.c picks the file per platform; here the GuC and HuC images are built in (build.py): the descriptor must name
+// those files ("xe/bmg_guc_70.bin" ends in kGucFwName).
+static bool fwIs(const char *path, const char *builtIn) {
+	if (!path) return false;
+	const size_t n = strlen(path), m = strlen(builtIn);
+	return n > m && path[n - m - 1] == '/' && !strcmp(path + n - m, builtIn);
+}
+
 bool IntelXe::start(IOService *provider) {
 	char dummy[8];
 	if (intelxeBootArg("IntelXe", "-intelxe_off", dummy, sizeof(dummy))) return false;
@@ -517,6 +543,32 @@ bool IntelXe::start(IOService *provider) {
 	if (intelxeBootArg("IntelXe", "intelxe_fds", &fds, sizeof(fds)) && fds == 1) gFdsBoot = 1;
 	pci = OSDynamicCast(IOPCIDevice, provider);
 	if (!pci) return false;
+	// Only a supported platform starts (IOPCIMatch lists the ids too); the others are refused with what they lack.
+	uint16_t id = 0;
+	const XePlatformDesc *plat = platformOf(pci, &id);
+	const char *sub = plat && plat->subplatform ? plat->subplatform : "";
+	if (!plat) {
+		LOG("8086:%04x: no platform descriptor, not starting", id);
+		return false;
+	}
+	if (!plat->supported) {
+		LOG("8086:%04x is %s%s%s: not supported yet (%s)", id, plat->name, *sub ? "-" : "", sub, plat->missing);
+		return false;
+	}
+	if (!fwIs(plat->gucFw, kGucFwName) || !fwIs(plat->hucFw, kHucFwName)) {
+		LOG("8086:%04x (%s): built-in firmware %s, %s; the platform needs %s, %s", id, plat->name, kGucFwName, kHucFwName,
+			plat->gucFw ? plat->gucFw : "none", plat->hucFw ? plat->hucFw : "none");
+		return false;
+	}
+	gXePlat = plat;
+	gXePlatId = id;
+	LOG("8086:%04x: %s%s%s, graphics %u.%02u, media %u.%02u, %s", id, plat->name, *sub ? "-" : "", sub,
+		plat->graphicsVerx100 / 100, plat->graphicsVerx100 % 100, plat->mediaVerx100 / 100, plat->mediaVerx100 % 100,
+		plat->isDgfx ? "discrete" : "integrated");
+	// xe->info.has_usm (the graphics IP's) and a standalone media GT (max_gt_per_tile 2): off where the platform has none.
+	// The UM queues sit in VRAM here, so has_usm needs a discrete part too.
+	if (!plat->hasUsm || !plat->isDgfx) gUsm = 0;
+	if (plat->maxGtPerTile < 2) gVideoWanted = 0;
 	pci->retain();
 	gDev = this;
 	sysctl_register_oid(&sysctl__debug_intelxe);
@@ -924,7 +976,7 @@ int IntelXe::waitDeviceReady() {
 	uint32_t id = 0;
 	for (;;) {
 		id = pci->configRead32(kIOPCIConfigVendorID);
-		if (id == 0xe20b8086u || id == 0xe20c8086u) break;
+		if (id == ((uint32_t)gXePlatId << 16 | 0x8086u)) break;   // the device IntelXe started on
 		if (elapsedMs() >= limitMs) { say("device not ready: config space reads 0x%08x after %llu ms\n", id, elapsedMs()); return ENXIO; }
 		IOSleep(20);
 	}

@@ -59,7 +59,8 @@ def main():
    fw=src.read_bytes()
    assert hashlib.sha256(fw).hexdigest()==sha, f'{src}: unexpected sha256'
    (objdir/inc).write_text(f'static const uint8_t {name}[] __attribute__((aligned(16))) = {{\n'+
-    '\n'.join(','.join(str(b) for b in fw[i:i+64])+',' for i in range(0,len(fw),64))+f'\n}};\nstatic const uint32_t {name}Size = {len(fw)};\n')
+    '\n'.join(','.join(str(b) for b in fw[i:i+64])+',' for i in range(0,len(fw),64))+f'\n}};\nstatic const uint32_t {name}Size = {len(fw)};\n'+
+    f'static const char {name}Name[] = "{fwname}";\n')   # IntelXe::start: the platform descriptor must name this file
   # XeProbe: whatever other GuC images are in the firmware directory (sha256 printed, not checked: any linux-firmware
   # release will do)
   probe=[]
