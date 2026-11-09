@@ -54,8 +54,10 @@ fn interior_field_memcpy_into_a_differently_typed_local_translates_and_the_contr
         Ok(_) => panic!(
             "the control did not fire: the module translated with METAL2VULKAN_NO_LEAF_MEMCPY set"
         ),
+        // Without the leaf lowering the memcpy stays a call of the external LLVM intrinsic, and the translator
+        // refuses it by name.
         Err(e) => assert!(
-            e.contains("OpFunctionCall"),
+            e.contains("unresolved external shader function: llvm.memcpy"),
             "the control was refused for another reason: {e}"
         ),
     }

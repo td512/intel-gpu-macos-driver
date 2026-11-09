@@ -2,6 +2,8 @@ use metal2vulkan::passes::Stage;
 use std::path::{Path, PathBuf};
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn no_public_fixture_declares_the_geometry_capability() {
     let mut checked = 0;
     let mut primitive_id = 0;

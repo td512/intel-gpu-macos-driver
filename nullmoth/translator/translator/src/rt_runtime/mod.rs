@@ -90,7 +90,7 @@ pub(crate) fn rewrite_text(ll: &str) -> Option<String> {
     let entry = ["kernel", "vertex", "fragment"].iter().find_map(|s| crate::meta::entry_name(ll, s));
     match rewrite(ll, entry.as_deref()) {
         Ok(out) => {
-            if let (Some(t), Some(dir)) = (out.as_ref(), std::env::var_os("METAL2VULKAN_RT_DUMP")) {
+            if let (Some(t), Some(dir)) = (out.as_ref(), crate::env_vars::rt_dump()) {
                 let _ = std::fs::write(std::path::Path::new(&dir).join(format!("{}.rt.ll", entry.as_deref().unwrap_or("entry"))), t);
             }
             out

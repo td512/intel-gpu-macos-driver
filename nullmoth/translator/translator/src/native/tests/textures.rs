@@ -1120,7 +1120,9 @@ entry:
         "{asm}"
     );
     assert!(asm.contains("OpTypeSampler"), "{asm}");
-    assert!(asm.contains("Binding 37"), "{asm}");
+    // texture 5: no binding 37 under bindless-all, a slot in the 2D heap
+    assert_eq!(heap_texture_dim(&spv, 5), Some(spirv::Dim::Dim2D), "{asm}");
+    assert!(!asm.contains("Binding 37"), "{asm}");
     assert!(asm.contains("Binding 162"), "{asm}");
     if std::process::Command::new("spirv-val")
         .arg("--version")
@@ -1224,7 +1226,12 @@ entry:
             .expect("reflected descriptor");
         assert_eq!(reflected.set, 0);
         assert_eq!(reflected.binding, binding);
-        assert!(asm.contains(&format!("Binding {binding}")), "{asm}");
+        if kind == crate::reflect::ResourceKind::Texture {
+            // Reflection keeps the texture band; the shader reads the texture from the bindless heap.
+            assert_eq!(heap_texture_dim(&spv, metal_index), Some(spirv::Dim::Dim2D), "{asm}");
+        } else {
+            assert!(asm.contains(&format!("Binding {binding}")), "{asm}");
+        }
     }
     reflection
         .validate_descriptor_abi()
@@ -1302,7 +1309,8 @@ entry:
         .expect("storage descriptor");
     assert_eq!(sampled.binding, 72);
     assert_eq!(storage.binding, 520);
-    assert!(asm.contains("Binding 72"), "{asm}");
+    // The sampled view comes from the bindless heap, the storage view keeps its own binding in the storage band.
+    assert_eq!(heap_texture_dim(&spv, 40), Some(spirv::Dim::Dim2D), "{asm}");
     assert!(asm.contains("Binding 520"), "{asm}");
     reflection
         .validate_descriptor_abi()
@@ -4334,8 +4342,8 @@ entry:
     let spv = crate::translate_sanitized_native(ll, Stage::Kernel, &tmp).expect("translate");
     let asm = disassemble(&spv).expect("disassemble");
     assert!(asm.contains("OpTypeImage"), "{asm}");
-    assert!(asm.contains(" 1D "), "{asm}");
-    assert!(asm.contains("Binding 32"), "{asm}");
+    // An unused texture is still declared, with the dimension its metadata names: a slot in the 1D heap.
+    assert_eq!(heap_texture_dim(&spv, 0), Some(spirv::Dim::Dim1D), "{asm}");
     if std::process::Command::new("spirv-val")
         .arg("--version")
         .output()

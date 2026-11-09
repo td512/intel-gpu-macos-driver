@@ -593,9 +593,7 @@ pub(in crate::passes) fn lower_float_math(
     if name.starts_with("air.fast_tanh.") && args.len() == 1 {
         return lower_fast_tanh(ctx, res, rty, args[0]);
     }
-    let trig_flush = std::env::var("NVMTL_XLATE_TRIG_FLUSH")
-        .map(|v| v == "1")
-        .unwrap_or(false);
+    let trig_flush = fast_trig_flush_on();
     if trig_flush
         && name.starts_with("air.fast_cos.")
         && args.len() == 1
@@ -1042,6 +1040,18 @@ fn lower_metal_round(ctx: &mut Ctx, res: Word, rty: Word, x: Word) -> Vec<Instru
         ));
     }
     out
+}
+
+/// fast_sin/fast_cos of an f32 return 0 for a huge or non-finite argument (lower_fast_trig) only when
+/// NVMTL_XLATE_TRIG_FLUSH=1; by default they are the plain GLSL functions.
+fn fast_trig_flush_on() -> bool {
+    #[cfg(test)]
+    if crate::passes::FAST_TRIG_FLUSH_FOR_TEST.with(std::cell::Cell::get) {
+        return true;
+    }
+    std::env::var("NVMTL_XLATE_TRIG_FLUSH")
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 
 fn lower_fast_trig(

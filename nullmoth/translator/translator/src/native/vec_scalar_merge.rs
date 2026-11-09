@@ -1,7 +1,7 @@
 use super::lex::split_top_level;
 use crate::fxhash::{HashMap, HashSet};
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 pub(super) fn lower_vector_scalar_pointer_merge(san_ll: &str) -> Cow<'_, str> {
     lower_impl(san_ll, true)

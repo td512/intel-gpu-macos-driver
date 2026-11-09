@@ -64,16 +64,6 @@ fn operands_of<'a>(ops: &'a [(&str, &str)], id: &str, opcode: &str) -> Option<&'
         .strip_prefix(opcode)
 }
 
-/// The literal an `OpConstant` names, e.g. `OpConstant %uint 2` or `OpConstant %6 2`.
-fn constant_value(ops: &[(&str, &str)], id: &str) -> Option<i64> {
-    let id = id.strip_prefix('%').unwrap_or(id);
-    operands_of(ops, id, "OpConstant ")?
-        .split_whitespace()
-        .last()?
-        .parse()
-        .ok()
-}
-
 const FIXTURE: &str = include_str!("fixtures/gl/sampler_array_chosen_by_constant.ll");
 
 #[test]

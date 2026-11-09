@@ -340,6 +340,8 @@ fn an_entry_point_already_named_main_translates_like_any_other() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_translates_the_same_under_renamed_identifiers() {
     let mut checked = 0;
     for path in public_fixtures() {

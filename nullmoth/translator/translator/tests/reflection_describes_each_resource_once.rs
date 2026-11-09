@@ -81,6 +81,8 @@ fn a_fragment_argument_buffer_reports_each_resident_once() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn every_public_fixture_reports_each_resource_once() {
     let mut checked = 0;
     let mut reported = 0;

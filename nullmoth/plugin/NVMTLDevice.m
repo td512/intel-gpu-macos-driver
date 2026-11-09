@@ -2059,7 +2059,7 @@ void nvmtl_gl_tag_reflection(id refl, MTLRenderPipelineDescriptor *d);
                 nvlog("pipeline: %s writes alpha into A8 target(s) mask %#x (%lu B variant)", ff->_fname.UTF8String, a8mask, (unsigned long)fa.length);
         }
     }
-    uint32_t rsc = (uint32_t)([d respondsToSelector:@selector(rasterSampleCount)] ? d.rasterSampleCount : d.sampleCount); if (!rsc) rsc = 1;
+    uint32_t rsc = (uint32_t)d.rasterSampleCount; if (!rsc) rsc = 1;
     NSData *flk = nvmtl_varying_link(vf, ffx); const void *fsb = flk ? flk.bytes : ffx->_spirv.bytes; size_t fsl = flk ? flk.length : ffx->_spirv.length;
     uint32_t tpt = 0, tcps = 0; int prc;
     if (nvmtl_spirv_tess_info(vf->_spirv.bytes, vf->_spirv.length, &tpt, &tcps)) {

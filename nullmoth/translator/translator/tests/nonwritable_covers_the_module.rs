@@ -172,6 +172,8 @@ fn a_read_write_image_the_body_only_reads_stops_demanding_stores() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn a_decorated_buffer_never_reflects_a_write() {
     let mut checked = 0;
     for path in public_fixtures() {
@@ -218,6 +220,8 @@ fn a_decorated_buffer_never_reflects_a_write() {
 }
 
 #[test]
+#[ignore = "sweeps the public fixture corpus, of which validation/fixtures/public holds 5 files; run with \
+            --ignored once the corpus is added"]
 fn no_public_fixture_writes_a_decorated_buffer() {
     let mut checked = 0;
     let mut decorated = 0;

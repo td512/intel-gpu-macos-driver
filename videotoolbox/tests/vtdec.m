@@ -46,7 +46,10 @@ int main(int argc, char **argv) { @autoreleasepool {
 	}
 	printf("VTIsHardwareDecodeSupported('av01') = %d\n", VTIsHardwareDecodeSupported('av01'));
 	AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:@(argv[1])] options:nil];
-	AVAssetTrack *track = [asset tracksWithMediaType:AVMediaTypeVideo].firstObject;
+	__block AVAssetTrack *track = nil; dispatch_semaphore_t loaded = dispatch_semaphore_create(0);
+	[asset loadTracksWithMediaType:AVMediaTypeVideo completionHandler:^(NSArray<AVAssetTrack *> *tracks, NSError *error) {
+		track = tracks.firstObject; dispatch_semaphore_signal(loaded); }];
+	dispatch_semaphore_wait(loaded, DISPATCH_TIME_FOREVER);
 	if (!track) { printf("no video track\n"); return 1; }
 	NSError *e = nil;
 	AVAssetReader *r = [AVAssetReader assetReaderWithAsset:asset error:&e];

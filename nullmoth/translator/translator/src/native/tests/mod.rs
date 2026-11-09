@@ -207,3 +207,149 @@ fn is_signed_i32_vector(module: &Module, ty: Word, lanes: u32) -> bool {
             && inst.operands.get(1) == Some(&Operand::LiteralBit32(1))
     })
 }
+
+fn decorated(module: &Module, target: Word, decoration: Decoration, value: u32) -> bool {
+    module.annotations.iter().any(|inst| {
+        inst.class.opcode == Op::Decorate
+            && inst.operands.first() == Some(&Operand::IdRef(target))
+            && inst.operands.get(1) == Some(&Operand::Decoration(decoration))
+            && inst.operands.get(2) == Some(&Operand::LiteralBit32(value))
+    })
+}
+
+fn variables_at(module: &Module, set: u32, binding: u32) -> HashSet<Word> {
+    module
+        .types_global_values
+        .iter()
+        .filter(|inst| inst.class.opcode == Op::Variable)
+        .filter_map(|inst| inst.result_id)
+        .filter(|var| {
+            decorated(module, *var, Decoration::DescriptorSet, set)
+                && decorated(module, *var, Decoration::Binding, binding)
+        })
+        .collect()
+}
+
+/// Under bindless-all (the default; NVMTL_NO_BINDLESS_ALL=1 turns it off) a sampled texture whose Metal index is below
+/// 128 has no descriptor binding of its own: the shader reads its heap slot from word TEXTURE_INDEX_BASE (64) + index
+/// of the per-draw table (set 0, binding SYNTHETIC_BINDING_BASE) and indexes the sampled-image heap (set
+/// BINDLESS_HEAP_SET, binding BINDLESS_HEAP_BINDING) with it (passes::resources::collapse, ParamBinding::HeapImage).
+/// Returns the dimension of the image the shader loads that way for `metal_index`, or None when it does not.
+fn heap_texture_dim(spv: &[u8], metal_index: u32) -> Option<spirv::Dim> {
+    const TEXTURE_INDEX_BASE: u32 = 64;
+    let module = load_bytes(spv).expect("load translated module");
+    let tables = variables_at(&module, 0, crate::reflect::SYNTHETIC_BINDING_BASE);
+    let heaps = variables_at(
+        &module,
+        crate::reflect::BINDLESS_HEAP_SET,
+        crate::reflect::BINDLESS_HEAP_BINDING,
+    );
+    let slot_words = module
+        .types_global_values
+        .iter()
+        .filter(|inst| {
+            inst.class.opcode == Op::Constant
+                && inst.operands.first()
+                    == Some(&Operand::LiteralBit32(TEXTURE_INDEX_BASE + metal_index))
+        })
+        .filter_map(|inst| inst.result_id)
+        .collect::<HashSet<_>>();
+    let id_at = |inst: &crate::spirv_module::Instruction, at: usize| match inst.operands.get(at) {
+        Some(Operand::IdRef(id)) => Some(*id),
+        _ => None,
+    };
+    let mut slot_pointers = HashSet::default();
+    let mut slots = HashSet::default();
+    let mut heap = None;
+    for inst in module.all_inst_iter() {
+        let (Some(result), Some(first)) = (inst.result_id, id_at(inst, 0)) else {
+            continue;
+        };
+        match inst.class.opcode {
+            Op::AccessChain
+                if tables.contains(&first)
+                    && inst.operands.iter().skip(1).any(
+                        |operand| matches!(operand, Operand::IdRef(id) if slot_words.contains(id)),
+                    ) =>
+            {
+                slot_pointers.insert(result);
+            }
+            Op::Load if slot_pointers.contains(&first) => {
+                slots.insert(result);
+            }
+            Op::UConvert | Op::BitwiseAnd if slots.contains(&first) => {
+                slots.insert(result);
+            }
+            Op::AccessChain
+                if heaps.contains(&first) && id_at(inst, 1).is_some_and(|slot| slots.contains(&slot)) =>
+            {
+                heap = Some(first);
+            }
+            _ => {}
+        }
+    }
+    let array = variable_pointee_type(&module, heap?)?;
+    let def = |id: Word| {
+        module
+            .types_global_values
+            .iter()
+            .find(|inst| inst.result_id == Some(id))
+    };
+    let image = match def(array)?.operands.first() {
+        Some(Operand::IdRef(element)) => def(*element)?,
+        _ => return None,
+    };
+    match (image.class.opcode, image.operands.get(1)) {
+        (Op::TypeImage, Some(Operand::Dim(dim))) => Some(*dim),
+        _ => None,
+    }
+}
+
+/// A device-address load is a call of a helper the emitter keeps out of line (emit_device_addr_load,
+/// null_bda_load_helper): `helper(base, address)` loads `address` unless `base` is null, and returns zero then.
+/// The helpers of `module`, by function id.
+fn null_bda_load_helpers(module: &Module) -> HashSet<Word> {
+    module
+        .functions
+        .iter()
+        .filter(|function| {
+            let [entry, live, merge] = &function.blocks[..] else {
+                return false;
+            };
+            let [base, address] = &function.parameters[..] else {
+                return false;
+            };
+            let uses = |inst: &crate::spirv_module::Instruction, id: Option<Word>| {
+                id.is_some_and(|id| inst.operands.first() == Some(&Operand::IdRef(id)))
+            };
+            entry
+                .instructions
+                .iter()
+                .any(|inst| inst.class.opcode == Op::INotEqual && uses(inst, base.result_id))
+                && live
+                    .instructions
+                    .iter()
+                    .any(|inst| inst.class.opcode == Op::ConvertUToPtr && uses(inst, address.result_id))
+                && live.instructions.iter().any(|inst| inst.class.opcode == Op::Load)
+                && merge.instructions.iter().any(|inst| inst.class.opcode == Op::Phi)
+        })
+        .filter_map(|function| function.def.as_ref()?.result_id)
+        .collect()
+}
+
+/// The values `module` reads through a null-guarded device-address load helper, with the address each one reads.
+fn null_bda_loads(module: &Module) -> HashMap<Word, Word> {
+    let helpers = null_bda_load_helpers(module);
+    module
+        .all_inst_iter()
+        .filter(|inst| inst.class.opcode == Op::FunctionCall)
+        .filter_map(|inst| match inst.operands[..] {
+            [Operand::IdRef(helper), Operand::IdRef(_), Operand::IdRef(address)]
+                if helpers.contains(&helper) =>
+            {
+                Some((inst.result_id?, address))
+            }
+            _ => None,
+        })
+        .collect()
+}

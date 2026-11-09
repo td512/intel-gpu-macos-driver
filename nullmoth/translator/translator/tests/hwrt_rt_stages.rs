@@ -39,34 +39,55 @@ fn asm_of(spv: &[u8]) -> String {
         .join("\n")
 }
 
-fn structure_variable(asm: &str) -> (String, Option<u32>, Option<u32>) {
-    let ty = asm
+/// A structure passed as `[[buffer(location)]]` is an address, never a descriptor: binding it as one made the driver read
+/// a surface state as the BVH address (every Metal RT shader would fault). Its Metal address (the 256-byte header
+/// nvmtl_rt_layout.h puts before the Vulkan structure) comes from the buffer-address table, words 0 and 1 of entry
+/// `location`, and the Vulkan structure is that address plus 256 (ray_query.rs, load_structure_with_base).
+fn assert_structure_from_address_table(asm: &str, location: u32) {
+    let structure = asm
         .lines()
-        .find(|l| l.contains("= OpTypeAccelerationStructureKHR"))
+        .find(|l| l.ends_with("= OpTypeAccelerationStructureKHR"))
         .and_then(|l| l.split_whitespace().next())
-        .unwrap_or_else(|| panic!("no OpTypeAccelerationStructureKHR in\n{asm}"))
-        .to_string();
-    let ptr = asm
+        .unwrap_or_else(|| panic!("no OpTypeAccelerationStructureKHR in\n{asm}"));
+    assert!(
+        !asm.lines()
+            .any(|l| l.ends_with(&format!("= OpTypePointer UniformConstant {structure}"))),
+        "the structure must not be a descriptor\n{asm}"
+    );
+    let table = asm
         .lines()
-        .find(|l| l.ends_with(&format!("= OpTypePointer UniformConstant {ty}")))
-        .and_then(|l| l.split_whitespace().next())
-        .unwrap_or_else(|| panic!("no UniformConstant pointer to {ty} in\n{asm}"))
+        .find(|l| l.starts_with("OpDecorate ") && l.ends_with(" Binding 640"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .unwrap_or_else(|| panic!("no buffer-address table (binding 640) in\n{asm}"))
         .to_string();
-    let var = asm
+    let c0 = uint_constant(asm, 0).expect("uint 0");
+    let c1 = uint_constant(asm, 1).expect("uint 1");
+    let cl = uint_constant(asm, location).expect("uint location");
+    for word in [&c0, &c1] {
+        assert!(
+            asm.lines().any(|l| l.contains("= OpAccessChain ")
+                && l.ends_with(&format!(" {table} {c0} {cl} {word}"))),
+            "entry {location} of the address table is not read\n{asm}"
+        );
+    }
+    let ulong = asm
         .lines()
-        .find(|l| l.ends_with(&format!("= OpVariable {ptr} UniformConstant")))
+        .find(|l| l.ends_with("= OpTypeInt 64 0"))
         .and_then(|l| l.split_whitespace().next())
-        .unwrap_or_else(|| panic!("no UniformConstant variable of {ptr} in\n{asm}"))
+        .unwrap_or_else(|| panic!("no ulong type in\n{asm}"))
         .to_string();
-    let decoration = |name: &str| -> Option<u32> {
+    let header = asm
+        .lines()
+        .find(|l| l.ends_with(&format!("= OpConstant {ulong} 256")))
+        .and_then(|l| l.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no 256-byte header offset in\n{asm}"))
+        .to_string();
+    assert!(
         asm.lines()
-            .find(|l| l.starts_with(&format!("OpDecorate {var} {name} ")))
-            .and_then(|l| l.split_whitespace().last())
-            .and_then(|n| n.parse().ok())
-    };
-    let set = decoration("DescriptorSet");
-    let binding = decoration("Binding");
-    (var, set, binding)
+            .any(|l| l.contains("= OpIAdd ") && l.ends_with(&format!(" {header}"))),
+        "{asm}"
+    );
+    assert!(asm.contains("OpConvertUToAccelerationStructureKHR"), "{asm}");
 }
 
 fn uint_constant(asm: &str, value: u32) -> Option<String> {
@@ -116,13 +137,8 @@ fn v_rt_vertex_acceleration_structure_at_buffer_0_translates_and_binds_like_a_bu
     assert!(result.is_ok(), "v_rt must translate: {:?}", result.err());
     let spv = result.unwrap();
     let asm = asm_of(&spv);
-    let (var, set, binding) = structure_variable(&asm);
-    assert_eq!(set, Some(0), "{var} DescriptorSet\n{asm}");
-    assert_eq!(
-        binding,
-        Some(0),
-        "{var} Binding: the structure is `as [[buffer(0)]]`\n{asm}"
-    );
+    // the structure is `as [[buffer(0)]]`
+    assert_structure_from_address_table(&asm, 0);
     assert!(asm.contains("OpRayQueryInitializeKHR"), "{asm}");
     let r = reflect(V_RT, Stage::Vertex);
     let (param, descriptor) = shadow_binding(&r, 0);
@@ -140,13 +156,8 @@ fn f_rt_fragment_acceleration_structure_at_buffer_0_translates_and_binds_like_a_
     assert!(result.is_ok(), "f_rt must translate: {:?}", result.err());
     let spv = result.unwrap();
     let asm = asm_of(&spv);
-    let (var, set, binding) = structure_variable(&asm);
-    assert_eq!(set, Some(0), "{var} DescriptorSet\n{asm}");
-    assert_eq!(
-        binding,
-        Some(0),
-        "{var} Binding: the structure is `as [[buffer(0)]]`\n{asm}"
-    );
+    // the structure is `as [[buffer(0)]]`
+    assert_structure_from_address_table(&asm, 0);
     assert!(asm.contains("OpRayQueryInitializeKHR"), "{asm}");
     let r = reflect(F_RT, Stage::Fragment);
     let (param, descriptor) = shadow_binding(&r, 0);
@@ -244,14 +255,13 @@ fn rq_unq_unqueried_structure_parameter_mints_no_structure() {
 }
 
 #[test]
-fn rq_direct_parameter_keeps_the_load_path() {
+fn rq_direct_parameter_reads_the_address_table() {
     let t = tmp("rq");
     let spv = translate(RQ, Stage::Kernel).expect("rq translates");
     let asm = asm_of(&spv);
     assert!(asm.contains("OpTypeAccelerationStructureKHR"), "{asm}");
-    assert!(
-        !asm.contains("OpConvertUToAccelerationStructureKHR"),
-        "{asm}"
-    );
+    // A direct parameter loads the structure's address from the buffer-address table, as an argument-buffer field
+    // loads it from the argument buffer.
+    assert_structure_from_address_table(&asm, 0);
     tools::spirv_val_bytes(&spv, &t).expect("spirv-val rq");
 }

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 // xlate_check: the plugin's shader path without a B580. Compiles mtl_smoke's kernel source with whatever Metal device
 // this machine has (Apple's front end makes the AIR), takes the library's metallib container and hands it to the
-// built plugin's nvmtl_translate_metallib (the function -[NVMTLDevice newLibraryWithData:] calls): metallib -> AIR ->
-// LLVM text (air-runtime/libLLVM.dylib) -> SPIR-V (libnvmtl_translate.dylib). Runs on any Mac (x86_64; Rosetta is fine).
+// built plugin as -[NVMTLDevice newLibraryWithData:] and newFunctionWithName: do: nvmtl_translate_metallib indexes the
+// metallib (each entry's AIR bitcode, its stage, its LLVM text from air-runtime/libLLVM.dylib, decoded on first use),
+// and nvmtl_compile_library_entry translates an entry to SPIR-V (libnvmtl_translate.dylib). Runs on any Mac (x86_64;
+// Rosetta is fine).
 //
 //   NVMTL_LOG_PATH=<log> NVMTL_AIRCACHE=<dir> ./xlate_check <path to NVMTLDriver.bundle/Contents/MacOS/NVMTLDriver> [out.spv]
 #import <Foundation/Foundation.h>
@@ -20,6 +22,7 @@ static NSString *const kSource =
      "}\n";
 
 typedef NSDictionary<NSString *, NSData *> *(*translate_fn)(NSData *, NSDictionary **, NSDictionary **);
+typedef NSData *(*compile_fn)(NSData *air, NSString *ll, NSString *stage, NSString *name, NSString **error);
 
 int main(int argc, char **argv)
 {
@@ -39,13 +42,17 @@ int main(int argc, char **argv)
         void *h = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
         if (!h) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 1; }
         translate_fn tr = (translate_fn)dlsym(h, "nvmtl_translate_metallib");
-        if (!tr) { fprintf(stderr, "no nvmtl_translate_metallib in %s\n", argv[1]); return 1; }
+        compile_fn compile = (compile_fn)dlsym(h, "nvmtl_compile_library_entry");
+        if (!tr || !compile) { fprintf(stderr, "no nvmtl_translate_metallib / nvmtl_compile_library_entry in %s\n", argv[1]); return 1; }
         NSDictionary *stages = nil, *airs = nil;
         NSDictionary<NSString *, NSData *> *fns = tr(mtlb, &stages, &airs);
         if (!fns.count) { fprintf(stderr, "FAIL: translation produced nothing (see NVMTL_LOG_PATH)\n"); return 3; }
         int bad = 0;
         for (NSString *name in fns) {
-            NSData *spv = fns[name];
+            NSString *why = nil;
+            // the index holds the entry's AIR; the translation happens when the entry is asked for, as here
+            NSData *spv = compile(fns[name], airs[name], stages[name], name, &why);
+            if (!spv) { printf("  %-12s FAILED: %s\n", name.UTF8String, why.UTF8String ?: "?"); bad = 1; continue; }
             const uint32_t magic = spv.length >= 4 ? *(const uint32_t *)spv.bytes : 0;
             printf("  %-12s stage %-8s SPIR-V %5lu bytes magic 0x%08x%s\n", name.UTF8String,
                    [stages[name] description].UTF8String ?: "?", (unsigned long)spv.length, magic,
