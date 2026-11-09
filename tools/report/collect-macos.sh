@@ -528,6 +528,7 @@ nvk() { if _v=$(nvram "$1" 2>/dev/null); then printf '%s = %s\n' "$1" "$(printf 
 	echo "== CPU power management"
 	sysctl hw.physicalcpu hw.logicalcpu hw.cpufrequency hw.cpufrequency_max machdep.cpu.core_count machdep.cpu.thread_count 2>/dev/null
 	grep -iE 'hybridpm|cputopology|cpufriend' "$TMPBASE/.kexts" 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /\./ && $i !~ /^0x/) { print "loaded: " $i; break } }'
+	sysctl debug.hybridpm.enabled debug.hybridpm.route debug.hybridpm.why 2>/dev/null
 	case " $(nvram boot-args 2>/dev/null | cut -f2-) " in *ctrsmt*) echo "boot-args set ctrsmt (CpuTopologyRebuild)" ;; esac
 } > "$F" 2>&1
 # The CPU's clock right now, when root can ask powermetrics (it reads the package's counters for one second).
@@ -952,10 +953,12 @@ for k in IntelXeFB NMXAccel NMXAGDC; do
 		warn kext-version "$k.kext $_lv is loaded but the installed file is $_fv: restart (if it stays, the Auxiliary Kernel Collection was not rebuilt: sudo ./install.sh --apply again)."
 	[ -z "$_lv" ] && [ -n "$_fv" ] && warn kext-not-loaded "$k.kext is installed ($_fv) but not loaded: see logs/kernel-ours-*.txt and kmutil, or approve it in System Settings > Privacy & Security."
 done
+# 12th-14th gen Core with E-cores (HybridPM leaves Core Ultra alone; the listed desktop models have P-cores only)
 case "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)" in
-*1[2-4][0-9][0-9][0-9]*|*Core\ Ultra*)
+*Ultra*|*i3-1[234]100*|*i3-12300*|*i5-12400*|*i5-12490*|*i5-12500|*i5-12500[!H]*|*i5-12600|*i5-12600[!KH]*) ;;
+*i[3579]-1[2-4][0-9][0-9][0-9]*)
 	grep -qi hybridpm "$TMPBASE/.kexts" 2>/dev/null ||
-		warn cpu-hybridpm "This Intel CPU has performance and efficiency cores, and HybridPM.kext is not loaded: XCPM can hold every core at a low clock, which shows as a slow GPU (Geekbench GPU scores about a third lower on the test machine). See the guide's CPU section." ;;
+		warn cpu-hybridpm "This Intel CPU has performance and efficiency cores, and HybridPM.kext is not loaded: XCPM can hold every core at a low clock, which shows as a slow GPU (Geekbench GPU scores about a third lower on the test machine). See \"Hybrid Intel CPUs\" in the install guide." ;;
 esac
 [ -n "$FPS_IDLE" ] && [ "$FPS_IDLE" -gt 100 ] &&
 	warn redraw "The display presented $FPS_IDLE frames a second while this report ran. If nothing on screen was moving, something redraws at full rate and takes GPU time from applications."
