@@ -215,7 +215,8 @@
 "The HiDPI switch is only half on. Turn it on again on the Display page, then restart." = "HiDPI anahtarı yarım açık. Ekran sayfasında yeniden açın, sonra yeniden başlatın.";
 "A HiDPI display override is left without the framebuffer's HiDPI modes. Turn HiDPI off or on again on the Display page." = "Bir HiDPI ekran ayarı, framebuffer'ın HiDPI modları olmadan kalmış. Ekran sayfasında HiDPI'ı kapatıp ya da yeniden açın.";
 "%@.kext %@ is loaded, but %@ is installed. Restart; if it stays, run Install this package again." = "%1$@.kext %2$@ yüklü, ama kurulu dosya %3$@. Yeniden başlatın; düzelmezse 'Bu paketi kur'u yeniden çalıştırın.";
-"This CPU has performance and efficiency cores and HybridPM.kext is not loaded: macOS can hold every core at a low clock, which makes the GPU look slow too. Add HybridPM to your EFI (see the install guide)." = "Bu işlemcide performans ve verimlilik çekirdekleri var ve HybridPM.kext yüklü değil: macOS tüm çekirdekleri düşük saat hızında tutabilir, bu da GPU'yu yavaş gösterir. HybridPM'i EFI'nize ekleyin (kurulum kılavuzuna bakın).";
+"This CPU has performance and efficiency cores (12th-14th gen Core) and HybridPM.kext is not loaded: macOS can hold the cores at low clocks, which makes the GPU look slow too. Add HybridPM.kext from the -efi.zip below Lilu in your EFI (the EFI page does it; install guide: Hybrid Intel CPUs)." = "Bu işlemcide performans ve verimlilik çekirdekleri var (12.-14. nesil Core) ve HybridPM.kext yüklü değil: macOS çekirdekleri düşük saat hızında tutabilir, bu da GPU'yu yavaş gösterir. -efi.zip'teki HybridPM.kext'i EFI'nizde Lilu'nun altına ekleyin (EFI sayfası bunu yapar; kurulum kılavuzu: Hibrit Intel işlemciler).";
+"HybridPM.kext is loaded but does nothing: %@." = "HybridPM.kext yüklü ama bir şey yapmıyor: %@.";
 "Create a report" = "Rapor oluştur";
 "Dismiss" = "Kapat";
 
@@ -379,7 +380,7 @@
 "Look again" = "Yeniden bak";
 "When it has finished: restart, then open this assistant again." = "Bitince: yeniden başlatın, sonra bu yardımcıyı yeniden açın.";
 "3. Add IntelXe.kext to OpenCore" = "3. IntelXe.kext'i OpenCore'a ekle";
-"The last piece loads before macOS: IntelXe.kext and SSDT-ARCOFF go into the EFI and its config. The EFI page shows the plan and applies it." = "Son parça macOS'tan önce yüklenir: IntelXe.kext ve SSDT-ARCOFF EFI'ye ve yapılandırmasına eklenir. EFI sayfası planı gösterir ve uygular.";
+"The last piece loads before macOS: IntelXe.kext and SSDT-ARCOFF go into the EFI and its config, and on a 12th-14th gen Intel CPU with efficiency cores HybridPM.kext too. The EFI page shows the plan and applies it." = "Son parça macOS'tan önce yüklenir: IntelXe.kext ve SSDT-ARCOFF EFI'ye ve yapılandırmasına eklenir; verimlilik çekirdekli 12.-14. nesil Intel işlemcide HybridPM.kext de. EFI sayfası planı gösterir ve uygular.";
 "Open the EFI page to add the kext" = "Kext'i eklemek için EFI sayfasını aç";
 "Then restart. If the next boot stops at the Apple logo, choose the previous entry or your USB stick in the OpenCore picker: the backup is kept." = "Sonra yeniden başlatın. Sonraki açılış Apple logosunda kalırsa OpenCore seçicide önceki girişi ya da USB belleğinizi seçin: yedek saklanır.";
 "4. Check that it works" = "4. Çalıştığını denetle";
@@ -634,3 +635,11 @@
 "Download Zink" = "Zink'i indir";
 "Use by default" = "Varsayılan olarak kullan";
 "1 check this session." = "Bu oturumda 1 denetim.";
+/* HybridPM on the EFI page */
+"HybridPM.kext needed" = "HybridPM.kext gerekli mi";
+"HybridPM.kext in the EFI" = "EFI'deki HybridPM.kext";
+"HybridPM Kernel > Add entry" = "HybridPM Kernel > Add kaydı";
+"Yes: this CPU has efficiency cores (12th-14th gen Core)" = "Evet: bu işlemcide verimlilik çekirdekleri var (12.-14. nesil Core)";
+"No: this CPU has no efficiency cores, or is not a 12th-14th gen Core" = "Hayır: bu işlemcide verimlilik çekirdeği yok ya da 12.-14. nesil bir Core değil";
+"There (%@); this package has none" = "Var (%@); bu pakette yok";
+"Not there; this package has none (0.1.4 and later have it)" = "Yok; bu pakette de yok (0.1.4 ve sonrasında var)";
