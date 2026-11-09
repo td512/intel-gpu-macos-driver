@@ -1,7 +1,7 @@
 use metal2vulkan::meta::TextureDimension;
 use metal2vulkan::passes::{Stage, TransformOptions};
 use metal2vulkan::reflect::{
-    DescriptorBindingRange, DescriptorLayout, ResourceKind, ShaderReflection,
+    DescriptorBindingRange, DescriptorLayout, ResourceKind, ShaderReflection, BINDLESS_HEAP_SET,
     DEFAULT_DESCRIPTOR_LAYOUT, SAMPLER_BINDING_RANGE, TEXTURE_BINDING_RANGE,
 };
 use metal2vulkan::translate_sanitized_native_reflected;
@@ -33,6 +33,10 @@ fn bindings_the_module_declares(spirv: &[u8]) -> BTreeSet<(u32, u32)> {
                 .find(|(other, _)| *other == target)
                 .map(|(_, set)| (*set, binding))
         })
+        // The bindless heap (set BINDLESS_HEAP_SET) is the device's own set, laid out and bound once per command
+        // buffer by the driver, not a binding of this pipeline's layout: its sampled textures are reached through
+        // heap slots the per-draw table carries.
+        .filter(|(set, _)| *set != BINDLESS_HEAP_SET)
         .collect()
 }
 
@@ -319,12 +323,54 @@ fn a_runtime_descriptor_array_reports_the_capacity_the_module_declares() {
     .expect("the descriptor-array kernel translates");
 
     assert_reflection_covers_declarations("the descriptor-array kernel", &spirv, &reflection);
-    let declared = array_lengths_the_module_declares(&spirv);
-    assert!(
-        declared.values().any(|length| *length > 1),
-        "this fixture is only meaningful if the module declares a descriptor array; got {declared:?}"
+    assert_eq!(
+        texture_array_counts(&reflection),
+        vec![128],
+        "a runtime texture array reports the 128 texture indices"
+    );
+    assert_eq!(
+        heap_array_clamps(&spirv),
+        vec![127],
+        "the module must index no further than the capacity reflection reports"
     );
     assert_counts_cover_declared_arrays("the descriptor-array kernel", &spirv, &reflection);
+}
+
+fn texture_array_counts(reflection: &ShaderReflection) -> Vec<u32> {
+    reflection
+        .bindings
+        .iter()
+        .filter(|resource| resource.kind == ResourceKind::TextureArray)
+        .filter_map(|resource| resource.descriptor.map(|location| location.count))
+        .collect()
+}
+
+/// Under bindless-all (the default) element `i` of a sampled texture array is the texture at Metal index `base + i`:
+/// its heap slot comes from the per-draw table, word 64 + base + min(i, N - 1), so the module declares no descriptor
+/// array (passes::resources::route_texture_array_elements_through_heap). Returns each `N - 1` the module clamps an
+/// element index to; empty when the module reads no array element through the heap.
+fn heap_array_clamps(spirv: &[u8]) -> Vec<u32> {
+    let text = metal2vulkan::disassemble(spirv).expect("disassemble the translated module");
+    let constants = text
+        .lines()
+        .filter_map(|line| match line.split_whitespace().collect::<Vec<_>>().as_slice() {
+            [result, "=", "OpConstant", _, value] => Some(((*result).to_string(), value.parse::<u32>().ok()?)),
+            _ => None,
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let heap_declared = text.lines().any(|line| {
+        line.starts_with("OpDecorate ")
+            && line.ends_with(&format!(" DescriptorSet {BINDLESS_HEAP_SET}"))
+    });
+    if !heap_declared {
+        return Vec::new();
+    }
+    text.lines()
+        .filter_map(|line| match line.split_whitespace().collect::<Vec<_>>().as_slice() {
+            [_, "=", "OpExtInst", _, _, "UMin", _, last] => constants.get(*last).copied(),
+            _ => None,
+        })
+        .collect()
 }
 
 const FIXED_TEXTURE_ARRAY: &str = r#"target triple = "spirv-unknown-vulkan1.2"
@@ -383,26 +429,20 @@ fn a_fixed_descriptor_array_reports_its_declared_length_not_the_ceiling() {
 
         assert_reflection_covers_declarations(label, &spirv, &reflection);
 
-        let declared = array_lengths_the_module_declares(&spirv);
-        assert!(
-            declared.values().any(|length| *length == declared_length),
-            "{label} should declare an OpTypeArray of {declared_length}; got {declared:?}"
+        // The elements are heap slots (heap_array_clamps), indexed no further than the declared length.
+        assert_eq!(
+            heap_array_clamps(&spirv),
+            vec![declared_length - 1],
+            "{label} should index an array of {declared_length}"
         );
-
         assert_eq!(
             assert_counts_cover_declared_arrays(label, &spirv, &reflection),
-            declared.len(),
+            array_lengths_the_module_declares(&spirv).len(),
             "{label} left a declared binding uncompared"
         );
 
-        let array_counts = reflection
-            .bindings
-            .iter()
-            .filter(|resource| resource.kind == metal2vulkan::reflect::ResourceKind::TextureArray)
-            .filter_map(|resource| resource.descriptor.map(|location| location.count))
-            .collect::<Vec<_>>();
         assert_eq!(
-            array_counts,
+            texture_array_counts(&reflection),
             vec![declared_length],
             "{label} should report exactly the declared array length"
         );
@@ -922,12 +962,15 @@ fn a_constexpr_sampler_no_sample_reads_is_not_reported() {
     .expect("the three-sampler fragment translates");
 
     assert_reflection_covers_declarations("the unread-sampler fragment", &spirv, &reflection);
+    // Every invented descriptor is declared: the two static samplers, and the buffer-address table the bindless
+    // texture reads its heap slot from.
+    assert_invented_descriptors_are_declared("the unread-sampler fragment", &spirv, &reflection);
     assert_eq!(
-        assert_invented_descriptors_are_declared(
-            "the unread-sampler fragment",
-            &spirv,
-            &reflection
-        ),
+        reflection
+            .bindings
+            .iter()
+            .filter(|binding| binding.kind == ResourceKind::StaticSampler && binding.descriptor.is_some())
+            .count(),
         2,
         "the two sampled states are reported and the unread one is not"
     );
