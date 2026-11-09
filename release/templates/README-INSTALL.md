@@ -28,7 +28,7 @@ Already running an earlier build of this driver? Go to [Upgrading](#upgrading-fr
 
   | File | What | Unpack it on |
   |---|---|---|
-  | `intel-gpu-macos-driver-@VER@-efi.zip` | the OpenCore pieces: `IntelXe.kext`, `SSDT-ARCOFF.aml` and its source; `IntelXe-EFI.ps1`, which makes stages 2 and 4 on Windows | any system |
+  | `intel-gpu-macos-driver-@VER@-efi.zip` | the OpenCore pieces: `IntelXe.kext`, `SSDT-ARCOFF.aml` and its source, `HybridPM.kext` (optional, [hybrid Intel CPUs](#hybrid-intel-cpus-12th-14th-gen-hybridpmkext)); `IntelXe-EFI.ps1`, which makes stages 2 and 4 on Windows | any system |
   | `IntelXe-Manager-@VER@.zip` | the IntelXe Manager app: stages 3 and 4 (and later updates) with buttons instead of Terminal; it downloads the next file itself | macOS on the PC |
   | `intel-gpu-macos-driver-@VER@-@CODENAME@.zip` | everything else, with `install.sh` and `efi.sh` | **macOS on the PC** (stage 3) |
   | `intel-gpu-macos-driver-@VER@-zink-gl.zip` | optional: OpenGL through zink for LWJGL games | macOS on the PC, after stage 4 |
@@ -244,6 +244,45 @@ Manager when Windows runs on the PC with the card). See `README-Windows.md` in t
    names the Arc B580 with 12 GB. In Terminal, `kmutil showloaded | grep -i intelxe` lists `IntelXe` and `IntelXeFB`,
    and `sysctl debug.nmxaccelfb` prints `1`.
 
+## Hybrid Intel CPUs (12th-14th gen): HybridPM.kext
+
+macOS's CPU power management (XCPM) predates CPUs with performance and efficiency cores. On Alder Lake and Raptor Lake
+it caps the P-cores (an i7-14700K stayed at 4.4 GHz instead of 5.6) and can hold fully busy cores at 800 MHz. The GPU
+driver does a lot of CPU work per command buffer, so the GPU looks slow too: on the test machine Geekbench's GPU scores
+were about a third higher with `HybridPM.kext`, and one CPU thread more than twice as fast. HybridPM is separate from
+the GPU driver and optional; it is in the `-efi.zip` and in the macOS package under `EFI/OC/Kexts/`.
+
+**Which CPUs:** 12th, 13th and 14th generation Core i3/i5/i7/i9 with P- and E-cores (Alder Lake and Raptor Lake,
+desktop and laptop; e.g. i5-12600K, i5-13400F, i7-14700K, i7-13620H). Not Core Ultra: it leaves those alone, as it does
+CPUs without E-cores and older CPUs (it only logs why). The model list is in `kernel/HybridPM/README.md` in the
+repository.
+
+**Adding it** (by hand; `efi.sh` and the app do not add it):
+
+1. It is a Lilu plugin. Most OpenCore EFIs already have `Lilu.kext` for VirtualSMC; if yours has not, add it from
+   [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases) (1.7.2 on the test machine). This package does not
+   include Lilu.
+2. Copy `HybridPM.kext` to `EFI/OC/Kexts/` and add it under `Kernel > Add`, **below** `Lilu.kext`:
+   `BundlePath HybridPM.kext`, `ExecutablePath Contents/MacOS/HybridPM`, `PlistPath Contents/Info.plist`,
+   `Enabled true`.
+3. Reboot. It starts working 20 seconds after boot.
+
+**Checking it:**
+
+```sh
+sysctl debug.hybridpm.enabled debug.hybridpm.why debug.hybridpm.route
+# debug.hybridpm.enabled: 1, debug.hybridpm.why: on (model 0xB7), debug.hybridpm.route: 1
+./hpmstat 1000 3     # in the package folder: each core's clock and load, HWP limits, package power
+```
+
+With `enabled` 0, `why` says why: `not hybrid` or `unsupported model` (Core Ultra and others), or `route 3` when a macOS
+update changed the routine it corrects; macOS then runs as without it. When `debug.hybridpm` does not exist, HybridPM or
+Lilu did not load (`kmutil showloaded | grep -i -e lilu -e hybridpm`).
+
+**Turning it off:** add `-hpmoff` to the boot-args, or set its `Kernel > Add` entry to `Enabled false`. Until the next
+restart, `sudo sysctl debug.hybridpm.hwp=0 debug.hybridpm.autonomous=0 debug.hybridpm.epp=-1 debug.hybridpm.eet_off=0`
+gives back macOS's own settings.
+
 ## Optional: OpenGL through zink
 
 macOS's own OpenGL runs on top of Metal and is slow on this driver. LWJGL 3 Java games (Minecraft Java 1.13 and later)
@@ -380,12 +419,14 @@ NVRAM settings and sysctls have only the new names: the variable `b580fb-vrr-mod
 |---|---|
 | `EFI/OC/Kexts/IntelXe.kext` | the EFI, `Kernel > Add` (stage 4); the same file as in the `-efi.zip` |
 | `EFI/OC/ACPI/SSDT-ARCOFF.aml`, `.dsl` | the EFI, `ACPI > Add`, after checking the path (stage 4) |
+| `EFI/OC/Kexts/HybridPM.kext` | optional: the EFI, `Kernel > Add` below Lilu, for 12th-14th gen hybrid Intel CPUs |
 | `Library/Extensions/IntelXeFB.kext`, `NMXAccel.kext`, `NMXAGDC.kext` | `/Library/Extensions` (display, accelerator), via `install.sh` |
 | `Library/GPUBundles/NVMTLDriverLib.bundle`, `nvmtl/`, `nvmtl-allow.txt` | `/Library/GPUBundles` (Metal driver, Mesa, codecs), via `install.sh` |
 | (made by `install.sh`) | `/Library/LaunchDaemons/io.github.yusufklncc.intelxe.guard.plist`: clears the boot guard once a boot has run for a minute |
 | `system-volume/` | optional: the copy of the Metal driver on the system volume (Safari on the GPU, 3.3) |
 | `efi.sh` | optional, on macOS: stages 2 and 4 in the EFI OpenCore booted from, with a backup and an undo |
 | `hidpi.sh` | optional: HiDPI modes for the monitor (display scaling), on and off |
+| `hpmstat` | optional: per-core clocks and package power, with HybridPM loaded |
 | `SHA256SUMS`, `sigcheck` | the checks `install.sh` runs |
 | `SOURCES.md`, `LICENSES/` | which source and script built each binary; the licence texts |
 

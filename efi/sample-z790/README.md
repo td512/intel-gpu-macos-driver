@@ -43,7 +43,7 @@ for anything that differs on your machine.
    | IntelBluetoothFirmware, IntelBTPatcher | 2.5.0 | [OpenIntelWireless/IntelBluetoothFirmware](https://github.com/OpenIntelWireless/IntelBluetoothFirmware/releases) | Intel Bluetooth |
    | AirportItlwm | 2.4.0 | [OpenIntelWireless/itlwm](https://github.com/OpenIntelWireless/itlwm/releases) | Intel Wi-Fi; take the build for your macOS. The test machine's BE202 needed a patched build that is not published |
    | IntelXe | from the `-efi.zip` | this project | the GPU driver, stage 4 only |
-   | HybridPM | | not published yet | the test machine's power management for hybrid CPUs; the entry is disabled. Without it the CPU stayed near 4.4 GHz instead of 5.5 GHz on macOS 26 |
+   | HybridPM | from the `-efi.zip` | this project ([kernel/HybridPM](../../kernel/HybridPM/README.md)) | XCPM fix for hybrid (12th-14th gen) CPUs; the entry is disabled here, enable it after Lilu. Without it the CPU stayed near 4.4 GHz instead of 5.5 GHz on macOS 26 |
 
    Leave out what your machine does not have (another Ethernet chip, Wi-Fi card or Bluetooth) and remove its
    `Kernel > Add` entry.

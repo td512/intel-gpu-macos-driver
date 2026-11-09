@@ -76,6 +76,15 @@ Scripts (`scripts/`):
 
 Licence: `IntelXeFB.cpp` is derived from nullmoth's NMIntelFB/NVRMFB and is therefore PolyForm Noncommercial 1.0.0. `IntelXeLink.*` is MIT. See `IntelXeFB/LICENSE`.
 
+## HybridPM/ — CPU clocks for hybrid Intel CPUs (`io.github.yusufklncc.HybridPM`, HybridPM.kext)
+
+A Lilu plugin, separate from the GPU driver, for Alder Lake / Raptor Lake CPUs (12th to 14th generation Core with P- and
+E-cores). macOS's XCPM writes the P-cores' HWP request in 100 MHz units where they count 78.741 MHz, and pins busy cores
+to low clocks; HybridPM converts the request and lets the hardware pick each core's clock. On the test machine's
+i7-14700K one thread went from ~55 to 128 M iterations/s and Geekbench's GPU scores rose about a third (the driver's
+CPU work per command buffer runs faster). Details, controls and `hpmstat`: [HybridPM/README.md](HybridPM/README.md).
+Built by `kernel/HybridPM/build.py` (MacKernelSDK and Lilu's headers).
+
 ## Building
 
 ```sh
@@ -84,6 +93,7 @@ git clone https://github.com/acidanthera/MacKernelSDK external/MacKernelSDK   # 
 python3 kernel/IntelXe/build.py                        # -> build/IntelXe.kext, build/IntelXeFB.kext
 python3 kernel/IntelXe/build.py --debug                # -O0, INTELXE_DEBUG=1 (destructive bring-up steps, batch dumps)
 python3 kernel/IntelXe/build.py --only IntelXe --output /tmp/k
+python3 kernel/HybridPM/build.py --lilu /path/to/Lilu.kext   # -> build/HybridPM/HybridPM.kext, hpmstat
 ```
 
 Built on an Apple Silicon Mac with the Command Line Tools (x86_64 kext target).
