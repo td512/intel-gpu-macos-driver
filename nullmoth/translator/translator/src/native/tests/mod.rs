@@ -304,3 +304,52 @@ fn heap_texture_dim(spv: &[u8], metal_index: u32) -> Option<spirv::Dim> {
         _ => None,
     }
 }
+
+/// A device-address load is a call of a helper the emitter keeps out of line (emit_device_addr_load,
+/// null_bda_load_helper): `helper(base, address)` loads `address` unless `base` is null, and returns zero then.
+/// The helpers of `module`, by function id.
+fn null_bda_load_helpers(module: &Module) -> HashSet<Word> {
+    module
+        .functions
+        .iter()
+        .filter(|function| {
+            let [entry, live, merge] = &function.blocks[..] else {
+                return false;
+            };
+            let [base, address] = &function.parameters[..] else {
+                return false;
+            };
+            let uses = |inst: &crate::spirv_module::Instruction, id: Option<Word>| {
+                id.is_some_and(|id| inst.operands.first() == Some(&Operand::IdRef(id)))
+            };
+            entry
+                .instructions
+                .iter()
+                .any(|inst| inst.class.opcode == Op::INotEqual && uses(inst, base.result_id))
+                && live
+                    .instructions
+                    .iter()
+                    .any(|inst| inst.class.opcode == Op::ConvertUToPtr && uses(inst, address.result_id))
+                && live.instructions.iter().any(|inst| inst.class.opcode == Op::Load)
+                && merge.instructions.iter().any(|inst| inst.class.opcode == Op::Phi)
+        })
+        .filter_map(|function| function.def.as_ref()?.result_id)
+        .collect()
+}
+
+/// The values `module` reads through a null-guarded device-address load helper, with the address each one reads.
+fn null_bda_loads(module: &Module) -> HashMap<Word, Word> {
+    let helpers = null_bda_load_helpers(module);
+    module
+        .all_inst_iter()
+        .filter(|inst| inst.class.opcode == Op::FunctionCall)
+        .filter_map(|inst| match inst.operands[..] {
+            [Operand::IdRef(helper), Operand::IdRef(_), Operand::IdRef(address)]
+                if helpers.contains(&helper) =>
+            {
+                Some((inst.result_id?, address))
+            }
+            _ => None,
+        })
+        .collect()
+}

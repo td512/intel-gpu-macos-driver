@@ -485,15 +485,26 @@ exit:
             .then_some(instruction.result_id?)
         })
         .collect::<HashSet<_>>();
+    // A device-address read is a call of the null-guarded load helper; its own OpLoad is not the kernel's.
+    let helpers = null_bda_load_helpers(&module);
+    let device_reads = null_bda_loads(&module);
     let loaded_i16 = module
-        .all_inst_iter()
-        .filter_map(|instruction| {
-            (instruction.class.opcode == Op::Load
-                && instruction
-                    .result_type
-                    .is_some_and(|ty| i16_types.contains(&ty)))
-            .then_some(instruction.result_id?)
+        .functions
+        .iter()
+        .filter(|function| {
+            !function
+                .def
+                .as_ref()
+                .and_then(|def| def.result_id)
+                .is_some_and(|id| helpers.contains(&id))
         })
+        .flat_map(|function| function.all_inst_iter())
+        .filter(|instruction| {
+            instruction.result_type.is_some_and(|ty| i16_types.contains(&ty))
+                && (instruction.class.opcode == Op::Load
+                    || instruction.result_id.is_some_and(|id| device_reads.contains_key(&id)))
+        })
+        .filter_map(|instruction| instruction.result_id)
         .collect::<HashSet<_>>();
     assert!(
         !loaded_i16.is_empty(),
@@ -610,13 +621,20 @@ entry:
             _ => {}
         }
     }
+    // Words read from device memory: a load through a converted pointer, or a call of the null-guarded
+    // device-address load helper (which converts its address itself).
+    let device_words = loaded_from
+        .iter()
+        .filter(|(_, pointer)| address_of.contains_key(*pointer))
+        .map(|(word, _)| *word)
+        .chain(null_bda_loads(&module).into_keys())
+        .collect::<HashSet<Word>>();
     let two_hops = module.all_inst_iter().any(|instruction| {
         instruction.class.opcode == Op::Store
             && matches!(instruction.operands.get(1), Some(Operand::IdRef(value)) if sevens.contains(value))
             && matches!(instruction.operands.first(), Some(Operand::IdRef(pointer)) if address_of
                 .get(pointer)
-                .and_then(|word| loaded_from.get(word))
-                .is_some_and(|table| address_of.contains_key(table)))
+                .is_some_and(|word| device_words.contains(word)))
     });
     assert!(
         two_hops,
@@ -1565,7 +1583,33 @@ declare extern_weak i64 @mtl.force_not_checked.load.i64.p1(ptr addrspace(1)) sec
     let asm = disassemble(&spv).expect("disassemble");
     assert!(asm.contains("PhysicalStorageBuffer64"), "{asm}");
     assert!(asm.contains("OpConvertUToPtr"), "{asm}");
-    assert!(!asm.contains("OpFunctionCall"), "{asm}");
+    // The external mtl.force_not_checked function is not called: the load is the emitter's own device-address load,
+    // the one call of the null-guarded load helper, at the inttoptr address plus 8.
+    let module = load_bytes(&spv).expect("load translated module");
+    let reads = null_bda_loads(&module);
+    let calls = module
+        .all_inst_iter()
+        .filter(|instruction| instruction.class.opcode == Op::FunctionCall)
+        .count();
+    assert_eq!((calls, reads.len()), (1, 1), "{asm}");
+    let eights = module
+        .types_global_values
+        .iter()
+        .filter(|instruction| {
+            instruction.class.opcode == Op::Constant
+                && instruction.operands.first() == Some(&Operand::LiteralBit64(8))
+        })
+        .filter_map(|instruction| instruction.result_id)
+        .collect::<HashSet<Word>>();
+    let address = *reads.values().next().unwrap();
+    assert!(
+        module.all_inst_iter().any(|instruction| {
+            instruction.class.opcode == Op::IAdd
+                && instruction.result_id == Some(address)
+                && matches!(instruction.operands.get(1), Some(Operand::IdRef(eight)) if eights.contains(eight))
+        }),
+        "{asm}"
+    );
     if std::process::Command::new("spirv-val")
         .arg("--version")
         .output()
@@ -12295,7 +12339,7 @@ merge:
 }
 
 #[test]
-fn native_forward_unmodeled_device_gep_phi_uses_typed_zero_not_pointer_phi() {
+fn native_forward_device_gep_phi_loads_a_device_address_not_a_pointer_phi() {
     let ll = r#"
 target triple = "spirv-unknown-vulkan1.2"
 %struct.Box = type { [3 x float], [3 x float] }
@@ -12339,11 +12383,29 @@ rhs:
         !asm.lines().any(|line| line.contains("OpSelect %_ptr_")),
         "unmodeled forward-GEP arms must not emit a pointer select:\n{asm}"
     );
+    // The merged pointer is no longer unmodeled: the phi arms are device addresses, and the load through it is a
+    // device-address load (null-guarded) rather than the typed zero this path once fell back to. Either way nothing
+    // may back the pointer with Private memory.
     assert!(
-        !asm.contains("OpTypePointer Private")
-            && asm.contains("OpConstantNull")
-            && asm.contains("OpCopyObject"),
-        "expected typed zero values without private pointer backing:\n{asm}"
+        !asm.contains("OpTypePointer Private"),
+        "expected no private pointer backing:\n{asm}"
+    );
+    let module = load_bytes(&out).expect("load translated module");
+    let float_types = module
+        .types_global_values
+        .iter()
+        .filter(|instruction| instruction.class.opcode == Op::TypeFloat)
+        .filter_map(|instruction| instruction.result_id)
+        .collect::<HashSet<Word>>();
+    assert!(
+        module.all_inst_iter().any(|instruction| {
+            instruction.class.opcode == Op::Load
+                && instruction.result_type.is_some_and(|ty| float_types.contains(&ty))
+                && matches!(instruction.operands.first(), Some(Operand::IdRef(pointer)) if module
+                    .all_inst_iter()
+                    .any(|def| def.result_id == Some(*pointer) && def.class.opcode == Op::ConvertUToPtr))
+        }),
+        "expected the merged float load to read a device address:\n{asm}"
     );
     if std::process::Command::new("spirv-val")
         .arg("--version")
@@ -14360,19 +14422,35 @@ entry:
                 && matches!(instruction.operands.first(), Some(Operand::IdRef(id)) if nulls.contains(id))
         })
         .count();
+    // Each device read is a call of the null-guarded load helper, which holds the one OpLoad they share.
+    let helpers = null_bda_load_helpers(&module);
+    let device_reads = null_bda_loads(&module);
     let float_loads = module
-        .all_inst_iter()
+        .functions
+        .iter()
+        .filter(|function| {
+            !function
+                .def
+                .as_ref()
+                .and_then(|def| def.result_id)
+                .is_some_and(|id| helpers.contains(&id))
+        })
+        .flat_map(|function| function.all_inst_iter())
         .filter(|instruction| {
-            instruction.class.opcode == Op::Load
-                && instruction
-                    .result_type
-                    .is_some_and(|ty| float_types.contains(&ty))
+            instruction
+                .result_type
+                .is_some_and(|ty| float_types.contains(&ty))
+                && (instruction.class.opcode == Op::Load
+                    || instruction
+                        .result_id
+                        .is_some_and(|id| device_reads.contains_key(&id)))
         })
         .count();
     assert_eq!(
         (null_copies, float_loads),
         (0, 2),
-        "(null-folded copies, real float loads): both helper reads must survive"
+        "(null-folded copies, real float loads): both helper reads must survive\n{}",
+        disassemble(&spv).unwrap_or_default()
     );
 }
 
