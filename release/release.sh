@@ -1,0 +1,112 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# release.sh VERSION OUT_DIR [--publish]: the release of intel-gpu-macos-driver VERSION in one place.
+#
+#   release/release.sh 0.1.4 ~/github-staging/release/out-0.1.4             dry run: checks everything, publishes nothing
+#   release/release.sh 0.1.4 ~/github-staging/release/out-0.1.4 --publish   tag, push, GitHub release (asks once more)
+#
+# Checks (all must pass, also for --publish):
+#   - VERSION in the repository, the branch (main), a clean work tree (untracked files only warn);
+#   - the tag vVERSION exists neither here nor on origin or gitlab; origin/main is an ancestor of HEAD (a fast-forward);
+#   - OUT_DIR holds the package zips of package.sh and the app, and its .sha256 matches them;
+#   - the versions inside: IntelXe.kext and HybridPM.kext in the -efi.zip, IntelXe Manager in its zip, install.sh in the
+#     Tahoe and Sequoia zips;
+#   - the release notes release/notes-VERSION.md (the final file, not the -draft) exist, say VERSION and have no
+#     "draft" or "TODO" left; release/install.sh and README-INSTALL*.md (package.sh's filled copies) are of VERSION;
+#   - the machine-identity scan (tools/commit-plan-scan.py of the private repo, when present) finds nothing in the
+#     notes and the filled guides.
+# Publishing: git tag -a vVERSION; git push origin main vVERSION; the same to gitlab (the local GitLab mirror);
+# gh release create vVERSION <zips> --notes-file release/notes-VERSION.md. Each step stops the rest on failure.
+set -uo pipefail
+[ $# -ge 2 ] || { sed -n '3,22p' "$0"; exit 2; }
+VER=$1 OUT=$2 PUBLISH=no
+[ "${3:-}" = --publish ] && PUBLISH=yes
+R=$(cd "$(dirname "$0")/.." && pwd)
+cd "$R"
+N=intel-gpu-macos-driver-$VER
+fails=0
+ok()  { printf '  ok    %s\n' "$*"; }
+bad() { printf '  FAIL  %s\n' "$*"; fails=$((fails + 1)); }
+warn(){ printf '  warn  %s\n' "$*"; }
+zipver() { # zip, path of an Info.plist inside: its CFBundleShortVersionString or CFBundleVersion
+	local t; t=$(mktemp -d); unzip -q -o "$1" "$2" -d "$t" 2>/dev/null
+	plutil -extract CFBundleShortVersionString raw "$t/$2" 2>/dev/null || plutil -extract CFBundleVersion raw "$t/$2" 2>/dev/null
+	rm -rf "$t"
+}
+
+echo "== intel-gpu-macos-driver $VER: release checks ($([ $PUBLISH = yes ] && echo publish || echo dry run))"
+# --- repository
+[ "$(cat VERSION 2>/dev/null)" = "$VER" ] && ok "VERSION is $VER" || bad "VERSION says $(cat VERSION 2>/dev/null), not $VER"
+br=$(git rev-parse --abbrev-ref HEAD)
+[ "$br" = main ] && ok "on main" || bad "on $br, not main"
+[ -z "$(git status --porcelain --untracked-files=no)" ] && ok "work tree clean" || bad "uncommitted changes: $(git status --porcelain --untracked-files=no | wc -l | tr -d ' ') files"
+[ -n "$(git status --porcelain | grep '^??')" ] && warn "untracked files (not part of the release): $(git status --porcelain | grep -c '^??')"
+if git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then bad "tag v$VER exists here"; else ok "tag v$VER is new here"; fi
+for rem in origin gitlab; do
+	git remote get-url "$rem" >/dev/null 2>&1 || { warn "no remote $rem"; continue; }
+	if out=$(timeout 20 git ls-remote --tags "$rem" "refs/tags/v$VER" 2>/dev/null || git ls-remote --tags "$rem" "refs/tags/v$VER" 2>/dev/null); then
+		[ -z "$out" ] && ok "tag v$VER is new on $rem" || bad "tag v$VER already on $rem"
+	else warn "$rem not reachable (tag not checked there)"; fi
+done
+git fetch -q origin main 2>/dev/null && { git merge-base --is-ancestor origin/main HEAD && ok "origin/main is an ancestor of HEAD ($(git rev-list --count origin/main..HEAD) commits to push)" || bad "origin/main is not an ancestor of HEAD: not a fast-forward"; } || warn "origin not fetched"
+
+# --- packages
+for f in "$N-tahoe.zip" "$N-sequoia.zip" "$N-efi.zip" "$N.sha256" "IntelXe-Manager-$VER.zip"; do
+	[ -f "$OUT/$f" ] && ok "$f" || bad "missing $OUT/$f"
+done
+[ -f "$OUT/$N-zink-gl.zip" ] && ok "$N-zink-gl.zip (optional)" || warn "no $N-zink-gl.zip (optional)"
+if [ -f "$OUT/$N.sha256" ]; then
+	(cd "$OUT" && shasum -a 256 -c "$N.sha256" >/dev/null 2>&1) && ok "$N.sha256 matches" || bad "$N.sha256 does not match the files"
+fi
+if [ -f "$OUT/$N-efi.zip" ]; then
+	v=$(zipver "$OUT/$N-efi.zip" "$N-efi/EFI/OC/Kexts/IntelXe.kext/Contents/Info.plist"); [ "$v" = "$VER" ] && ok "IntelXe.kext $v" || bad "IntelXe.kext in the -efi.zip is ${v:-unreadable}"
+	v=$(zipver "$OUT/$N-efi.zip" "$N-efi/EFI/OC/Kexts/HybridPM.kext/Contents/Info.plist"); [ "$v" = "$VER" ] && ok "HybridPM.kext $v" || bad "HybridPM.kext in the -efi.zip is ${v:-unreadable}"
+fi
+if [ -f "$OUT/IntelXe-Manager-$VER.zip" ]; then
+	v=$(zipver "$OUT/IntelXe-Manager-$VER.zip" "IntelXe Manager.app/Contents/Info.plist"); [ "$v" = "$VER" ] && ok "IntelXe Manager $v" || bad "IntelXe Manager is ${v:-unreadable}"
+fi
+for m in tahoe sequoia; do
+	[ -f "$OUT/$N-$m.zip" ] || continue
+	unzip -p "$OUT/$N-$m.zip" "$N-$m/install.sh" 2>/dev/null | grep -q "^VER=$VER$" && ok "install.sh in -$m.zip is $VER" || bad "install.sh in -$m.zip is not $VER"
+done
+
+# --- notes and filled copies
+NOTES=release/notes-$VER.md
+if [ -f "$NOTES" ]; then
+	ok "$NOTES"
+	grep -q "$VER" "$NOTES" || bad "$NOTES does not mention $VER"
+	grep -qiE '\bdraft\b|TODO|TBD' "$NOTES" && bad "$NOTES still says draft/TODO/TBD" || ok "no draft/TODO left in the notes"
+else
+	bad "no $NOTES (finish release/notes-$VER-draft.md and rename it)"
+fi
+grep -q "^VER=$VER$" release/install.sh && ok "release/install.sh is $VER" || bad "release/install.sh is not $VER (run package.sh, commit its filled copies)"
+grep -q "intel-gpu-macos-driver-$VER-" release/README-INSTALL.md && ok "release/README-INSTALL.md is $VER" || bad "release/README-INSTALL.md is not $VER"
+SCAN=$(cd "$R/.." && pwd)/../hackintosh/tools/commit-plan-scan.py
+[ -f "$SCAN" ] || SCAN=$HOME/hackintosh/tools/commit-plan-scan.py
+if [ -f "$SCAN" ]; then
+	files=$(ls "$NOTES" release/README-INSTALL.md release/README-INSTALL.tr.md 2>/dev/null)
+	h=$(python3 "$SCAN" $files 2>&1 | sed -n 's/^scan: \([0-9]*\) hit(s)$/\1/p')
+	[ "${h:-1}" = 0 ] && ok "identity scan: 0 hits" || bad "identity scan: ${h:-?} hit(s) in the notes or guides"
+else
+	warn "identity scan not found (tools/commit-plan-scan.py of the private repo)"
+fi
+
+echo "== $fails failure(s)"
+CMDS=(
+	"git tag -a v$VER -m 'intel-gpu-macos-driver $VER'"
+	"git push origin main v$VER"
+	"git push gitlab main v$VER"
+	"gh release create v$VER $(cd "$OUT" 2>/dev/null && ls | grep -E "^($N|IntelXe-Manager-$VER)" | sed "s#^#'$OUT/#; s#\$#'#" | tr '\n' ' ')--title 'intel-gpu-macos-driver $VER' --notes-file $NOTES"
+)
+echo "== the publishing steps:"
+for c in "${CMDS[@]}"; do echo "  $c"; done
+[ $PUBLISH = yes ] || { echo "dry run: nothing was published"; exit $([ $fails = 0 ] && echo 0 || echo 1); }
+[ $fails = 0 ] || { echo "not publishing: fix the failures first"; exit 1; }
+printf 'Publish intel-gpu-macos-driver %s now (tag, push to origin and gitlab, GitHub release)? Type the version to go on: ' "$VER"
+read -r answer
+[ "$answer" = "$VER" ] || { echo "not published"; exit 1; }
+for c in "${CMDS[@]}"; do
+	echo "== $c"
+	eval "$c" || { echo "stopped: that step failed; the steps before it are done"; exit 1; }
+done
+echo "== published $VER"
