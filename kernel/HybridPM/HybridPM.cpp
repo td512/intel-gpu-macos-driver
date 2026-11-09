@@ -23,6 +23,9 @@
 //  debug.hybridpm.state (read-only, any user) returns HpmState below: per-CPU APERF/MPERF, HWP capabilities and
 //  request, core type and temperature, plus package RAPL energy, power limits (MSR 0x610 and the MCHBAR copy at
 //  0x59A0, the lower one applies), perf-limit reasons and turbo ratio limits. hpmstat diffs two samples.
+//
+//  CPU guard: it acts only on Intel family 6 hybrid CPUs (CPUID.07H:EDX[15]) with HWP whose model uses the ADL/RPL scale
+//  above; everything else is left to XCPM untouched (no route, no MSR access) and debug.hybridpm.why says why.
 #include <Headers/plugin_start.hpp>
 #include <Headers/kern_api.hpp>
 #include <Headers/kern_patcher.hpp>
@@ -34,7 +37,8 @@
 
 static inline uint64_t rdmsr64(uint32_t m) { uint32_t lo, hi; asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(m)); return ((uint64_t)hi << 32) | lo; }
 static inline void wrmsr64(uint32_t m, uint64_t v) { asm volatile("wrmsr" : : "c"(m), "a"((uint32_t)v), "d"((uint32_t)(v >> 32))); }
-static inline uint32_t cpuidEax(uint32_t leaf) { uint32_t a, b, c, d; asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(leaf), "c"(0)); return a; }
+static inline void cpuid(uint32_t leaf, uint32_t sub, uint32_t r[4]) { asm volatile("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(leaf), "c"(sub)); }
+static inline uint32_t cpuidEax(uint32_t leaf) { uint32_t r[4]; cpuid(leaf, 0, r); return r[0]; }
 
 static constexpr int MaxCpus = 64;
 static constexpr uint32_t HybridScale = 78741;   // P-core kHz per HWP performance unit (ADL/RPL)
@@ -47,6 +51,56 @@ static CpuNumberFn cpuNumber;
 static int enabled, hwpOn = 1, autonomous = 1, eppOverride = 0, eetOff = 1, route, applied;
 static uint8_t coreType[MaxCpus];   // CPUID 0x1A EAX[31:24]: 0x40 Core, 0x20 Atom; 0 = not seen yet
 static mach_vm_address_t orgSetRatio;
+static uint32_t cpuModel;
+static char why[96] = "not checked";   // debug.hybridpm.why
+
+// ─── CPU guard ───────────────────────────────────────────────────────────────────────────────────────────────────
+// HybridScale is Linux intel_pstate's HYBRID_SCALING_FACTOR_ADL, which its hybrid_scaling_factor table applies to these
+// family 6 models (names from arch/x86/include/asm/intel-family.h): ALDERLAKE 0x97, ALDERLAKE_L 0x9A, RAPTORLAKE 0xB7,
+// RAPTORLAKE_P 0xBA, RAPTORLAKE_S 0xBF. ALDERLAKE_N 0xBE has E-cores only, so the hybrid bit already rules it out; it is
+// listed as Alder Lake. Core Ultra uses other scales (METEORLAKE_L 0xAA / METEORLAKE 0xAC: HYBRID_SCALING_FACTOR_MTL
+// 80000; LUNARLAKE_M 0xBD: _LNL 86957) or scales not checked here (ARROWLAKE_H 0xC5, ARROWLAKE 0xC6, ARROWLAKE_U 0xB5,
+// PANTHERLAKE_L 0xCC; Linux may take them from CPPC), and anything else is unknown: all of those are left alone. The raw
+// CPUID instruction gives the real signature; OpenCore's Cpuid1Data only changes what the kernel itself records.
+static bool cpuSupported() {
+	uint32_t r[4];
+	cpuid(0, 0, r);
+	const uint32_t maxLeaf = r[0];
+	if (r[1] != 0x756E6547 || r[3] != 0x49656E69 || r[2] != 0x6C65746E) {   // "GenuineIntel"
+		strlcpy(why, "not an Intel CPU", sizeof(why));
+		return false;
+	}
+	cpuid(1, 0, r);
+	const uint32_t family = ((r[0] >> 8) & 0xF) + (((r[0] >> 8) & 0xF) == 0xF ? (r[0] >> 20) & 0xFF : 0);
+	cpuModel = ((r[0] >> 4) & 0xF) | ((r[0] >> 12) & 0xF0);
+	if (family != 6) {
+		snprintf(why, sizeof(why), "not family 6 (family %u, model 0x%02X)", family, cpuModel);
+		return false;
+	}
+	if (maxLeaf < 0x1A || (cpuid(7, 0, r), !(r[3] & (1U << 15)))) {
+		snprintf(why, sizeof(why), "not hybrid (model 0x%02X)", cpuModel);
+		return false;
+	}
+	cpuid(6, 0, r);
+	if (!(r[0] & (1U << 7))) {
+		snprintf(why, sizeof(why), "no HWP (model 0x%02X)", cpuModel);
+		return false;
+	}
+	switch (cpuModel) {
+	case 0x97: case 0x9A: case 0xBE: case 0xBF:
+		snprintf(why, sizeof(why), "Alder Lake hybrid (model 0x%02X): waiting for XCPM", cpuModel);
+		return true;
+	case 0xB7: case 0xBA:
+		snprintf(why, sizeof(why), "Raptor Lake hybrid (model 0x%02X): waiting for XCPM", cpuModel);
+		return true;
+	case 0xAA: case 0xAC: case 0xB5: case 0xBD: case 0xC5: case 0xC6: case 0xCC:
+		snprintf(why, sizeof(why), "unsupported model 0x%02X (Core Ultra: another HWP scale)", cpuModel);
+		return false;
+	default:
+		snprintf(why, sizeof(why), "unsupported model 0x%02X (HWP scale unknown)", cpuModel);
+		return false;
+	}
+}
 
 // ─── HWP request ─────────────────────────────────────────────────────────────────────────────────────────────────
 static uint64_t setRatio(uint64_t ratio, uint64_t a1, uint64_t a2, uint64_t a3) {   // Apple uses only edi
@@ -81,6 +135,7 @@ static void apply(thread_call_param_t, thread_call_param_t) {
 	rendezvous(eetOne, eetOff ? (void *)1 : nullptr);
 	enabled = orgSetRatio != 0;   // the request is converted at XCPM's next write on each CPU
 	applied = 1;
+	snprintf(why, sizeof(why), "on (model 0x%02X)", cpuModel);
 	SYSLOG("hpm", "on: route %d, hwp %d, autonomous %d, epp %d, eet_off %d", route, hwpOn, autonomous, eppOverride, (int)((rdmsr64(0x1FC) >> 19) & 1));
 }
 
@@ -170,17 +225,23 @@ SYSCTL_INT(_debug_hybridpm, OID_AUTO, hwp, CTLFLAG_RW, &hwpOn, 0, "convert XCPM 
 SYSCTL_INT(_debug_hybridpm, OID_AUTO, autonomous, CTLFLAG_RW, &autonomous, 0, "1 = desired 0, the hardware picks the clock");
 SYSCTL_INT(_debug_hybridpm, OID_AUTO, epp, CTLFLAG_RW, &eppOverride, 0, "EPP override, -1 keeps XCPM's");
 SYSCTL_PROC(_debug_hybridpm, OID_AUTO, eet_off, CTLTYPE_INT | CTLFLAG_RW, nullptr, 0, eetHandler, "I", "1 = energy-efficient turbo off");
-SYSCTL_INT(_debug_hybridpm, OID_AUTO, route, CTLFLAG_RD, &route, 0, "1 routed, 2 no symbol, 3 no match, 4 route failed");
-SYSCTL_INT(_debug_hybridpm, OID_AUTO, enabled, CTLFLAG_RD, &enabled, 0, "");
+SYSCTL_INT(_debug_hybridpm, OID_AUTO, route, CTLFLAG_RD, &route, 0, "0 not tried, 1 routed, 2 no symbol, 3 no match, 4 route failed");
+SYSCTL_INT(_debug_hybridpm, OID_AUTO, enabled, CTLFLAG_RD, &enabled, 0, "1 = the request is converted");
+SYSCTL_STRING(_debug_hybridpm, OID_AUTO, why, CTLFLAG_RD, why, sizeof(why), "state, or why it does nothing");
 
 // The routine builds the request from its ratio argument (edi) and writes it: prologue, then at +0x168
 // "mov eax,edi; shr edx,0x18; mov ecx,0x774; wrmsr". Search forward from the exported neighbour for exactly one match.
+static void off(const char *reason) {
+	snprintf(why, sizeof(why), "route %d: %s", route, reason);
+	SYSLOG("hpm", "off: %s", why);
+}
+
 static void processKernel(KernelPatcher &patcher) {
 	rendezvous = reinterpret_cast<RendezvousFn>(patcher.solveSymbol(KernelPatcher::KernelID, "_mp_rendezvous_no_intrs"));
 	cpuNumber = reinterpret_cast<CpuNumberFn>(patcher.solveSymbol(KernelPatcher::KernelID, "_cpu_number"));
 	const mach_vm_address_t base = patcher.solveSymbol(KernelPatcher::KernelID, "_xcpm_enable_pstate_ctrs");
 	patcher.clearError();
-	if (!rendezvous || !cpuNumber || !base) { route = 2; return; }
+	if (!rendezvous || !cpuNumber || !base) { route = 2; return off("a kernel symbol is missing"); }
 	static const uint8_t pro[] = {0x55, 0x48, 0x89, 0xE5, 0x53, 0x50, 0x89, 0xFB};
 	static const uint8_t wr[] = {0x89, 0xF8, 0xC1, 0xEA, 0x18, 0xB9, 0x74, 0x07, 0x00, 0x00, 0x0F, 0x30};
 	mach_vm_address_t fn = 0;
@@ -190,10 +251,11 @@ static void processKernel(KernelPatcher &patcher) {
 		fn = a;
 		matches++;
 	}
-	if (matches != 1) { route = 3; return; }
+	if (matches != 1) { route = 3; return off(matches ? "XCPM request writer matched more than once" : "XCPM request writer not found"); }
 	orgSetRatio = patcher.routeFunction(fn, reinterpret_cast<mach_vm_address_t>(setRatio), true);
-	if (patcher.getError() != KernelPatcher::Error::NoError) { orgSetRatio = 0; patcher.clearError(); route = 4; return; }
+	if (patcher.getError() != KernelPatcher::Error::NoError) { orgSetRatio = 0; patcher.clearError(); route = 4; return off("routing failed"); }
 	route = 1;
+	snprintf(why, sizeof(why), "model 0x%02X, routed: on 20 s after boot", cpuModel);
 	DBGLOG("hpm", "routed _xcpm_enable_pstate_ctrs+0x%llx", fn - base);
 	mapMchbar();
 	sysctl_register_oid(&sysctl__debug_hybridpm_hwp);
@@ -227,9 +289,14 @@ PluginConfiguration ADDPR(config) {
 		if (PE_parse_boot_argn("hpmepp", &v, sizeof(v)) && v >= -1 && v <= 255) eppOverride = v;
 		if (PE_parse_boot_argn("hpmeet", &v, sizeof(v))) eetOff = v != 0;
 		sysctl_register_oid(&sysctl__debug_hybridpm);
-		sysctl_register_oid(&sysctl__debug_hybridpm_state);
 		sysctl_register_oid(&sysctl__debug_hybridpm_route);
 		sysctl_register_oid(&sysctl__debug_hybridpm_enabled);
+		sysctl_register_oid(&sysctl__debug_hybridpm_why);
+		if (!cpuSupported()) {   // logged once; no route, no MSR access, no state sysctl
+			SYSLOG("hpm", "off: %s", why);
+			return;
+		}
+		sysctl_register_oid(&sysctl__debug_hybridpm_state);
 		lilu.onPatcherLoadForce([](void *, KernelPatcher &patcher) { processKernel(patcher); });
 	}
 };

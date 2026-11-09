@@ -41,6 +41,35 @@ Idle package power stayed about 10 W for every EPP. Geekbench's GPU scores (Meta
 third higher with it, because the driver's per-command-buffer CPU work runs at the higher clock. A user with an
 i5-13400F (also Alder Lake / Raptor Lake hybrid) and no HybridPM got GPU scores about 30 % lower than the test machine.
 
+## Which CPUs
+
+It acts only on Intel family 6 CPUs that are hybrid (CPUID leaf 7 EDX bit 15), have HWP, and are one of the models whose
+P-cores use the 78.741 MHz unit (the models Linux `intel_pstate` gives `HYBRID_SCALING_FACTOR_ADL`):
+
+| Model | Linux name | CPUs |
+|---|---|---|
+| 0x97 | `ALDERLAKE` | 12th gen desktop (and some 13th/14th gen i5, e.g. i5-13400F stepping C0) |
+| 0x9A | `ALDERLAKE_L` | 12th gen laptop (H, P, U) |
+| 0xB7 | `RAPTORLAKE` | 13th and 14th gen desktop (e.g. i7-14700K, i5-13400F stepping B0) |
+| 0xBA | `RAPTORLAKE_P` | 13th gen laptop (H, P, U) |
+| 0xBF | `RAPTORLAKE_S` | some 13th/14th gen desktop i3/i5 models |
+
+`0xBE` (`ALDERLAKE_N`, N100 and the like) is listed as well but has efficiency cores only, so the hybrid check already
+leaves it alone. Core Ultra (Meteor Lake 0xAA/0xAC, Arrow Lake 0xC5/0xC6/0xB5, Lunar Lake 0xBD, Panther Lake 0xCC)
+uses other units (Linux: 80 MHz for Meteor Lake, 86.957 MHz for Lunar Lake) and is left alone, as is any model not
+listed, any CPU that is not hybrid (an i5-12400 with P-cores only, every CPU before 12th gen) and any non-Intel CPU.
+On those the plugin does nothing: it routes nothing, reads and writes no MSR, logs one line (`HybridPM hpm: off: ...`)
+and shows the reason:
+
+```sh
+sysctl debug.hybridpm.enabled debug.hybridpm.why
+# debug.hybridpm.enabled: 0
+# debug.hybridpm.why: unsupported model 0xAA (Core Ultra: another HWP scale)
+```
+
+The model comes from the CPUID instruction itself, so OpenCore's `Cpuid1Data` (which changes what the kernel records)
+does not hide it.
+
 ## Controls
 
 Live, as root (`sudo sysctl ...`):
@@ -57,10 +86,11 @@ Read-only, any user:
 | sysctl | What |
 |---|---|
 | `debug.hybridpm.enabled` | 1 once the conversion is active (20 s after boot) |
-| `debug.hybridpm.route` | 1 routed; 2 a kernel symbol is missing; 3 the XCPM routine was not found (exactly one match is required); 4 routing failed |
-| `debug.hybridpm.state` | a binary sample for `hpmstat`: per-CPU APERF/MPERF, HWP capabilities and request, core type and temperature; package RAPL energy, power limits (MSR 0x610 and the MCHBAR copy, the lower one applies), perf-limit reasons, turbo ratio limits |
+| `debug.hybridpm.why` | `on (model 0xB7)` when active; otherwise why not: `not hybrid (model 0x..)`, `unsupported model 0x..`, `not an Intel CPU`, `route 3: XCPM request writer not found`, ... |
+| `debug.hybridpm.route` | 0 not tried (unsupported CPU); 1 routed; 2 a kernel symbol is missing; 3 the XCPM routine was not found (exactly one match is required); 4 routing failed |
+| `debug.hybridpm.state` | (supported CPUs only) a binary sample for `hpmstat`: per-CPU APERF/MPERF, HWP capabilities and request, core type and temperature; package RAPL energy, power limits (MSR 0x610 and the MCHBAR copy, the lower one applies), perf-limit reasons, turbo ratio limits |
 
-Boot-args: `-hpmoff` (Lilu: the plugin does not start), `hpmhwp=0`, `hpmauto=0`, `hpmepp=N` (-1..255), `hpmeet=0`;
+Boot-args: `-hpmoff` (Lilu: the plugin does not start, and `debug.hybridpm` does not exist), `hpmhwp=0`, `hpmauto=0`, `hpmepp=N` (-1..255), `hpmeet=0`;
 `-hpmdbg` shows the debug lines of a `--debug` build, `-hpmbeta` lets it start on a macOS newer than 26.
 
 `hpmstat [interval-ms [count]]` (no root) diffs two samples and prints each CPU's effective clock, busy share, HWP
