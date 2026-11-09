@@ -89,6 +89,7 @@ static const uint8_t xe2_bcs_offsets[] = {
 #define MI_STORE_DATA_IMM MI_INSTR(0x20)
 #define   MI_SDI_GGTT (1u << 22)
 #define   MI_SDI_NUM_DW(x) ((x) + 3 - 2)
+#define   MI_SDI_NUM_QW(x) ((2 * (x) + 3 - 2) | 1u << 21)   // bit 21: the store is a qword
 #define MI_LOAD_REGISTER_IMM MI_INSTR(0x22)
 #define   MI_LRI_LRM_CS_MMIO (1u << 19)
 #define   MI_LRI_FORCE_POSTED (1u << 12)

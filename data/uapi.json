@@ -6,15 +6,15 @@
    "kernel": {
     "path": "kernel/IntelXe",
     "repo": "intel-gpu-macos-driver",
-    "repo_head": "030bfae",
-    "last_commit": "8ae346e 2026-10-31",
+    "repo_head": "5cce0f9",
+    "last_commit": "065338a 2026-11-10",
     "dirty": false
    },
    "fb": {
     "path": "kernel/IntelXeFB",
     "repo": "intel-gpu-macos-driver",
-    "repo_head": "030bfae",
-    "last_commit": "fa6e59a 2026-10-31",
+    "repo_head": "5cce0f9",
+    "last_commit": "b5c5ea3 2026-11-08",
     "dirty": false
    }
   },
@@ -22,14 +22,14 @@
  },
  "summary": {
   "cells": 182,
-  "implemented": 77,
+  "implemented": 99,
   "noop": 0,
-  "rejected": 83,
-  "absent": 3,
-  "unverified": 19,
-  "pct_implemented": 42.3,
+  "rejected": 59,
+  "absent": 2,
+  "unverified": 22,
+  "pct_implemented": 54.4,
   "ioctls": 16,
-  "ioctls_implemented": 11
+  "ioctls_implemented": 13
  },
  "cells": [
   {
@@ -40,7 +40,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5688",
+     "at": "kernel/IntelXe/xe_core.cpp:7837",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_DEVICE_QUERY:"
     }
@@ -82,7 +82,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5691",
+     "at": "kernel/IntelXe/xe_core.cpp:7846",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_GEM_CREATE: {"
     }
@@ -130,7 +130,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5774",
+     "at": "kernel/IntelXe/xe_core.cpp:8019",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_GEM_MMAP_OFFSET: {"
     }
@@ -178,7 +178,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5806",
+     "at": "kernel/IntelXe/xe_core.cpp:8078",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_VM_CREATE: {"
     }
@@ -226,7 +226,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5828",
+     "at": "kernel/IntelXe/xe_core.cpp:8100",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_VM_DESTROY: {"
     }
@@ -274,7 +274,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5839",
+     "at": "kernel/IntelXe/xe_core.cpp:8115",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_VM_BIND: {"
     }
@@ -323,15 +323,15 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5876",
+     "at": "kernel/IntelXe/xe_core.cpp:8194",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_EXEC_QUEUE_CREATE: {"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:321 (file scope)",
-    "kernel/IntelXe/xe_core.cpp:1872 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:405 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:2288 (file scope)"
    ],
    "consumers": [
     {
@@ -374,7 +374,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5914",
+     "at": "kernel/IntelXe/xe_core.cpp:8259",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_EXEC_QUEUE_DESTROY: {"
     }
@@ -423,7 +423,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5959",
+     "at": "kernel/IntelXe/xe_core.cpp:8305",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_EXEC_QUEUE_GET_PROPERTY: {"
     }
@@ -472,7 +472,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5968",
+     "at": "kernel/IntelXe/xe_core.cpp:8314",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_EXEC: {"
     }
@@ -518,17 +518,25 @@
    "token": "DRM_IOCTL_XE_WAIT_USER_FENCE",
    "area": "ioctls",
    "value": 74,
-   "status": "rejected",
-   "by": "switch default",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7422",
+     "kind": "use",
+     "code": "if ((!err || request == DRM_IOCTL_XE_WAIT_USER_FENCE) && (request & IOC_OUT) && putUser(arg, buf, len)) err = EFAULT;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7843",
+     "kind": "use",
+     "code": "case DRM_IOCTL_XE_WAIT_USER_FENCE:"
     }
    ],
-   "why": "no case for value 74 in the switch at kernel/IntelXe/xe_core.cpp:5661; its default returns an error",
-   "comments": [],
+   "why": "",
+   "comments": [
+    "kernel/IntelXe/xe_core.cpp:5026 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:7486 (file scope)"
+   ],
    "consumers": [
     {
      "consumer": "Intel compute-runtime (NEO)",
@@ -541,8 +549,8 @@
     }
    ],
    "doc": "",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_IOCTL_XE_OBSERVATION",
@@ -552,12 +560,12 @@
    "by": "switch default",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
    ],
-   "why": "no case for value 75 in the switch at kernel/IntelXe/xe_core.cpp:5661; its default returns an error",
+   "why": "no case for value 75 in the switch at kernel/IntelXe/xe_core.cpp:7807; its default returns an error",
    "comments": [],
    "consumers": [
     {
@@ -587,18 +595,25 @@
    "token": "DRM_IOCTL_XE_MADVISE",
    "area": "ioctls",
    "value": 76,
-   "status": "rejected",
-   "by": "switch default",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/IntelXe.cpp:310",
+     "kind": "use",
+     "code": "\"rb7r: DRM_IOCTL_XE_MADVISE purgeable state and purge counters\");"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7840",
+     "kind": "use",
+     "code": "case DRM_IOCTL_XE_MADVISE:"
     }
    ],
-   "why": "no case for value 76 in the switch at kernel/IntelXe/xe_core.cpp:5661; its default returns an error",
+   "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:3429 (deviceQuery)"
+    "kernel/IntelXe/IntelXe.cpp:284 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:295 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:4402 (file scope)"
    ],
    "consumers": [
     {
@@ -621,8 +636,8 @@
     }
    ],
    "doc": "",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime); native OpenGL via iris"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS",
@@ -632,12 +647,12 @@
    "by": "switch default",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
    ],
-   "why": "no case for value 77 in the switch at kernel/IntelXe/xe_core.cpp:5661; its default returns an error",
+   "why": "no case for value 77 in the switch at kernel/IntelXe/xe_core.cpp:7807; its default returns an error",
    "comments": [],
    "consumers": [
     {
@@ -662,12 +677,12 @@
    "by": "switch default",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
    ],
-   "why": "no case for value 78 in the switch at kernel/IntelXe/xe_core.cpp:5661; its default returns an error",
+   "why": "no case for value 78 in the switch at kernel/IntelXe/xe_core.cpp:7807; its default returns an error",
    "comments": [],
    "consumers": [
     {
@@ -692,14 +707,14 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5921",
+     "at": "kernel/IntelXe/xe_core.cpp:8267",
      "kind": "use",
      "code": "case DRM_IOCTL_XE_VM_GET_PROPERTY: {"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:279 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:344 (file scope)"
    ],
    "consumers": [
     {
@@ -724,12 +739,17 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:1895",
+     "at": "kernel/IntelXe/xe_core.cpp:2317",
      "kind": "use",
      "code": "q->stateCacheFix = props->stateCacheFix && eng->drmClass == DRM_XE_ENGINE_CLASS_RENDER;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5650",
+     "at": "kernel/IntelXe/xe_core.cpp:2913",
+     "kind": "use",
+     "code": "if (q->eng->gt || (q->eng->drmClass != DRM_XE_ENGINE_CLASS_COMPUTE && q->eng->drmClass != DRM_XE_ENGINE_CLASS_RENDER))"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7464",
      "kind": "use",
      "code": "if (cls != DRM_XE_ENGINE_CLASS_RENDER) return EOPNOTSUPP;"
     }
@@ -777,7 +797,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:2846",
+     "at": "kernel/IntelXe/xe_core.cpp:3832",
      "kind": "use",
      "code": "if (!gMigQ && queueCreate(gMigVm, DRM_XE_ENGINE_CLASS_COPY, 0, &gMigQ)) { gMigQ = nullptr; return; }"
     }
@@ -816,14 +836,29 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:1838",
+     "at": "kernel/IntelXe/xe_core.cpp:2251",
      "kind": "use",
      "code": "if ((cls == DRM_XE_ENGINE_CLASS_VIDEO_DECODE || cls == DRM_XE_ENGINE_CLASS_VIDEO_ENHANCE) && gVideoWanted && gDev->mediaUp())"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:8221",
+     "kind": "use",
+     "code": "const bool media = eci.engine_class == DRM_XE_ENGINE_CLASS_VIDEO_DECODE ||"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:8659",
+     "kind": "use",
+     "code": "const bool vcs = e.drmClass == DRM_XE_ENGINE_CLASS_VIDEO_DECODE;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:8705",
+     "kind": "use",
+     "code": "e[i] = {gMediaEngines[i].base, gMediaEngines[i].phys, gMediaEngines[i].drmClass == DRM_XE_ENGINE_CLASS_VIDEO_DECODE,"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/IntelXe.cpp:2177 (IntelXe::mediaGucLoad)"
+    "kernel/IntelXe/IntelXe.cpp:2800 (IntelXe::mediaGucLoad)"
    ],
    "consumers": [
     {
@@ -857,14 +892,19 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:1838",
+     "at": "kernel/IntelXe/xe_core.cpp:2251",
      "kind": "use",
      "code": "if ((cls == DRM_XE_ENGINE_CLASS_VIDEO_DECODE || cls == DRM_XE_ENGINE_CLASS_VIDEO_ENHANCE) && gVideoWanted && gDev->mediaUp())"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:8222",
+     "kind": "use",
+     "code": "eci.engine_class == DRM_XE_ENGINE_CLASS_VIDEO_ENHANCE;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/IntelXe.cpp:2180 (IntelXe::mediaGucLoad)"
+    "kernel/IntelXe/IntelXe.cpp:2803 (IntelXe::mediaGucLoad)"
    ],
    "consumers": [
     {
@@ -895,12 +935,22 @@
    "area": "engine classes",
    "value": 4,
    "status": "implemented",
-   "by": "value 4",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/IntelXe.cpp:1791",
+     "at": "kernel/IntelXe/xe_core.cpp:2886",
      "kind": "use",
-     "code": "if (ccs & 1u << i) gEngines[gNumEngines++] = {4, l++, i, 4, ccsBase[i], 0x3000, 0x3000u + i * 0x1000};"
+     "code": "const int ci = q->eng->drmClass == DRM_XE_ENGINE_CLASS_COMPUTE;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:2913",
+     "kind": "use",
+     "code": "if (q->eng->gt || (q->eng->drmClass != DRM_XE_ENGINE_CLASS_COMPUTE && q->eng->drmClass != DRM_XE_ENGINE_CLASS_RENDER))"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:2915",
+     "kind": "use",
+     "code": "const int ci = q->eng->drmClass == DRM_XE_ENGINE_CLASS_COMPUTE;"
     }
    ],
    "why": "",
@@ -937,7 +987,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5888",
+     "at": "kernel/IntelXe/xe_core.cpp:8211",
      "kind": "use",
      "code": "if (eci.engine_class == DRM_XE_ENGINE_CLASS_VM_BIND) {"
     }
@@ -967,7 +1017,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3426",
+     "at": "kernel/IntelXe/xe_core.cpp:4773",
      "kind": "use",
      "code": "r.info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] = gDev->devId | (uint32_t)gDev->revId << 16;"
     }
@@ -1006,9 +1056,9 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3431",
+     "at": "kernel/IntelXe/xe_core.cpp:4778",
      "kind": "use",
-     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM | DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |"
+     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = (gXePlat->isDgfx ? DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM : 0) |"
     }
    ],
    "why": "",
@@ -1045,9 +1095,9 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3431",
+     "at": "kernel/IntelXe/xe_core.cpp:4778",
      "kind": "use",
-     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM | DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |"
+     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = (gXePlat->isDgfx ? DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM : 0) |"
     }
    ],
    "why": "",
@@ -1084,9 +1134,9 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3432",
+     "at": "kernel/IntelXe/xe_core.cpp:4780",
      "kind": "use",
-     "code": "DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY | DRM_XE_QUERY_CONFIG_FLAG_HAS_DISABLE_STATE_CACHE_PERF_FIX;"
+     "code": "DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY | DRM_XE_QUERY_CONFIG_FLAG_HAS_DISABLE_STATE_CACHE_PERF_FIX |"
     }
    ],
    "why": "",
@@ -1123,9 +1173,9 @@
    "by": "not reported",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3431",
+     "at": "kernel/IntelXe/xe_core.cpp:4778",
      "kind": "use",
-     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM | DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |"
+     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = (gXePlat->isDgfx ? DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM : 0) |"
     }
    ],
    "why": "the handler that reports DRM_XE_QUERY_CONFIG_FLAG* values does not set this one",
@@ -1153,9 +1203,9 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3431",
+     "at": "kernel/IntelXe/xe_core.cpp:4779",
      "kind": "use",
-     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM | DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |"
+     "code": "DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |"
     }
    ],
    "why": "",
@@ -1192,9 +1242,9 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3432",
+     "at": "kernel/IntelXe/xe_core.cpp:4780",
      "kind": "use",
-     "code": "DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY | DRM_XE_QUERY_CONFIG_FLAG_HAS_DISABLE_STATE_CACHE_PERF_FIX;"
+     "code": "DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY | DRM_XE_QUERY_CONFIG_FLAG_HAS_DISABLE_STATE_CACHE_PERF_FIX |"
     }
    ],
    "why": "",
@@ -1218,16 +1268,16 @@
    "token": "DRM_XE_QUERY_CONFIG_FLAG_HAS_PURGING_SUPPORT",
    "area": "DEVICE_QUERY contents",
    "value": 32,
-   "status": "absent",
-   "by": "not reported",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3431",
+     "at": "kernel/IntelXe/xe_core.cpp:4781",
      "kind": "use",
-     "code": "r.info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM | DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT |"
+     "code": "DRM_XE_QUERY_CONFIG_FLAG_HAS_PURGING_SUPPORT;"
     }
    ],
-   "why": "the handler that reports DRM_XE_QUERY_CONFIG_FLAG* values does not set this one",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -1241,8 +1291,8 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_query_config",
-   "need": "needed_now",
-   "need_why": "used by Mesa ANV / intel common (as run on macOS); our kernel: absent"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_QUERY_CONFIG_MIN_ALIGNMENT",
@@ -1252,7 +1302,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3433",
+     "at": "kernel/IntelXe/xe_core.cpp:4782",
      "kind": "use",
      "code": "r.info[DRM_XE_QUERY_CONFIG_MIN_ALIGNMENT] = 0x1000;"
     }
@@ -1291,9 +1341,9 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3434",
+     "at": "kernel/IntelXe/xe_core.cpp:4783",
      "kind": "use",
-     "code": "r.info[DRM_XE_QUERY_CONFIG_VA_BITS] = 48;"
+     "code": "r.info[DRM_XE_QUERY_CONFIG_VA_BITS] = gXePlat->vaBits;"
     }
    ],
    "why": "",
@@ -1330,7 +1380,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3435",
+     "at": "kernel/IntelXe/xe_core.cpp:4784",
      "kind": "use",
      "code": "r.info[DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY] = 1;"
     }
@@ -1378,7 +1428,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3441",
+     "at": "kernel/IntelXe/xe_core.cpp:4790",
      "kind": "use",
      "code": "r.g[0].type = DRM_XE_QUERY_GT_TYPE_MAIN;"
     }
@@ -1417,7 +1467,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3449",
+     "at": "kernel/IntelXe/xe_core.cpp:4798",
      "kind": "use",
      "code": "r.g[1].type = DRM_XE_QUERY_GT_TYPE_MEDIA;"
     }
@@ -1447,7 +1497,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3469",
+     "at": "kernel/IntelXe/xe_core.cpp:4818",
      "kind": "use",
      "code": "r.g = {0, DRM_XE_TOPO_DSS_GEOMETRY, 16};"
     }
@@ -1486,7 +1536,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3471",
+     "at": "kernel/IntelXe/xe_core.cpp:4820",
      "kind": "use",
      "code": "r.c = {0, DRM_XE_TOPO_DSS_COMPUTE, 16};"
     }
@@ -1516,7 +1566,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3473",
+     "at": "kernel/IntelXe/xe_core.cpp:4822",
      "kind": "use",
      "code": "r.l = {0, DRM_XE_TOPO_L3_BANK, 8};"
     }
@@ -1555,7 +1605,7 @@
    "by": "not reported",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3469",
+     "at": "kernel/IntelXe/xe_core.cpp:4818",
      "kind": "use",
      "code": "r.g = {0, DRM_XE_TOPO_DSS_GEOMETRY, 16};"
     }
@@ -1594,7 +1644,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3475",
+     "at": "kernel/IntelXe/xe_core.cpp:4824",
      "kind": "use",
      "code": "r.e = {0, DRM_XE_TOPO_SIMD16_EU_PER_DSS, 8};"
     }
@@ -1633,7 +1683,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3392",
+     "at": "kernel/IntelXe/xe_core.cpp:4739",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_ENGINES: {"
     }
@@ -1673,7 +1723,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3401",
+     "at": "kernel/IntelXe/xe_core.cpp:4748",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_MEM_REGIONS: {"
     }
@@ -1713,7 +1763,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3423",
+     "at": "kernel/IntelXe/xe_core.cpp:4770",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_CONFIG: {"
     }
@@ -1762,7 +1812,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3438",
+     "at": "kernel/IntelXe/xe_core.cpp:4787",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_GT_LIST: {"
     }
@@ -1801,7 +1851,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3458",
+     "at": "kernel/IntelXe/xe_core.cpp:4807",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_HWCONFIG:"
     }
@@ -1840,7 +1890,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3460",
+     "at": "kernel/IntelXe/xe_core.cpp:4809",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_GT_TOPOLOGY: {"
     }
@@ -1879,7 +1929,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3479",
+     "at": "kernel/IntelXe/xe_core.cpp:4828",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_ENGINE_CYCLES: {"
     }
@@ -1918,7 +1968,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3508",
+     "at": "kernel/IntelXe/xe_core.cpp:4857",
      "kind": "use",
      "code": "case DRM_XE_DEVICE_QUERY_UC_FW_VERSION: {"
     }
@@ -1949,12 +1999,12 @@
    "by": "switch default",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3534",
+     "at": "kernel/IntelXe/xe_core.cpp:4892",
      "kind": "reject",
      "code": "default: return EINVAL;"
     }
    ],
-   "why": "no case for value 8 in the switch at kernel/IntelXe/xe_core.cpp:3391; its default returns an error",
+   "why": "no case for value 8 in the switch at kernel/IntelXe/xe_core.cpp:4738; its default returns an error",
    "comments": [],
    "consumers": [
     {
@@ -1975,16 +2025,16 @@
    "token": "DRM_XE_DEVICE_QUERY_PXP_STATUS",
    "area": "DEVICE_QUERY types",
    "value": 9,
-   "status": "rejected",
-   "by": "switch default",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3534",
-     "kind": "reject",
-     "code": "default: return EINVAL;"
+     "at": "kernel/IntelXe/xe_core.cpp:4883",
+     "kind": "use",
+     "code": "case DRM_XE_DEVICE_QUERY_PXP_STATUS:"
     }
    ],
-   "why": "no case for value 9 in the switch at kernel/IntelXe/xe_core.cpp:3391; its default returns an error",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -1998,8 +2048,8 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_device_query",
-   "need": "not_needed",
-   "need_why": "Linux-only concept: PXP protected content (Linux/Windows DRM content protection; no macOS path)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_DEVICE_QUERY_EU_STALL",
@@ -2009,12 +2059,12 @@
    "by": "switch default",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3534",
+     "at": "kernel/IntelXe/xe_core.cpp:4892",
      "kind": "reject",
      "code": "default: return EINVAL;"
     }
    ],
-   "why": "no case for value 10 in the switch at kernel/IntelXe/xe_core.cpp:3391; its default returns an error",
+   "why": "no case for value 10 in the switch at kernel/IntelXe/xe_core.cpp:4738; its default returns an error",
    "comments": [],
    "consumers": [
     {
@@ -2044,11 +2094,21 @@
    "token": "DRM_XE_GEM_CREATE_EXTENSION_SET_PROPERTY",
    "area": "GEM_CREATE / MMAP_OFFSET",
    "value": 0,
-   "status": "unverified",
-   "by": null,
-   "uses": [],
-   "why": "no use by name or by value 0; no dispatch switch, field match or proof decides it",
-   "comments": [],
+   "status": "implemented",
+   "by": "name",
+   "uses": [
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:23",
+     "kind": "use",
+     "code": "if (ext.property >= 1 || ext.pad || ext.property != DRM_XE_GEM_CREATE_EXTENSION_SET_PROPERTY) return EINVAL;"
+    }
+   ],
+   "why": "",
+   "comments": [
+    "kernel/IntelXe/xe_core.cpp:7475 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:7481 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:7873 (xeIoctlLocked)"
+   ],
    "consumers": [
     {
      "consumer": "Mesa ANV / intel common (as run on macOS)",
@@ -2070,8 +2130,8 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_gem_create",
-   "need": "needed_now",
-   "need_why": "used by Mesa ANV / intel common (as run on macOS); our kernel: unverified"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_GEM_CREATE_SET_PROPERTY_PXP_TYPE",
@@ -2081,7 +2141,10 @@
    "by": null,
    "uses": [],
    "why": "no use by name or by value 0; no dispatch switch, field match or proof decides it",
-   "comments": [],
+   "comments": [
+    "kernel/IntelXe/xe_core.cpp:7476 (file scope)",
+    "kernel/IntelXe/xe_uapi_args.cpp:24 (gemCreateUserExtSetProperty)"
+   ],
    "consumers": [
     {
      "consumer": "Mesa ANV / intel common (as run on macOS)",
@@ -2110,10 +2173,16 @@
    "token": "DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING",
    "area": "GEM_CREATE / MMAP_OFFSET",
    "value": 1,
-   "status": "unverified",
-   "by": null,
-   "uses": [],
-   "why": "no use by name or by value 1; no dispatch switch, field match or proof decides it",
+   "status": "implemented",
+   "by": "name",
+   "uses": [
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7854",
+     "kind": "use",
+     "code": "constexpr uint32_t kFlags = DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING | DRM_XE_GEM_CREATE_FLAG_SCANOUT |"
+    }
+   ],
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -2127,8 +2196,8 @@
     }
    ],
    "doc": "Modify the GEM object allocation strategy by deferring physical memory allocation until the object is either bound to a virtual memory region via VM_BIND or accessed by the CPU. As a result, no backin",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_GEM_CREATE_FLAG_SCANOUT",
@@ -2138,20 +2207,30 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5707",
+     "at": "kernel/IntelXe/xe_core.cpp:7854",
+     "kind": "use",
+     "code": "constexpr uint32_t kFlags = DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING | DRM_XE_GEM_CREATE_FLAG_SCANOUT |"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7870",
+     "kind": "use",
+     "code": "if ((g->flags & DRM_XE_GEM_CREATE_FLAG_SCANOUT) && g->cpu_caching == DRM_XE_GEM_CPU_CACHING_WB)"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7891",
      "kind": "use",
      "code": "const bool scanout = g->flags & DRM_XE_GEM_CREATE_FLAG_SCANOUT;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6284",
+     "at": "kernel/IntelXe/xe_core.cpp:8864",
      "kind": "use",
      "code": "bo->gemFlags & DRM_XE_GEM_CREATE_FLAG_SCANOUT ? \"s\" : \"\", bo->placement & 1 ? \"+sys\" : \"\","
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:246 (file scope)",
-    "kernel/IntelXe/xe_core.cpp:4142 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:284 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:5691 (file scope)"
    ],
    "consumers": [
     {
@@ -2167,9 +2246,9 @@
      "consumer": "Metal plugin / VideoToolbox (this repository)",
      "kind": "now",
      "feature": null,
-     "commit": "030bfaed7ca8",
+     "commit": "5cce0f9cce39",
      "at": [
-      "nullmoth/plugin/nvmtl_vk.c:2439"
+      "nullmoth/plugin/nvmtl_vk.c:2693"
      ]
     },
     {
@@ -2194,14 +2273,29 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5703",
+     "at": "kernel/IntelXe/xe_core.cpp:7672",
+     "kind": "use",
+     "code": "if (bo->vram && bo->hi && (bo->gemFlags & DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM)) {"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7855",
+     "kind": "use",
+     "code": "DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM | DRM_XE_GEM_CREATE_FLAG_NO_COMPRESSION;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7867",
+     "kind": "reject",
+     "code": "if ((g->flags & DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM) && !vramPl) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7887",
      "kind": "use",
      "code": "const bool visible = g->flags & DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6283",
+     "at": "kernel/IntelXe/xe_core.cpp:8863",
      "kind": "use",
-     "code": "put(\" %llu KB %s%s%s%s%s\", bo->size >> 10, bo->gemFlags & DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM ? \"v\" : \"\","
+     "code": "put(\" %llu KB %s%s%s%s%s%s\", bo->size >> 10, bo->gemFlags & DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM ? \"v\" : \"\","
     }
    ],
    "why": "",
@@ -2220,9 +2314,9 @@
      "consumer": "Metal plugin / VideoToolbox (this repository)",
      "kind": "now",
      "feature": null,
-     "commit": "030bfaed7ca8",
+     "commit": "5cce0f9cce39",
      "at": [
-      "nullmoth/plugin/nvmtl_vk.c:2443"
+      "nullmoth/plugin/nvmtl_vk.c:2697"
      ]
     },
     {
@@ -2247,14 +2341,19 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5709",
+     "at": "kernel/IntelXe/xe_core.cpp:7855",
+     "kind": "use",
+     "code": "DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM | DRM_XE_GEM_CREATE_FLAG_NO_COMPRESSION;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7893",
      "kind": "use",
      "code": "bo->noComp = g->flags & DRM_XE_GEM_CREATE_FLAG_NO_COMPRESSION;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:247 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:285 (file scope)"
    ],
    "consumers": [
     {
@@ -2297,9 +2396,19 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3818",
+     "at": "kernel/IntelXe/xe_core.cpp:5232",
+     "kind": "reject",
+     "code": "if (bo->caching == DRM_XE_GEM_CPU_CACHING_WB && !((kPatCoherent >> op.pat_index) & 1)) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:5284",
      "kind": "use",
      "code": "bo->size = op.range; bo->user = md; bo->caching = DRM_XE_GEM_CPU_CACHING_WB; bo->refs = 1;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7870",
+     "kind": "use",
+     "code": "if ((g->flags & DRM_XE_GEM_CREATE_FLAG_SCANOUT) && g->cpu_caching == DRM_XE_GEM_CPU_CACHING_WB)"
     }
    ],
    "why": "",
@@ -2345,9 +2454,19 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:4952",
+     "at": "kernel/IntelXe/xe_core.cpp:6561",
      "kind": "use",
      "code": "bo->caching = DRM_XE_GEM_CPU_CACHING_WC;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7868",
+     "kind": "reject",
+     "code": "if (!g->cpu_caching || g->cpu_caching > DRM_XE_GEM_CPU_CACHING_WC) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7869",
+     "kind": "use",
+     "code": "if (vramPl && g->cpu_caching != DRM_XE_GEM_CPU_CACHING_WC) return EINVAL;"
     }
    ],
    "why": "",
@@ -2417,20 +2536,20 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5812",
+     "at": "kernel/IntelXe/xe_core.cpp:8084",
      "kind": "use",
      "code": "constexpr uint32_t kAll = DRM_XE_VM_CREATE_FLAG_SCRATCH_PAGE | DRM_XE_VM_CREATE_FLAG_LR_MODE |"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5819",
+     "at": "kernel/IntelXe/xe_core.cpp:8091",
      "kind": "use",
      "code": "XeVm *vm = vmCreate(0, v->flags & DRM_XE_VM_CREATE_FLAG_SCRATCH_PAGE);"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:274 (file scope)",
-    "kernel/IntelXe/xe_core.cpp:1287 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:339 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:1686 (file scope)"
    ],
    "consumers": [
     {
@@ -2473,17 +2592,17 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5812",
+     "at": "kernel/IntelXe/xe_core.cpp:8084",
      "kind": "use",
      "code": "constexpr uint32_t kAll = DRM_XE_VM_CREATE_FLAG_SCRATCH_PAGE | DRM_XE_VM_CREATE_FLAG_LR_MODE |"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5815",
+     "at": "kernel/IntelXe/xe_core.cpp:8087",
      "kind": "reject",
      "code": "if ((v->flags & DRM_XE_VM_CREATE_FLAG_FAULT_MODE) && !(v->flags & DRM_XE_VM_CREATE_FLAG_LR_MODE)) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5818",
+     "at": "kernel/IntelXe/xe_core.cpp:8090",
      "kind": "reject",
      "code": "if (v->flags & (DRM_XE_VM_CREATE_FLAG_LR_MODE | DRM_XE_VM_CREATE_FLAG_FAULT_MODE)) return EINVAL;"
     }
@@ -2513,29 +2632,29 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5813",
+     "at": "kernel/IntelXe/xe_core.cpp:8085",
      "kind": "use",
      "code": "DRM_XE_VM_CREATE_FLAG_FAULT_MODE | DRM_XE_VM_CREATE_FLAG_NO_VM_OVERCOMMIT;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5815",
+     "at": "kernel/IntelXe/xe_core.cpp:8087",
      "kind": "reject",
      "code": "if ((v->flags & DRM_XE_VM_CREATE_FLAG_FAULT_MODE) && !(v->flags & DRM_XE_VM_CREATE_FLAG_LR_MODE)) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5816",
+     "at": "kernel/IntelXe/xe_core.cpp:8088",
      "kind": "use",
      "code": "if ((v->flags & DRM_XE_VM_CREATE_FLAG_NO_VM_OVERCOMMIT) && !(v->flags & DRM_XE_VM_CREATE_FLAG_FAULT_MODE))"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5818",
+     "at": "kernel/IntelXe/xe_core.cpp:8090",
      "kind": "reject",
      "code": "if (v->flags & (DRM_XE_VM_CREATE_FLAG_LR_MODE | DRM_XE_VM_CREATE_FLAG_FAULT_MODE)) return EINVAL;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:1512 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:1911 (file scope)"
    ],
    "consumers": [
     {
@@ -2560,12 +2679,12 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5813",
+     "at": "kernel/IntelXe/xe_core.cpp:8085",
      "kind": "use",
      "code": "DRM_XE_VM_CREATE_FLAG_FAULT_MODE | DRM_XE_VM_CREATE_FLAG_NO_VM_OVERCOMMIT;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5816",
+     "at": "kernel/IntelXe/xe_core.cpp:8088",
      "kind": "use",
      "code": "if ((v->flags & DRM_XE_VM_CREATE_FLAG_NO_VM_OVERCOMMIT) && !(v->flags & DRM_XE_VM_CREATE_FLAG_FAULT_MODE))"
     }
@@ -2595,19 +2714,24 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3750",
+     "at": "kernel/IntelXe/xe_core.cpp:5199",
      "kind": "use",
      "code": "if (op.op != DRM_XE_VM_BIND_OP_MAP && (decomp || isNull)) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3751",
+     "at": "kernel/IntelXe/xe_core.cpp:5200",
      "kind": "reject",
      "code": "if (!op.obj && op.op == DRM_XE_VM_BIND_OP_MAP && !isNull) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3763",
+     "at": "kernel/IntelXe/xe_core.cpp:5222",
      "kind": "use",
      "code": "case DRM_XE_VM_BIND_OP_MAP: {"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:8155",
+     "kind": "use",
+     "code": "if (op.op != DRM_XE_VM_BIND_OP_MAP || !op.obj) continue;"
     }
    ],
    "why": "",
@@ -2653,12 +2777,12 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3754",
+     "at": "kernel/IntelXe/xe_core.cpp:5203",
      "kind": "use",
      "code": "op.op == DRM_XE_VM_BIND_OP_UNMAP))"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3832",
+     "at": "kernel/IntelXe/xe_core.cpp:5298",
      "kind": "use",
      "code": "case DRM_XE_VM_BIND_OP_UNMAP:"
     }
@@ -2706,12 +2830,17 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3753",
+     "at": "kernel/IntelXe/xe_core.cpp:5181",
+     "kind": "reject",
+     "code": "if (op.op == DRM_XE_VM_BIND_OP_MAP_USERPTR && (!(bit & kPatCoherent) || comp)) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:5202",
      "kind": "use",
      "code": "if (op.obj && (op.op == DRM_XE_VM_BIND_OP_MAP_USERPTR || op.op == DRM_XE_VM_BIND_OP_PREFETCH ||"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3788",
+     "at": "kernel/IntelXe/xe_core.cpp:5254",
      "kind": "use",
      "code": "case DRM_XE_VM_BIND_OP_MAP_USERPTR: {"
     }
@@ -2732,9 +2861,9 @@
      "consumer": "Metal plugin / VideoToolbox (this repository)",
      "kind": "now",
      "feature": null,
-     "commit": "030bfaed7ca8",
+     "commit": "5cce0f9cce39",
      "at": [
-      "nullmoth/plugin/NVMTLObjects.m:1346"
+      "nullmoth/plugin/NVMTLObjects.m:1570"
      ]
     },
     {
@@ -2768,12 +2897,17 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3752",
+     "at": "kernel/IntelXe/xe_core.cpp:5201",
      "kind": "reject",
      "code": "if (op.op == DRM_XE_VM_BIND_OP_UNMAP_ALL && (!op.obj || op.addr || op.range)) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3837",
+     "at": "kernel/IntelXe/xe_core.cpp:5210",
+     "kind": "use",
+     "code": "(!op.range && op.op != DRM_XE_VM_BIND_OP_UNMAP_ALL))"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:5303",
      "kind": "use",
      "code": "case DRM_XE_VM_BIND_OP_UNMAP_ALL: {"
     }
@@ -2812,23 +2946,23 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3747",
+     "at": "kernel/IntelXe/xe_core.cpp:5196",
      "kind": "reject",
      "code": "if (op.op > DRM_XE_VM_BIND_OP_PREFETCH || (op.flags & ~kSupported)) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3753",
+     "at": "kernel/IntelXe/xe_core.cpp:5202",
      "kind": "use",
      "code": "if (op.obj && (op.op == DRM_XE_VM_BIND_OP_MAP_USERPTR || op.op == DRM_XE_VM_BIND_OP_PREFETCH ||"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3756",
+     "at": "kernel/IntelXe/xe_core.cpp:5205",
      "kind": "use",
      "code": "if (op.prefetch_mem_region_instance && op.op != DRM_XE_VM_BIND_OP_PREFETCH) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3843",
-     "kind": "noop",
+     "at": "kernel/IntelXe/xe_core.cpp:5314",
+     "kind": "use",
      "code": "case DRM_XE_VM_BIND_OP_PREFETCH:"
     }
    ],
@@ -2857,22 +2991,22 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:1433",
+     "at": "kernel/IntelXe/xe_core.cpp:1832",
      "kind": "use",
      "code": "if (!(flags & DRM_XE_VM_BIND_FLAG_READONLY)) v |= 2;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3742",
+     "at": "kernel/IntelXe/xe_core.cpp:5189",
      "kind": "use",
      "code": "constexpr uint32_t kSupported = DRM_XE_VM_BIND_FLAG_READONLY | DRM_XE_VM_BIND_FLAG_IMMEDIATE | DRM_XE_VM_BIND_FLAG_NULL |"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3798",
+     "at": "kernel/IntelXe/xe_core.cpp:5264",
      "kind": "use",
      "code": "IODirection dir = (flags & DRM_XE_VM_BIND_FLAG_READONLY) ? kIODirectionOut : kIODirectionInOut;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3805",
+     "at": "kernel/IntelXe/xe_core.cpp:5271",
      "kind": "use",
      "code": "flags |= DRM_XE_VM_BIND_FLAG_READONLY;"
     }
@@ -2902,7 +3036,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3742",
+     "at": "kernel/IntelXe/xe_core.cpp:5189",
      "kind": "use",
      "code": "constexpr uint32_t kSupported = DRM_XE_VM_BIND_FLAG_READONLY | DRM_XE_VM_BIND_FLAG_IMMEDIATE | DRM_XE_VM_BIND_FLAG_NULL |"
     }
@@ -2932,35 +3066,35 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:1617",
+     "at": "kernel/IntelXe/xe_core.cpp:2017",
      "kind": "use",
      "code": "MapReq r = {(flags & DRM_XE_VM_BIND_FLAG_NULL) ? nullptr : bo, off, addr, range, pat, flags, ctx, 0, 0, 0,"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:1618",
+     "at": "kernel/IntelXe/xe_core.cpp:2018",
      "kind": "use",
      "code": "kernelHuge || gHugePages != 0, (flags & DRM_XE_VM_BIND_FLAG_NULL) != 0};"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3742",
+     "at": "kernel/IntelXe/xe_core.cpp:5189",
      "kind": "use",
      "code": "constexpr uint32_t kSupported = DRM_XE_VM_BIND_FLAG_READONLY | DRM_XE_VM_BIND_FLAG_IMMEDIATE | DRM_XE_VM_BIND_FLAG_NULL |"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3745",
+     "at": "kernel/IntelXe/xe_core.cpp:5192",
      "kind": "use",
      "code": "const bool isNull = op.flags & DRM_XE_VM_BIND_FLAG_NULL, mirror = op.flags & DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR,"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3769",
+     "at": "kernel/IntelXe/xe_core.cpp:5226",
      "kind": "use",
      "code": "if (!(op.flags & DRM_XE_VM_BIND_FLAG_NULL)) {"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:1293 (file scope)",
-    "kernel/IntelXe/xe_core.cpp:1410 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:1692 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:1809 (file scope)"
    ],
    "consumers": [
     {
@@ -2994,7 +3128,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3743",
+     "at": "kernel/IntelXe/xe_core.cpp:5190",
      "kind": "use",
      "code": "DRM_XE_VM_BIND_FLAG_DUMPABLE | DRM_XE_VM_BIND_FLAG_CHECK_PXP | DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR |"
     }
@@ -3042,7 +3176,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3743",
+     "at": "kernel/IntelXe/xe_core.cpp:5190",
      "kind": "use",
      "code": "DRM_XE_VM_BIND_FLAG_DUMPABLE | DRM_XE_VM_BIND_FLAG_CHECK_PXP | DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR |"
     }
@@ -3081,12 +3215,12 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3743",
+     "at": "kernel/IntelXe/xe_core.cpp:5190",
      "kind": "use",
      "code": "DRM_XE_VM_BIND_FLAG_DUMPABLE | DRM_XE_VM_BIND_FLAG_CHECK_PXP | DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR |"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3745",
+     "at": "kernel/IntelXe/xe_core.cpp:5192",
      "kind": "use",
      "code": "const bool isNull = op.flags & DRM_XE_VM_BIND_FLAG_NULL, mirror = op.flags & DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR,"
     }
@@ -3117,14 +3251,14 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3744",
+     "at": "kernel/IntelXe/xe_core.cpp:5191",
      "kind": "use",
      "code": "DRM_XE_VM_BIND_FLAG_MADVISE_AUTORESET | DRM_XE_VM_BIND_FLAG_DECOMPRESS;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3748",
+     "at": "kernel/IntelXe/xe_core.cpp:5197",
      "kind": "reject",
-     "code": "if (mirror || (op.flags & DRM_XE_VM_BIND_FLAG_MADVISE_AUTORESET)) return EINVAL;"
+     "code": "if (op.flags & DRM_XE_VM_BIND_FLAG_MADVISE_AUTORESET) return EINVAL;"
     }
    ],
    "why": "",
@@ -3153,12 +3287,17 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3744",
+     "at": "kernel/IntelXe/xe_core.cpp:5180",
+     "kind": "reject",
+     "code": "if ((op.flags & DRM_XE_VM_BIND_FLAG_DECOMPRESS) && comp) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:5191",
      "kind": "use",
      "code": "DRM_XE_VM_BIND_FLAG_MADVISE_AUTORESET | DRM_XE_VM_BIND_FLAG_DECOMPRESS;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3746",
+     "at": "kernel/IntelXe/xe_core.cpp:5193",
      "kind": "use",
      "code": "decomp = op.flags & DRM_XE_VM_BIND_FLAG_DECOMPRESS;"
     }
@@ -3184,16 +3323,10 @@
    "token": "DRM_XE_CONSULT_MEM_ADVISE_PREF_LOC",
    "area": "MADVISE / memory ranges",
    "value": -1,
-   "status": "rejected",
-   "by": "parent ioctl",
-   "uses": [
-    {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
-    }
-   ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "status": "unverified",
+   "by": null,
+   "uses": [],
+   "why": "no use by name or by value -1; no dispatch switch, field match or proof decides it",
    "comments": [],
    "consumers": [
     {
@@ -3218,14 +3351,14 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5930",
+     "at": "kernel/IntelXe/xe_core.cpp:8276",
      "kind": "use",
      "code": "if (g->property != DRM_XE_VM_GET_PROPERTY_FAULTS) return EINVAL;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:279 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:344 (file scope)"
    ],
    "consumers": [
     {
@@ -3250,14 +3383,14 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5626",
+     "at": "kernel/IntelXe/xe_core.cpp:7440",
      "kind": "use",
      "code": "if (sp.base.pad || sp.base.name != DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY) return EINVAL;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:5612 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:7426 (file scope)"
    ],
    "consumers": [
     {
@@ -3300,7 +3433,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5631",
+     "at": "kernel/IntelXe/xe_core.cpp:7445",
      "kind": "use",
      "code": "case DRM_XE_EXEC_QUEUE_SET_PROPERTY_PRIORITY:"
     }
@@ -3348,7 +3481,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5636",
+     "at": "kernel/IntelXe/xe_core.cpp:7450",
      "kind": "use",
      "code": "case DRM_XE_EXEC_QUEUE_SET_PROPERTY_TIMESLICE:"
     }
@@ -3368,7 +3501,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5640",
+     "at": "kernel/IntelXe/xe_core.cpp:7454",
      "kind": "use",
      "code": "case DRM_XE_EXEC_QUEUE_SET_PROPERTY_PXP_TYPE:"
     }
@@ -3407,7 +3540,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5643",
+     "at": "kernel/IntelXe/xe_core.cpp:7457",
      "kind": "reject",
      "code": "case DRM_XE_EXEC_QUEUE_SET_HANG_REPLAY_STATE:"
     }
@@ -3417,7 +3550,7 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_exec_queue_create",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP",
@@ -3427,7 +3560,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5645",
+     "at": "kernel/IntelXe/xe_core.cpp:7459",
      "kind": "reject",
      "code": "case DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP:"
     }
@@ -3481,7 +3614,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5647",
+     "at": "kernel/IntelXe/xe_core.cpp:7461",
      "kind": "reject",
      "code": "case DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_QUEUE_PRIORITY:"
     }
@@ -3511,19 +3644,19 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5627",
+     "at": "kernel/IntelXe/xe_core.cpp:7441",
      "kind": "reject",
      "code": "if (sp.property > DRM_XE_EXEC_QUEUE_SET_DISABLE_STATE_CACHE_PERF_FIX || sp.pad) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5649",
+     "at": "kernel/IntelXe/xe_core.cpp:7463",
      "kind": "use",
      "code": "case DRM_XE_EXEC_QUEUE_SET_DISABLE_STATE_CACHE_PERF_FIX:"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:323 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:407 (file scope)"
    ],
    "consumers": [
     {
@@ -3548,21 +3681,21 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5882",
+     "at": "kernel/IntelXe/xe_core.cpp:8205",
      "kind": "reject",
      "code": "if ((e->flags & ~(uint32_t)DRM_XE_EXEC_QUEUE_LOW_LATENCY_HINT) || e->reserved[0] || e->reserved[1]) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5899",
+     "at": "kernel/IntelXe/xe_core.cpp:8237",
      "kind": "use",
      "code": "props.lowLatency = e->flags & DRM_XE_EXEC_QUEUE_LOW_LATENCY_HINT;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:322 (file scope)",
-    "kernel/IntelXe/xe_core.cpp:1858 (queueRegister)",
-    "kernel/IntelXe/xe_core.cpp:3427 (deviceQuery)"
+    "kernel/IntelXe/xe_core.cpp:406 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:2274 (queueRegister)",
+    "kernel/IntelXe/xe_core.cpp:2715 (file scope)"
    ],
    "consumers": [
     {
@@ -3572,6 +3705,15 @@
      "commit": "a3ad934832bb",
      "at": [
       "src/intel/vulkan/xe/anv_queue.c:153"
+     ]
+    },
+    {
+     "consumer": "Metal plugin / VideoToolbox (this repository)",
+     "kind": "now",
+     "feature": null,
+     "commit": "5cce0f9cce39",
+     "at": [
+      "nullmoth/plugin/nvmtl_vk.c:772"
      ]
     },
     {
@@ -3596,7 +3738,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5964",
+     "at": "kernel/IntelXe/xe_core.cpp:8310",
      "kind": "use",
      "code": "if (p->property != DRM_XE_EXEC_QUEUE_GET_PROPERTY_BAN) return EINVAL;"
     }
@@ -3649,7 +3791,7 @@
    "consumers": [],
    "doc": "banned due to GPU hang/timeout",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_EXEC_QUEUE_BAN_REASON_PAGE_OFFLINE",
@@ -3683,9 +3825,14 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3561",
+     "at": "kernel/IntelXe/xe_core.cpp:4941",
      "kind": "use",
      "code": "if (s.type != DRM_XE_SYNC_TYPE_SYNCOBJ && s.type != DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:45",
+     "kind": "use",
+     "code": "case DRM_XE_SYNC_TYPE_SYNCOBJ:"
     }
    ],
    "why": "",
@@ -3733,19 +3880,24 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3561",
+     "at": "kernel/IntelXe/xe_core.cpp:4941",
      "kind": "use",
      "code": "if (s.type != DRM_XE_SYNC_TYPE_SYNCOBJ && s.type != DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3563",
+     "at": "kernel/IntelXe/xe_core.cpp:4943",
      "kind": "use",
      "code": "*point = s.type == DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ ? s.timeline_value : 0;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3651",
+     "at": "kernel/IntelXe/xe_core.cpp:5063",
      "kind": "use",
      "code": "if (s.type == DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ) {"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:49",
+     "kind": "use",
+     "code": "case DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ:"
     }
    ],
    "why": "",
@@ -3788,22 +3940,35 @@
    "token": "DRM_XE_SYNC_TYPE_USER_FENCE",
    "area": "syncs (EXEC / VM_BIND)",
    "value": 2,
-   "status": "rejected",
+   "status": "implemented",
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3560",
+     "at": "kernel/IntelXe/xe_core.cpp:4923",
+     "kind": "use",
+     "code": "if (e.type != DRM_XE_SYNC_TYPE_USER_FENCE) continue;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:4940",
      "kind": "reject",
      "code": "if (s.type == DRM_XE_SYNC_TYPE_USER_FENCE) return EINVAL;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3648",
-     "kind": "reject",
-     "code": "if (s.type == DRM_XE_SYNC_TYPE_USER_FENCE) { err = EINVAL; break; }"
+     "at": "kernel/IntelXe/xe_core.cpp:5059",
+     "kind": "use",
+     "code": "if (s.type == DRM_XE_SYNC_TYPE_USER_FENCE) continue;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:54",
+     "kind": "use",
+     "code": "case DRM_XE_SYNC_TYPE_USER_FENCE:"
     }
    ],
    "why": "",
-   "comments": [],
+   "comments": [
+    "kernel/IntelXe/xe_core.cpp:359 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:5026 (file scope)"
+   ],
    "consumers": [
     {
      "consumer": "Intel compute-runtime (NEO)",
@@ -3817,8 +3982,8 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_sync",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_SYNC_FLAG_SIGNAL",
@@ -3828,14 +3993,24 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3612",
+     "at": "kernel/IntelXe/xe_core.cpp:4993",
      "kind": "use",
      "code": "if (s.flags & DRM_XE_SYNC_FLAG_SIGNAL) continue;"
     },
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3647",
+     "at": "kernel/IntelXe/xe_core.cpp:5058",
      "kind": "use",
      "code": "if (!(s.flags & DRM_XE_SYNC_FLAG_SIGNAL)) continue;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:42",
+     "kind": "reject",
+     "code": "if ((s.flags & ~(uint32_t)DRM_XE_SYNC_FLAG_SIGNAL) || s.reserved[0] || s.reserved[1]) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:43",
+     "kind": "use",
+     "code": "const bool signal = s.flags & DRM_XE_SYNC_FLAG_SIGNAL;"
     }
    ],
    "why": "",
@@ -3890,17 +4065,17 @@
    "area": "syncs (EXEC / VM_BIND)",
    "value": 1024,
    "status": "implemented",
-   "by": "value 1024",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3545",
+     "at": "kernel/IntelXe/xe_core.cpp:4907",
      "kind": "use",
-     "code": "if (num > 1024) return EINVAL;"
+     "code": "if (num > DRM_XE_MAX_SYNCS) return EINVAL;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:3539 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:4897 (file scope)"
    ],
    "consumers": [],
    "doc": "value of a field in struct drm_xe_exec",
@@ -3911,16 +4086,16 @@
    "token": "DRM_XE_UFENCE_WAIT_OP_EQ",
    "area": "WAIT_USER_FENCE",
    "value": 0,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:77",
+     "kind": "use",
+     "code": "case DRM_XE_UFENCE_WAIT_OP_EQ: passed = (rvalue & mask) == (value & mask); break;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_WAIT_USER_FENCE, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -3935,23 +4110,23 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_wait_user_fence",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_UFENCE_WAIT_OP_NEQ",
    "area": "WAIT_USER_FENCE",
    "value": 1,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:78",
+     "kind": "use",
+     "code": "case DRM_XE_UFENCE_WAIT_OP_NEQ: passed = (rvalue & mask) != (value & mask); break;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_WAIT_USER_FENCE, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -3965,43 +4140,43 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_wait_user_fence",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_UFENCE_WAIT_OP_GT",
    "area": "WAIT_USER_FENCE",
    "value": 2,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:79",
+     "kind": "use",
+     "code": "case DRM_XE_UFENCE_WAIT_OP_GT: passed = (rvalue & mask) > (value & mask); break;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_WAIT_USER_FENCE, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [],
    "doc": "value of a field in struct drm_xe_wait_user_fence",
-   "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_UFENCE_WAIT_OP_GTE",
    "area": "WAIT_USER_FENCE",
    "value": 3,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:80",
+     "kind": "use",
+     "code": "case DRM_XE_UFENCE_WAIT_OP_GTE: passed = (rvalue & mask) >= (value & mask); break;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_WAIT_USER_FENCE, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4015,68 +4190,83 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_wait_user_fence",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_UFENCE_WAIT_OP_LT",
    "area": "WAIT_USER_FENCE",
    "value": 4,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:81",
+     "kind": "use",
+     "code": "case DRM_XE_UFENCE_WAIT_OP_LT: passed = (rvalue & mask) < (value & mask); break;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_WAIT_USER_FENCE, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [],
    "doc": "value of a field in struct drm_xe_wait_user_fence",
-   "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_UFENCE_WAIT_OP_LTE",
    "area": "WAIT_USER_FENCE",
    "value": 5,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:68",
+     "kind": "use",
+     "code": "if (a.op > DRM_XE_UFENCE_WAIT_OP_LTE) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:82",
+     "kind": "use",
+     "code": "case DRM_XE_UFENCE_WAIT_OP_LTE: passed = (rvalue & mask) <= (value & mask); break;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_WAIT_USER_FENCE, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [],
    "doc": "value of a field in struct drm_xe_wait_user_fence",
-   "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_UFENCE_WAIT_FLAG_ABSTIME",
    "area": "WAIT_USER_FENCE",
    "value": 1,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:67",
      "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "code": "if (a.flags & ~(uint16_t)DRM_XE_UFENCE_WAIT_FLAG_ABSTIME) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:98",
+     "kind": "use",
+     "code": "if (a.flags & DRM_XE_UFENCE_WAIT_FLAG_ABSTIME) return (uint64_t)a.timeout <= n ? (int64_t)(n + 1) : a.timeout;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:106",
+     "kind": "use",
+     "code": "if (a.flags & DRM_XE_UFENCE_WAIT_FLAG_ABSTIME) return;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_WAIT_USER_FENCE, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [],
    "doc": "value of a field in struct drm_xe_wait_user_fence",
-   "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_OA_CAPS_BASE",
@@ -4086,7 +4276,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4096,7 +4286,7 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_oa_unit",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_CAPS_SYNCS",
@@ -4106,7 +4296,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4136,7 +4326,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4146,7 +4336,7 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_oa_unit",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_CAPS_WAIT_NUM_REPORTS",
@@ -4156,7 +4346,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4166,7 +4356,7 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_oa_unit",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_CAPS_OAM",
@@ -4176,7 +4366,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4186,7 +4376,7 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_oa_unit",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_CAPS_OA_UNIT_GT_ID",
@@ -4196,7 +4386,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4206,7 +4396,7 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_oa_unit",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_EXTENSION_SET_PROPERTY",
@@ -4216,7 +4406,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4246,7 +4436,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4276,7 +4466,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4306,7 +4496,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4336,7 +4526,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4366,7 +4556,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4396,7 +4586,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4426,7 +4616,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4436,7 +4626,7 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_oa_stream_status",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OASTATUS_REPORT_LOST",
@@ -4446,7 +4636,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4500,7 +4690,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4530,7 +4720,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -4540,22 +4730,27 @@
    "consumers": [],
    "doc": "value of a field in struct drm_xe_query_eu_stall",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC",
    "area": "MADVISE / memory ranges",
    "value": 0,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7560",
+     "kind": "use",
+     "code": "case DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC: {"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7586",
+     "kind": "use",
+     "code": "if (a.type == DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC && (int32_t)a.preferred_mem_loc.devmem_fd > 0) return ENOENT;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4569,23 +4764,28 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_madvise",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_MEM_RANGE_ATTR_ATOMIC",
    "area": "MADVISE / memory ranges",
    "value": 1,
    "status": "rejected",
-   "by": "parent ioctl",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:7556",
      "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "code": "if (a.type == DRM_XE_MEM_RANGE_ATTR_ATOMIC && (a.atomic.val > DRM_XE_ATOMIC_CPU || a.atomic.pad || a.atomic.reserved)) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7615",
+     "kind": "reject",
+     "code": "if (any && (a.type == DRM_XE_MEM_RANGE_ATTR_ATOMIC || a.type == DRM_XE_MEM_RANGE_ATTR_PAT)) return EOPNOTSUPP;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4607,15 +4807,25 @@
    "area": "MADVISE / memory ranges",
    "value": 2,
    "status": "rejected",
-   "by": "parent ioctl",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:7557",
      "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "code": "if (a.type == DRM_XE_MEM_RANGE_ATTR_PAT && (a.pat_index.val >= gXePlat->patEntries || (a.pat_index.val >= 16 && a.pat_index.val <= 19))) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7558",
+     "kind": "reject",
+     "code": "if (a.type == DRM_XE_MEM_RANGE_ATTR_PAT && (a.pat_index.pad || a.pat_index.reserved)) return EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7615",
+     "kind": "reject",
+     "code": "if (any && (a.type == DRM_XE_MEM_RANGE_ATTR_ATOMIC || a.type == DRM_XE_MEM_RANGE_ATTR_PAT)) return EOPNOTSUPP;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4636,17 +4846,25 @@
    "token": "DRM_XE_VMA_ATTR_PURGEABLE_STATE",
    "area": "MADVISE / memory ranges",
    "value": 3,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7568",
+     "kind": "use",
+     "code": "case DRM_XE_VMA_ATTR_PURGEABLE_STATE: {"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7579",
+     "kind": "use",
+     "code": "const bool purgeable = a.type == DRM_XE_VMA_ATTR_PURGEABLE_STATE;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
-   "comments": [],
+   "why": "",
+   "comments": [
+    "kernel/IntelXe/xe_core.cpp:295 (file scope)",
+    "kernel/IntelXe/xe_core.cpp:4402 (file scope)"
+   ],
    "consumers": [
     {
      "consumer": "iris (Mesa)",
@@ -4659,23 +4877,23 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_madvise",
-   "need": "needed_future",
-   "need_why": "only for: native OpenGL via iris"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_PREFERRED_LOC_DEFAULT_DEVICE",
    "area": "MADVISE / memory ranges",
    "value": 0,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7562",
+     "kind": "use",
+     "code": "const bool ok = fd >= DRM_XE_PREFERRED_LOC_DEFAULT_SYSTEM && (fd > DRM_XE_PREFERRED_LOC_DEFAULT_DEVICE ||"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4689,23 +4907,23 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_madvise",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_PREFERRED_LOC_DEFAULT_SYSTEM",
    "area": "MADVISE / memory ranges",
    "value": -1,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7562",
+     "kind": "use",
+     "code": "const bool ok = fd >= DRM_XE_PREFERRED_LOC_DEFAULT_SYSTEM && (fd > DRM_XE_PREFERRED_LOC_DEFAULT_DEVICE ||"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4719,23 +4937,17 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_madvise",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_MIGRATE_ALL_PAGES",
    "area": "MADVISE / memory ranges",
    "value": 0,
-   "status": "rejected",
-   "by": "parent ioctl",
-   "uses": [
-    {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
-    }
-   ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "status": "unverified",
+   "by": null,
+   "uses": [],
+   "why": "no use by name or by value 0; no dispatch switch, field match or proof decides it",
    "comments": [],
    "consumers": [
     {
@@ -4756,16 +4968,16 @@
    "token": "DRM_XE_MIGRATE_ONLY_SYSTEM_PAGES",
    "area": "MADVISE / memory ranges",
    "value": 1,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7563",
+     "kind": "use",
+     "code": "!a.preferred_mem_loc.region_instance) && a.preferred_mem_loc.migration_policy <= DRM_XE_MIGRATE_ONLY_SYSTEM_PAGES &&"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4779,23 +4991,17 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_madvise",
-   "need": "needed_future",
-   "need_why": "only for: OpenCL / oneAPI (Intel compute-runtime)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_ATOMIC_UNDEFINED",
    "area": "MADVISE / memory ranges",
    "value": 0,
-   "status": "rejected",
-   "by": "parent ioctl",
-   "uses": [
-    {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
-    }
-   ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "status": "unverified",
+   "by": null,
+   "uses": [],
+   "why": "no use by name or by value 0; no dispatch switch, field match or proof decides it",
    "comments": [],
    "consumers": [
     {
@@ -4816,16 +5022,10 @@
    "token": "DRM_XE_ATOMIC_DEVICE",
    "area": "MADVISE / memory ranges",
    "value": 1,
-   "status": "rejected",
-   "by": "parent ioctl",
-   "uses": [
-    {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
-    }
-   ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "status": "unverified",
+   "by": null,
+   "uses": [],
+   "why": "no use by name or by value 1; no dispatch switch, field match or proof decides it",
    "comments": [],
    "consumers": [
     {
@@ -4846,16 +5046,10 @@
    "token": "DRM_XE_ATOMIC_GLOBAL",
    "area": "MADVISE / memory ranges",
    "value": 2,
-   "status": "rejected",
-   "by": "parent ioctl",
-   "uses": [
-    {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
-    }
-   ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "status": "unverified",
+   "by": null,
+   "uses": [],
+   "why": "no use by name or by value 2; no dispatch switch, field match or proof decides it",
    "comments": [],
    "consumers": [
     {
@@ -4877,15 +5071,15 @@
    "area": "MADVISE / memory ranges",
    "value": 3,
    "status": "rejected",
-   "by": "parent ioctl",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:7556",
      "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "code": "if (a.type == DRM_XE_MEM_RANGE_ATTR_ATOMIC && (a.atomic.val > DRM_XE_ATOMIC_CPU || a.atomic.pad || a.atomic.reserved)) return EINVAL;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4906,16 +5100,21 @@
    "token": "DRM_XE_VMA_PURGEABLE_STATE_WILLNEED",
    "area": "MADVISE / memory ranges",
    "value": 0,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7570",
+     "kind": "use",
+     "code": "const bool ok = v == DRM_XE_VMA_PURGEABLE_STATE_WILLNEED || v == DRM_XE_VMA_PURGEABLE_STATE_DONTNEED;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_core.cpp:7602",
+     "kind": "use",
+     "code": "if (a.purge_state_val.val == DRM_XE_VMA_PURGEABLE_STATE_WILLNEED) {"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4929,23 +5128,23 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_madvise",
-   "need": "needed_future",
-   "need_why": "only for: native OpenGL via iris"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_VMA_PURGEABLE_STATE_DONTNEED",
    "area": "MADVISE / memory ranges",
    "value": 1,
-   "status": "rejected",
-   "by": "parent ioctl",
+   "status": "implemented",
+   "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
-     "kind": "reject",
-     "code": "default: return ENOTTY;"
+     "at": "kernel/IntelXe/xe_core.cpp:7570",
+     "kind": "use",
+     "code": "const bool ok = v == DRM_XE_VMA_PURGEABLE_STATE_WILLNEED || v == DRM_XE_VMA_PURGEABLE_STATE_DONTNEED;"
     }
    ],
-   "why": "only reachable through DRM_IOCTL_XE_MADVISE, DRM_IOCTL_XE_VM_QUERY_MEM_RANGE_ATTRS, which our dispatch rejects",
+   "why": "",
    "comments": [],
    "consumers": [
     {
@@ -4959,8 +5158,8 @@
     }
    ],
    "doc": "value of a field in struct drm_xe_madvise",
-   "need": "needed_future",
-   "need_why": "only for: native OpenGL via iris"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_RAS_ERROR_SEVERITY_NAMES",
@@ -4998,14 +5197,14 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3407",
+     "at": "kernel/IntelXe/xe_core.cpp:4754",
      "kind": "use",
      "code": "r.m[0].mem_class = DRM_XE_MEM_REGION_CLASS_SYSMEM;"
     }
    ],
    "why": "",
    "comments": [
-    "kernel/IntelXe/xe_core.cpp:162 (file scope)"
+    "kernel/IntelXe/xe_core.cpp:180 (file scope)"
    ],
    "consumers": [
     {
@@ -5039,7 +5238,7 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:3412",
+     "at": "kernel/IntelXe/xe_core.cpp:4759",
      "kind": "use",
      "code": "r.m[1].mem_class = DRM_XE_MEM_REGION_CLASS_VRAM;"
     }
@@ -5078,7 +5277,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5108,7 +5307,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5147,7 +5346,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5186,7 +5385,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5216,7 +5415,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5246,7 +5445,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5256,7 +5455,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_UNIT_TYPE_OAM",
@@ -5266,7 +5465,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5276,7 +5475,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_UNIT_TYPE_OAM_SAG",
@@ -5286,7 +5485,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5296,7 +5495,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_UNIT_TYPE_MERT",
@@ -5306,7 +5505,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5316,7 +5515,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_FMT_TYPE_OAG",
@@ -5326,7 +5525,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5356,7 +5555,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5366,7 +5565,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_FMT_TYPE_OAM",
@@ -5376,7 +5575,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5386,7 +5585,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_FMT_TYPE_OAC",
@@ -5396,7 +5595,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5406,7 +5605,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_FMT_TYPE_OAM_MPEC",
@@ -5416,7 +5615,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5426,7 +5625,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_FMT_TYPE_PEC",
@@ -5436,7 +5635,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5466,7 +5665,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5476,7 +5675,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_PROPERTY_SAMPLE_OA",
@@ -5486,7 +5685,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5516,7 +5715,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5546,7 +5745,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5576,7 +5775,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5606,7 +5805,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5636,7 +5835,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5666,7 +5865,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5676,7 +5875,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_OA_PROPERTY_NO_PREEMPT",
@@ -5686,7 +5885,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5716,7 +5915,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5746,7 +5945,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5776,7 +5975,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5806,7 +6005,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5816,7 +6015,7 @@
    "consumers": [],
    "doc": "",
    "need": "not_needed",
-   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
+   "need_why": "no consumer found in: Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files); Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files); iris (Mesa) @ a3ad934832bb (57 files); Mesa intel/perf @ a3ad934832bb (18 files); Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   },
   {
    "token": "DRM_XE_PXP_TYPE_NONE",
@@ -5826,9 +6025,14 @@
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5641",
+     "at": "kernel/IntelXe/xe_core.cpp:7455",
      "kind": "use",
      "code": "if (sp.value == DRM_XE_PXP_TYPE_NONE) break;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:13",
+     "kind": "use",
+     "code": "if (value == DRM_XE_PXP_TYPE_NONE) return 0;"
     }
    ],
    "why": "",
@@ -5842,13 +6046,18 @@
    "token": "DRM_XE_PXP_TYPE_HWDRM",
    "area": "PXP",
    "value": 1,
-   "status": "rejected",
+   "status": "implemented",
    "by": "name",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:5642",
+     "at": "kernel/IntelXe/xe_core.cpp:7456",
      "kind": "reject",
      "code": "return sp.value == DRM_XE_PXP_TYPE_HWDRM ? ENODEV : EINVAL;"
+    },
+    {
+     "at": "kernel/IntelXe/xe_uapi_args.cpp:14",
+     "kind": "use",
+     "code": "if (value != DRM_XE_PXP_TYPE_HWDRM) return EINVAL;"
     }
    ],
    "why": "",
@@ -5876,8 +6085,8 @@
     }
    ],
    "doc": "",
-   "need": "not_needed",
-   "need_why": "Linux-only concept: PXP protected content (Linux/Windows DRM content protection; no macOS path)"
+   "need": null,
+   "need_why": ""
   },
   {
    "token": "DRM_XE_EU_STALL_PROP_GT_ID",
@@ -5887,7 +6096,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5926,7 +6135,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -5965,7 +6174,7 @@
    "by": "parent ioctl",
    "uses": [
     {
-     "at": "kernel/IntelXe/xe_core.cpp:6100",
+     "at": "kernel/IntelXe/xe_core.cpp:8496",
      "kind": "reject",
      "code": "default: return ENOTTY;"
     }
@@ -6126,16 +6335,15 @@
  "need": {
   "searched": [
    "Mesa ANV / intel common (as run on macOS) @ a3ad934832bb (193 files)",
-   "Metal plugin / VideoToolbox (this repository) @ 030bfaed7ca8 (44 files)",
+   "Metal plugin / VideoToolbox (this repository) @ 5cce0f9cce39 (59 files)",
    "iris (Mesa) @ a3ad934832bb (57 files)",
    "Mesa intel/perf @ a3ad934832bb (18 files)",
    "Intel compute-runtime (NEO) @ 248eb54f8441 (137 files)"
   ],
   "counts": {
-   "implemented": 77,
-   "needed_future": 63,
-   "needed_now": 2,
-   "not_needed": 40
+   "implemented": 99,
+   "needed_future": 49,
+   "not_needed": 34
   },
   "method": "token names searched in the consumer trees (xe_drm.h copies excluded); tools/parity/consumers.py"
  }

@@ -156,7 +156,10 @@ def check_proof(proof, idx):
 def tree_id(path):
     try:
         top = git(path, 'rev-parse', '--show-toplevel').strip()
-        return {'path': os.path.relpath(path, top), 'repo': os.path.basename(top),
+        # a linked worktree is named after its repository (the directory of the common .git), not its own directory
+        common = os.path.abspath(os.path.join(top, git(path, 'rev-parse', '--git-common-dir').strip()))
+        repo = os.path.basename(os.path.dirname(common)) if os.path.basename(common) == '.git' else os.path.basename(top)
+        return {'path': os.path.relpath(path, top), 'repo': repo,
                 'repo_head': git(top, 'rev-parse', '--short', 'HEAD').strip(),
                 'last_commit': git(path, 'log', '-1', '--format=%h %cs', '--', '.').strip(),
                 'dirty': bool(git(path, 'status', '--porcelain', '--', '.').strip())}
