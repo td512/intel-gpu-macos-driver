@@ -136,7 +136,8 @@ for cpu in "$NOHYBRID" "$HYBRID" '12th Gen Intel(R) Core(TM) i9-12900K' '12th Ge
     '12th Gen Intel(R) Core(TM) i5-12600K' '12th Gen Intel(R) Core(TM) i5-12600H' '12th Gen Intel(R) Core(TM) i5-12490F' \
     '12th Gen Intel(R) Core(TM) i3-12100F' '12th Gen Intel(R) Core(TM) i3-12300' '13th Gen Intel(R) Core(TM) i3-13100' \
     '13th Gen Intel(R) Core(TM) i7-13620H' '14th Gen Intel(R) Core(TM) i9-14900K' '14th Gen Intel(R) Core(TM) i5-14400F' \
-    'Intel(R) Core(TM) i3-14100' 'Intel(R) Core(TM) Ultra 7 155H' '12th Gen Intel(R) Core(TM) i7-1255U'; do
+    'Intel(R) Core(TM) i3-14100' 'Intel(R) Core(TM) Ultra 7 155H' '12th Gen Intel(R) Core(TM) i7-1255U' \
+    '13th Gen Intel(R) Core(TM) i7-1360P'; do
     printf '%s|%s\n' "$(INTELXE_CPU_BRAND=$cpu efi --status | sed -n 's/^hybridpm_needed=//p')" "$cpu" >> "$X/efi-sh/hybrid-cpus.txt"
 done
 # SSDT-ARCOFF adapted to the card's port: the package with the 0.1.3 table; a port of the same depth, a shorter and a

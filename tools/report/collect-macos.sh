@@ -956,7 +956,7 @@ done
 # 12th-14th gen Core with E-cores (HybridPM leaves Core Ultra alone; the listed desktop models have P-cores only)
 case "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)" in
 *Ultra*|*i3-1[234]100*|*i3-12300*|*i5-12400*|*i5-12490*|*i5-12500|*i5-12500[!H]*|*i5-12600|*i5-12600[!KH]*) ;;
-*i[3579]-1[2-4][0-9][0-9][0-9]*)
+*i[3579]-1[2-4][0-9][0-9][0-9]*|*i[3579]-1[2-4][0-9][0-9][UP]*)
 	grep -qi hybridpm "$TMPBASE/.kexts" 2>/dev/null ||
 		warn cpu-hybridpm "This Intel CPU has performance and efficiency cores, and HybridPM.kext is not loaded: XCPM can hold every core at a low clock, which shows as a slow GPU (Geekbench GPU scores about a third lower on the test machine). See \"Hybrid Intel CPUs\" in the install guide." ;;
 esac

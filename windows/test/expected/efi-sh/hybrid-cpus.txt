@@ -16,4 +16,5 @@ yes|14th Gen Intel(R) Core(TM) i9-14900K
 yes|14th Gen Intel(R) Core(TM) i5-14400F
 no|Intel(R) Core(TM) i3-14100
 no|Intel(R) Core(TM) Ultra 7 155H
-no|12th Gen Intel(R) Core(TM) i7-1255U
+yes|12th Gen Intel(R) Core(TM) i7-1255U
+yes|13th Gen Intel(R) Core(TM) i7-1360P

@@ -28,7 +28,7 @@ private func plistValue(_ path: String, _ key: String) -> String? {
 /// i3/i5/i7/i9-12xxx..14xxx, without Core Ultra (HybridPM leaves it alone) and the desktop models with P-cores only. The
 /// same list as efi.sh and the diagnostics report.
 func hybridCPU(_ brand: String) -> Bool {
-    brand.range(of: #"\bi[3579]-1[2-4][0-9]{3}"#, options: .regularExpression) != nil
+    brand.range(of: #"\bi[3579]-1[2-4]([0-9]{3}|[0-9]{2}[UP])"#, options: .regularExpression) != nil
         && brand.range(of: #"Ultra|i3-1[234]100|i3-12300|i5-12400|i5-12490|i5-12500(?!H)|i5-12600(?![KH])"#, options: .regularExpression) == nil
 }
 

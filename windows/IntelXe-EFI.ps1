@@ -1148,7 +1148,7 @@ namespace IntelXeEfi
         {
             if (string.IsNullOrEmpty(name)) return false;
             if (Regex.IsMatch(name, "Ultra|i3-1[234]100|i3-12300|i5-12400|i5-12490|i5-12500(?!H)|i5-12600(?![KH])")) return false;
-            return Regex.IsMatch(name, "i[3579]-1[2-4][0-9][0-9][0-9]");
+            return Regex.IsMatch(name, "i[3579]-1[2-4]([0-9][0-9][0-9]|[0-9][0-9][UP])");
         }
         public bool HpmNeeded { get { return HybridCpu(Cpu); } }
         /// Does the package have HybridPM.kext (0.1.4 and later)?
@@ -1383,7 +1383,7 @@ namespace IntelXeEfi
                 if (i < 0)
                 {
                     p.Lines.Add("config   ACPI > Add: add " + SsdtName + " (Enabled)");
-                    p.Ops.Add(Op.Append(AcpiAdd, PValue.Dict("Comment", "SSDT-ARCOFF: hides the Arc B580 from the generic display driver (intel-gpu-macos-driver)",
+                    p.Ops.Add(Op.Append(AcpiAdd, PValue.Dict("Comment", "SSDT-ARCOFF: hides the Arc B580/B570 from the generic display driver (intel-gpu-macos-driver)",
                         "Enabled", true, "Path", SsdtName)));
                 }
                 else if (Plist.Raw(cfg.Get(Cat(AcpiAdd, i.ToString(), "Enabled"))) != "true")

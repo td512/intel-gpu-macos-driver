@@ -125,6 +125,7 @@ BRAND=${INTELXE_CPU_BRAND-$(sysctl -n machdep.cpu.brand_string 2>/dev/null || tr
 case "$BRAND" in
     *Ultra*|*i3-1[234]100*|*i3-12300*|*i5-12400*|*i5-12490*|*i5-12500|*i5-12500[!H]*|*i5-12600|*i5-12600[!KH]*) HPMNEED=no;;
     *i[3579]-1[2-4][0-9][0-9][0-9]*) HPMNEED=yes;;
+    *i[3579]-1[2-4][0-9][0-9][UP]*) HPMNEED=yes;;   # the U and P laptop models (i7-1255U, i7-1360P): all with E-cores
     *) HPMNEED=no;;
 esac
 HPMPKG=no; [ -f "$HPK/Contents/MacOS/HybridPM" ] && [ -f "$HPK/Contents/Info.plist" ] && HPMPKG=yes
@@ -343,7 +344,7 @@ plan_files() {
         i=$(find_entry "$CFG" ACPI.Add Path "$SSDT")
         if [ -z "$i" ]; then
             PLAN+=("config   ACPI > Add: add $SSDT (Enabled)")
-            op append ACPI.Add json '{"Comment":"SSDT-ARCOFF: hides the Arc B580 from the generic display driver (intel-gpu-macos-driver)","Enabled":true,"Path":"SSDT-ARCOFF.aml"}'
+            op append ACPI.Add json '{"Comment":"SSDT-ARCOFF: hides the Arc B580/B570 from the generic display driver (intel-gpu-macos-driver)","Enabled":true,"Path":"SSDT-ARCOFF.aml"}'
         elif [ "$(pget "$CFG" ACPI.Add.$i.Enabled)" != true ]; then
             PLAN+=("config   ACPI > Add, item $i ($SSDT): Enabled false -> true"); op set ACPI.Add.$i.Enabled bool true
         fi

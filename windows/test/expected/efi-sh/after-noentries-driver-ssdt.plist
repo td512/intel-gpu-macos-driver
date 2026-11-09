@@ -80,7 +80,7 @@
 			</dict>
 			<dict>
 				<key>Comment</key>
-				<string>SSDT-ARCOFF: hides the Arc B580 from the generic display driver (intel-gpu-macos-driver)</string>
+				<string>SSDT-ARCOFF: hides the Arc B580/B570 from the generic display driver (intel-gpu-macos-driver)</string>
 				<key>Enabled</key>
 				<true/>
 				<key>Path</key>
