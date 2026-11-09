@@ -96,6 +96,8 @@ def classify_use(tok, lines, k):
             return 'noop'
         return 'use'
     if ERR.search(code):
+        if re.match(r'^\s*if\s*\(\s*[\w.>\[\]-]+\s*>\s*%s\s*\)\s*return\s+E[A-Z]+;' % tok, code):
+            return 'use'                         # "if (x > TOKEN) return E..": a limit, TOKEN itself accepted
         for p in pos:
             before = code[:p]
             if re.search(r'!=\s*$', before):
