@@ -101,7 +101,7 @@ struct MonitorView: View {
     var body: some View {
         let s = model.now
         Form {
-            Section2(title: "Display") {
+            Section2(title: "Display", symbol: "display") {
                 LabeledContent("Mode") { Text(s.mode.isEmpty ? "–" : s.mode) }
                 LabeledContent("Variable refresh") { Text(manager.vrrActive ? String(localized: "Offered") : String(localized: "Off")) }
                 LabeledContent("Frames presented") { Text(s.fps.map { String(format: "%.0f / s", $0) } ?? "–") }
@@ -109,7 +109,7 @@ struct MonitorView: View {
                 Text("Frames the display took in the last second: it rises with motion on screen and falls to a few when nothing moves.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section2(title: "GPU") {
+            Section2(title: "GPU", symbol: "gauge.medium") {
                 if model.sensorsMissing {
                     Label("The GPU clock and temperatures need IntelXe.kext 0.1.4 or later in your EFI.", systemImage: "info.circle").foregroundStyle(.secondary)
                 } else {
@@ -124,7 +124,7 @@ struct MonitorView: View {
                 }
                 LabeledContent("Video memory in use") { Text(s.vramUsedMB.map { String(format: "%.1f GB", Double($0) / 1024) } ?? "–") }
             }
-            Section2(title: "Menu bar") {
+            Section2(title: "Menu bar", symbol: "menubar.rectangle") {
                 CaptionedToggle(title: "Show in the menu bar", caption: "Frames, GPU clock and temperature, and the display sizes (HiDPI ones too) to switch with one click.", isOn: $menuBarItem)
             }
         }

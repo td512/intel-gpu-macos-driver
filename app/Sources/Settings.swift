@@ -81,7 +81,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section2(title: "Power") {
+            Section2(title: "Power", symbol: "bolt") {
                 Picker("GPU power profile", selection: $st.edit.profile) {
                     Text("Balanced").tag(0); Text("Power saving").tag(1)
                 }
@@ -93,7 +93,7 @@ struct SettingsView: View {
                 Text("Applied at the next start.").font(.caption).foregroundStyle(.secondary)
                 CaptionedToggle(title: "Fast GPU response for apps", caption: "Keeps the GPU clock up while an app's GPU work runs, instead of letting short bursts run at the lowest clock: games, Metal and OpenCL apps and benchmarks respond faster (Geekbench 4-6 percent higher). The desktop itself is not affected; an idle GPU sleeps either way. Applies to apps started afterwards.", isOn: $st.edit.fastResponse)
             }
-            Section2(title: "Diagnostics") {
+            Section2(title: "Diagnostics", symbol: "stethoscope") {
                 CaptionedToggle(title: "GPU timing in the driver's log", caption: "For performance reports; test builds of the Metal driver only.", isOn: $st.edit.gpuTiming)
                 HStack {
                     Text("Power and diagnostics are saved together; the power settings apply at the next start.").font(.caption).foregroundStyle(.secondary)
@@ -102,7 +102,7 @@ struct SettingsView: View {
                     Button("Save") { manager.applySettings(st.edit); st.saved = st.edit }.disabled(st.edit == st.saved).keyboardShortcut(.defaultAction)
                 }
             }
-            Section2(title: "This app") {
+            Section2(title: "This app", symbol: "gearshape") {
                 CaptionedToggle(title: "Open at login", caption: "Keeps the menu bar item there. Applies at once.", isOn: Binding(get: { st.loginItem }, set: { on in
                     do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {}
                     st.loginItem = SMAppService.mainApp.status == .enabled
@@ -123,7 +123,7 @@ struct DisplayTroubleshootingView: View {
     @EnvironmentObject var manager: Manager
     @StateObject var st = SettingsState()
     var body: some View {
-        Section2(title: "Display troubleshooting") {
+        Section2(title: "Display troubleshooting", symbol: "wrench.and.screwdriver") {
                 CaptionedToggle(title: "Hardware cursor", caption: "Turn off if the pointer flickers, leaves trails or has the wrong colours.", isOn: $st.edit.hwCursor)
                 CaptionedToggle(title: "Output off when the display sleeps", caption: "Some monitors then wake more reliably, some less.", isOn: $st.edit.dpms)
                 CaptionedToggle(title: "Low framerate compensation", caption: "In Variable refresh: repeats frames below the monitor's lowest rate.", isOn: $st.edit.lfc)

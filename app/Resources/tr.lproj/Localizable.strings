@@ -527,3 +527,6 @@
 "A dialog after login only when something needs attention, such as a macOS update that removed the system-volume copy." = "Girişten sonra yalnızca ilgilenmeniz gereken bir şey varsa (örneğin bir macOS güncellemesi sistem birimi kopyasını sildiyse) bir pencere gösterir.";
 "Fast GPU response for apps" = "Uygulamalar için hızlı GPU yanıtı";
 "Keeps the GPU clock up while an app's GPU work runs, instead of letting short bursts run at the lowest clock: games, Metal and OpenCL apps and benchmarks respond faster (Geekbench 4-6 percent higher). The desktop itself is not affected; an idle GPU sleeps either way. Applies to apps started afterwards." = "Bir uygulamanın GPU işi çalışırken GPU saatini yüksek tutar; kısa iş patlamaları en düşük saatte çalışmaz: oyunlar, Metal ve OpenCL uygulamaları ve benchmark'lar daha hızlı yanıt verir (Geekbench yüzde 4-6 daha yüksek). Masaüstünün kendisi etkilenmez; boştaki GPU her iki durumda da uyur. Bundan sonra başlatılan uygulamalarda geçerlidir.";
+
+/* Look and feel: shared pieces */
+"More information" = "Ayrıntılar";

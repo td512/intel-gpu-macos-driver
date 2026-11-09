@@ -352,15 +352,15 @@ enum Section: String, CaseIterable, Identifiable {
     }
     var icon: String {
         switch self {
-        case .system: return "gauge.with.dots.needle.33percent"
-        case .monitor: return "waveform.path.ecg"
+        case .system: return "square.grid.2x2"
+        case .monitor: return "gauge.medium"
         case .driver: return "shippingbox"
-        case .efi: return "externaldrive"
-        case .zink: return "cube.transparent"
+        case .efi: return "internaldrive"
+        case .zink: return "gamecontroller"
         case .display: return "display"
-        case .settings: return "slider.horizontal.3"
+        case .settings: return "gearshape"
         case .tests: return "checkmark.seal"
-        case .report: return "stethoscope"
+        case .report: return "doc.text.magnifyingglass"
         case .log: return "text.alignleft"
         }
     }
@@ -539,7 +539,7 @@ struct SystemView: View {
     @StateObject var live = MonitorModel()
     var body: some View {
         Form {
-            Section2(title: "At a glance") {
+            Section2(title: "At a glance", symbol: "square.grid.2x2") {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                     OverviewCard(title: "Driver", symbol: "shippingbox", tint: manager.updateAvailable ? .orange : .accentColor,
                                  value: installedText, detail: String(localized: "Latest release: \(releaseText)")) {
@@ -564,14 +564,14 @@ struct SystemView: View {
                     }
                 }
             }
-            Section2(title: "Setup") {
+            Section2(title: "Setup", symbol: "list.number") {
                 HStack {
                     Text("Step by step from a fresh macOS install to a working driver.").font(.callout).foregroundStyle(.secondary)
                     Spacer()
                     Button("Open the setup assistant") { manager.showSetup = true }
                 }
             }
-            Section2(title: "This Mac") {
+            Section2(title: "This Mac", symbol: "desktopcomputer") {
                 DisclosureGroup(manager.facts.checks.allSatisfy { $0.state != .bad } ? String(localized: "Requirements met") : String(localized: "Some requirements are not met")) {
                     ForEach(manager.facts.checks) { check in
                         CheckRow(check: check)
@@ -607,8 +607,18 @@ struct SystemView: View {
 
 struct Section2<Content: View>: View {
     let title: LocalizedStringKey
+    var symbol: String?
     @ViewBuilder let content: Content
-    var body: some View { SwiftUI.Section { content } header: { Text(title) } }
+    var body: some View {
+        SwiftUI.Section { content } header: {
+            if let symbol {
+                HStack(spacing: 7) {
+                    Image(systemName: symbol).foregroundStyle(Color.accentColor).frame(width: 20)
+                    Text(title)
+                }
+            } else { Text(title) }
+        }
+    }
 }
 
 struct CheckRow: View {
@@ -658,7 +668,7 @@ struct DriverView: View {
 
     var body: some View {
         Form {
-            Section2(title: "Package") {
+            Section2(title: "Package", symbol: "shippingbox") {
                 if let package = manager.package {
                     LabeledContent("Folder") { Text(package.directory.path).textSelection(.enabled).lineLimit(2).truncationMode(.middle) }
                     LabeledContent("Version") { Text(manager.packageStatus["package_version"] ?? "–") }
@@ -686,12 +696,12 @@ struct DriverView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             if manager.package != nil {
-                Section2(title: "Install") {
+                Section2(title: "Install", symbol: "arrow.down.circle") {
                     ActionRow(action: .install, enabled: enabled(.install), prominent: installRecommended) { page.confirming = .install }
                     ActionRow(action: .repair, enabled: enabled(.repair)) { page.confirming = .repair }
                     ActionRow(action: .check, enabled: enabled(.check)) { manager.perform(.check) }
                 }
-                Section2(title: "Go back") {
+                Section2(title: "Go back", symbol: "arrow.uturn.backward") {
                     ActionRow(action: .undo, enabled: enabled(.undo)) { page.confirming = .undo }
                     ActionRow(action: .uninstall, enabled: enabled(.uninstall), destructive: true) { page.confirming = .uninstall }
                 }
@@ -764,7 +774,7 @@ struct ZinkView: View {
     var body: some View {
         let f = manager.facts, ready = manager.zinkPackage != nil
         Form {
-            Section2(title: "Zink") {
+            Section2(title: "Zink", symbol: "gamecontroller") {
                 Text("Optional. LWJGL 3 Java games such as Minecraft render through Mesa's Zink straight to Vulkan, instead of Apple's OpenGL. Native applications stay on Apple's OpenGL.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 LabeledContent("Installed") {
@@ -772,7 +782,7 @@ struct ZinkView: View {
                         .foregroundStyle(f.zinkInstalled ? .green : .secondary)
                 }
             }
-            Section2(title: "Every LWJGL application") {
+            Section2(title: "Every LWJGL application", symbol: "square.stack.3d.up") {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(f.zinkGlobal ? "On: LWJGL 3 applications use Zink." : "Off: they use Apple's OpenGL.")
@@ -787,7 +797,7 @@ struct ZinkView: View {
                     }
                 }
             }
-            Section2(title: "Install") {
+            Section2(title: "Install", symbol: "arrow.down.circle") {
                 if let package = manager.zinkPackage {
                     LabeledContent("Package") { Text(package.directory.path).lineLimit(2).truncationMode(.middle).textSelection(.enabled) }
                 } else {

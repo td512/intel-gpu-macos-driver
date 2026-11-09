@@ -131,7 +131,7 @@ struct SSVSection: View {
 
     var body: some View {
         let s = manager.ssv
-        Section2(title: "Safari and WebKit") {
+        Section2(title: "Safari and WebKit", symbol: "safari") {
             Text("Safari draws its pages in a process that may load code only from the system volume. To use the GPU there, the Metal driver needs a second copy on the system volume; without it Safari works, drawing in software.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             LabeledContent("System-volume copy") {

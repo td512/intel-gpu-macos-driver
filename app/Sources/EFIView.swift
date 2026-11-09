@@ -47,7 +47,7 @@ struct EFIView: View {
     var body: some View {
         Form {
             if manager.package == nil {
-                Section2(title: "Package") {
+                Section2(title: "Package", symbol: "shippingbox") {
                     Text("Choose a package on the Driver page first: IntelXe.kext and SSDT-ARCOFF.aml come from it.").foregroundStyle(.secondary)
                     Button("Open the Driver page") { manager.requestedSection = .driver }
                 }
@@ -72,7 +72,7 @@ struct EFIView: View {
     }
 
     var partition: some View {
-        Section2(title: "EFI partition") {
+        Section2(title: "EFI partition", symbol: "internaldrive") {
             Text("For a Mac installed with a plain OpenCore EFI (stage 1 of the install guide): this page does stages 2 and 4 on the EFI that OpenCore booted from, or on an EFI folder you choose, such as a USB stick's.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !efi.known {
@@ -124,7 +124,7 @@ struct EFIView: View {
     }
 
     var files: some View {
-        Section2(title: "IntelXe.kext and SSDT-ARCOFF (stage 4)") {
+        Section2(title: "IntelXe.kext and SSDT-ARCOFF (stage 4)", symbol: "puzzlepiece.extension") {
             LabeledContent("IntelXe.kext in the EFI") { Text(kextText).multilineTextAlignment(.trailing) }
             LabeledContent("Kernel > Add entry") { Text(entryText(efi["kext_entry"])) }
             LabeledContent("SSDT-ARCOFF.aml in the EFI") { Text(fileText(efi["ssdt_file"])) }
@@ -136,7 +136,7 @@ struct EFIView: View {
     }
 
     var settings: some View {
-        Section2(title: "Settings (stage 2)") {
+        Section2(title: "Settings (stage 2)", symbol: "slider.horizontal.3") {
             Text("SIP (csr-active-config), the boot-args amfi_get_out_of_my_way=0x1 and intelxe_surfvram=2, ResizeAppleGpuBars, DisableIoMapper and ReconnectGraphicsOnConnect, as stage 2 of the install guide sets them. Separate from the files above; your other settings stay as they are.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             planOrHint(.settings)
@@ -146,7 +146,7 @@ struct EFIView: View {
 
     /// only for the system-volume copy (Driver page, Safari and WebKit)
     var safari: some View {
-        Section2(title: "Safari on the GPU (optional)") {
+        Section2(title: "Safari on the GPU (optional)", symbol: "safari") {
             Text("The system-volume copy of the Metal driver (Driver page) changes the system volume's seal. OpenCore's Apple Secure Boot (Misc > Security > SecureBootModel) refuses to start macOS from such a volume, so it must be Disabled first. Only for the system-volume copy: without it, leave it as it is.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             LabeledContent("SecureBootModel") { Text(efi["secure_boot_model"].isEmpty ? "–" : efi["secure_boot_model"]) }
@@ -156,7 +156,7 @@ struct EFIView: View {
     }
 
     var undo: some View {
-        Section2(title: "Undo") {
+        Section2(title: "Undo", symbol: "arrow.uturn.backward") {
             LabeledContent("Last backup") {
                 Text(efi.backup.map { "\($0) (\(efi["backup_kind"]))" } ?? String(localized: "None"))
                     .textSelection(.enabled).lineLimit(3).truncationMode(.middle)
