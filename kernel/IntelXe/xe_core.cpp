@@ -2503,12 +2503,13 @@ int xeJobTimeString(char *b, size_t len, int fwHold) {
 	return k;
 }
 
-static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl, uint32_t nInl, uint32_t seq, bool flush,
-	uint32_t *dw) {
-	uint32_t n = 0;
+// The job-timing slot of q, 0 if the job is not timed (job timing: render GT only).
+static uint32_t jobTimeAddr(const XeQueue *q) { return gJobTime && gJtMem && !q->eng->gt ? gJtG + q->slot * 16 : 0; }
+
+// A job's commands up to and including the jump to its batch (jobDwords; direct submission puts them in the stub).
+static uint32_t jobPre(const XeQueue *q, uint64_t batch, uint32_t seq, bool flush, uint32_t jt, uint32_t *dw, uint32_t n) {
 	const uint32_t seqAddr = seqnoG + q->slot * kSlotBytes;
 	const bool rc = q->eng->drmClass == 0 || q->eng->drmClass == 4, compute = q->eng->drmClass == 4;
-	const uint32_t jt = gJobTime && gJtMem && !q->eng->gt ? gJtG + q->slot * 16 : 0;   // job timing: render GT only
 	if (jt) jtSrm(dw, n, jt);
 	if (rc) {
 		dw[n++] = MI_INSTR(0x5) | 1u << 8 | 1;   // preparser disable
@@ -2550,6 +2551,15 @@ static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl,
 		dw[n++] = (uint32_t)batch;
 		dw[n++] = (uint32_t)(batch >> 32);
 	}
+	return n;
+}
+
+// A job's commands after its batch returns: kernel inline commands, the cache flush, the seqno, the interrupt
+// (jobDwords; direct submission puts them in the armed slot).
+static uint32_t jobPost(const XeQueue *q, const uint32_t *inl, uint32_t nInl, uint32_t seq, uint32_t jt, uint32_t *dw,
+	uint32_t n) {
+	const uint32_t seqAddr = seqnoG + q->slot * kSlotBytes;
+	const bool rc = q->eng->drmClass == 0 || q->eng->drmClass == 4, compute = q->eng->drmClass == 4;
 	for (uint32_t i = 0; i < nInl; i++) dw[n++] = inl[i];   // kernel commands in the ring itself (VRAM clears)
 	if (jt) jtSrm(dw, n, jt + 8);
 	dw[n++] = MI_ARB_ON_OFF;                   // MI_ARB_DISABLE
@@ -2573,6 +2583,14 @@ static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl,
 	dw[n++] = MI_INSTR(0x2);                   // MI_USER_INTERRUPT
 	dw[n++] = MI_ARB_ON_OFF | MI_ARB_ENABLE;
 	dw[n++] = MI_INSTR(0x5);                   // MI_ARB_CHECK
+	return n;
+}
+
+static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl, uint32_t nInl, uint32_t seq, bool flush,
+	uint32_t *dw) {
+	const uint32_t jt = jobTimeAddr(q);
+	uint32_t n = jobPre(q, batch, seq, flush, jt, dw, 0);
+	n = jobPost(q, inl, nInl, seq, jt, dw, n);
 	if (n & 1) dw[n++] = MI_NOOP;
 	return n;
 }
@@ -2597,9 +2615,19 @@ static void watchArm() {
 	thread_call_enter_delayed(gWatchCall, deadline);
 }
 
-static void ringWrite(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq) {
+// Job timing: job seq goes to the engine now (the previous job's timestamps are collected). gSchedLock.
+static void jtSubmit(XeQueue *q, uint32_t seq) {
+	if (gJobTime && gJtMem && !q->eng->gt) {
+		jtCollect(q);
+		JtSlot &s = gJtSlots[q->slot];
+		gJtEngBase = q->eng->base;
+		s.seq = seq; s.gen = gSlotGen[q->slot]; s.execTs = gJtExecTs; s.subTs = jtNow(q->eng->base); s.armed = true;
+	}
+}
+
+// The dwords into the ring at the tail, which moves past them (not yet in the LRC). gSchedLock.
+static void ringCopy(XeQueue *q, const uint32_t *dw, uint32_t n) {
 	auto *ring = reinterpret_cast<uint32_t *>(q->lrcCpu);
-	auto *regs = lrcRegs(q);
 	const uint32_t start = q->tail / 4, room = ringSize / 4 - start, first = n < room ? n : room;
 	memcpy(ring + start, dw, first * 4);
 	if (!q->lrcBlk) flushRange(ring + start, first * 4);
@@ -2610,6 +2638,11 @@ static void ringWrite(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq) 
 	// VRAM: the ring contents are out before the tail that publishes them (xe_lrc_write_ring's xe_device_wmb)
 	if (q->lrcBlk) gDev->deviceWmb();
 	q->tail = (q->tail + n * 4) % ringSize;
+}
+
+static void ringWrite(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq) {
+	auto *regs = lrcRegs(q);
+	ringCopy(q, dw, n);
 	q->submitted = seq;
 	if (gJobTimeoutMs > 0) watchArm();   // the job watchdog looks while anything is outstanding
 	q->ringPos[seq % 256] = q->tail;
@@ -2617,26 +2650,27 @@ static void ringWrite(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq) 
 	lrcSync(q, regs + CTX_RING_TAIL, 4);
 	if (gResetting && !q->eng->gt) return;   // the context is scheduled when it is registered again
 	uint32_t act[2] = {0x1000, q->gucId};
-	if (gJobTime && gJtMem && !q->eng->gt) {
-		jtCollect(q);
-		JtSlot &s = gJtSlots[q->slot];
-		gJtEngBase = q->eng->base;
-		s.seq = seq; s.gen = gSlotGen[q->slot]; s.execTs = gJtExecTs; s.subTs = jtNow(q->eng->base); s.armed = true;
-	}
+	jtSubmit(q, seq);
 	gDev->guc(act, 2, q->eng->gt);
+}
+
+// Whether the job that goes to the ring now invalidates the TLB first (the VM's page tables changed since this queue's
+// last invalidation).
+// rb7o: a queue with more than one engine in its mask invalidates the TLB before every batch (xe_sched_job_arm's
+// batch_invalidate_tlb, Linux's rule for scratch VMs). The once-per-page-table-change rule assumes the batches after
+// the first run on the engine that first one invalidated; the GuC may run the next one on another engine, whose TLB
+// can still hold an entry (a scratch one) from before the change.
+static bool tlbFlushDue(const XeQueue *q, uint32_t gen) {
+	return gen != q->flushedGen || (gTlbEveryBatch && q->vm->scratch) ||   // rb7k: Linux's scratch-VM rule on demand
+		(q->logicalMask & (q->logicalMask - 1));
 }
 
 // Emits the job if the ring has room. gSchedLock. The VM's page-table generation is read here, when the job goes to
 // the ring: binds bump it after their PTE writes and before signaling their out-fences, so a job that depends on a
 // bind sees it.
-// rb7o: a queue with more than one engine in its mask invalidates the TLB before every batch (xe_sched_job_arm's
-// batch_invalidate_tlb, Linux's rule for scratch VMs). The once-per-page-table-change rule assumes the batches after
-// the first run on the engine that first one invalidated; the GuC may run the next one on another engine, whose TLB
-// can still hold an entry (a scratch one) from before the change.
 static bool queueEmitEx(XeQueue *q, uint64_t batch, const uint32_t *inl, uint32_t nInl, uint32_t seq, uint32_t *dw) {
 	const uint32_t gen = q->vm->ptGen;
-	const bool flush = gen != q->flushedGen || (gTlbEveryBatch && q->vm->scratch) ||   // rb7k: Linux's scratch-VM rule on demand
-		(q->logicalMask & (q->logicalMask - 1));
+	const bool flush = tlbFlushDue(q, gen);
 	const uint32_t n = jobDwords(q, batch, inl, nInl, seq, flush, dw);
 	if (!ringRoom(q, n)) return false;
 	ringWrite(q, dw, n, seq);
