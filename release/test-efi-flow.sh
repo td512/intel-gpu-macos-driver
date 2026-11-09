@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 # test-efi-flow.sh [PACKAGE_DIR]: runs templates/efi.sh against a fake EFI folder made from efi/sample-z790/config.plist,
 # set back to how stage 1 leaves it, in a throwaway folder: no root, no EFI partition, no NVRAM. Without PACKAGE_DIR the
-# package's IntelXe.kext and SSDT-ARCOFF.aml are stand-ins. Checks status, plan, apply, settings, undo, the plan hash,
-# a different kext, the ACPI path check, an earlier B580.kext entry, the boot-path parsing and the ioreg parsing.
+# package's IntelXe.kext and SSDT-ARCOFF.aml are stand-ins (and the 0.1.3 table, for adapting it). Checks status, plan,
+# apply, settings, undo, the plan hash, a different kext, the ACPI path check, SSDT-ARCOFF adapted to other ports (with
+# iasl, when there is one, to disassemble and compare), an earlier B580.kext entry, the boot-path and the ioreg parsing.
 set -uo pipefail
 R=$(cd "$(dirname "$0")" && pwd)
 S=$R/templates/efi.sh
@@ -141,10 +142,13 @@ efi --plan > "$ROOT/plan" 2>&1; has "plan replaces it" "$ROOT/plan" "replace  EF
 efi --apply > /dev/null 2>&1; expect "after --apply" kext_file same
 efi --undo > /dev/null 2>&1; efi --undo > /dev/null 2>&1
 
-# the ACPI path: SSDT-ARCOFF only when a table names the card's port
-INTELXE_CARD_ACPI_PATH='\_SB.PC00.PEG0.PEGP' efi --plan > "$ROOT/plan" 2>&1
-hasnt "another port: the SSDT is not copied" "$ROOT/plan" "EFI/OC/ACPI/SSDT-ARCOFF.aml"
-has "another port: says why" "$ROOT/plan" "the card's port here is \\_SB.PC00.PEG0.PEGP"
+# the ACPI path: SSDT-ARCOFF only when a table names the card's port (or the package's can be adapted to it, below)
+PX=$ROOT/pkg-stand-in; ditto "$P/EFI" "$PX/EFI"; printf 'SSDT\x2f\x04_SB_PC00PEG1PEGP stand-in' > "$PX/EFI/OC/ACPI/SSDT-ARCOFF.aml"
+INTELXE_CARD_ACPI_PATH='\_SB.PC00.PEG0.PEGP' "$S" --package "$PX" --efi "$F" --plan > "$ROOT/plan" 2>&1
+hasnt "another port, a table it cannot adapt: the SSDT is not copied" "$ROOT/plan" "EFI/OC/ACPI/SSDT-ARCOFF.aml"
+has "another port: says why" "$ROOT/plan" "the card's port here is \\_SB.PC00.PEG0.PEGP, and the package's SSDT-ARCOFF.aml is not laid out"
+INTELXE_CARD_ACPI_PATH='\_SB.PC00.PEG1' "$S" --package "$PX" --efi "$F" --plan > "$ROOT/plan" 2>&1
+hasnt "a shorter path inside the package's does not count as named" "$ROOT/plan" "EFI/OC/ACPI/SSDT-ARCOFF.aml"
 INTELXE_CARD_ACPI_PATH=none efi --plan > "$ROOT/plan" 2>&1; has "no ACPI name: says so" "$ROOT/plan" "has no ACPI name"
 INTELXE_CARD_ACPI_PATH= efi --plan > "$ROOT/plan" 2>&1; has "no card: says so" "$ROOT/plan" "No Arc B580 found"
 printf 'SSDT\x2f\x04_SB_PC00PEG0PEGP my own build' > "$F/EFI/OC/ACPI/SSDT-ARCOFF.aml"
@@ -220,6 +224,82 @@ got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg4" "$S" --pac
 grep -v 0be20000 "$ROOT/ioreg" > "$ROOT/ioreg3"
 got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg3" "$S" --package "$P" --efi "$F" --status | sed -n 's/^card_acpi_path=//p')
 [ -z "$got" ] && ok "ioreg: no card, no path" || bad "ioreg without a card: $got"
+
+# SSDT-ARCOFF adapted to another port. The table: the package's, or (with stand-ins) the 0.1.3 SSDT-ARCOFF.aml, which
+# iasl 20260408 builds from efi/SSDT-ARCOFF.dsl
+PA=$ROOT/pkg-aml; ditto "$P/EFI" "$PA/EFI"
+if [ $# = 0 ]; then
+    h=53534454da000000024c5745580000004152434f4646000000100000494e544c08042620a01800155c2f045f53425f5043303050454731
+    h=${h}504547500600a04c09905b125c5f4f5349605f4f53490d44617277696e001044085c2f045f53425f5043303050454731504547505b824d
+    h=${h}0642524731085f4144520c000001005b824b0547465830085f41445200144e045f44534d04a009936a00a411030103a4123b060d6e616d
+    h=${h}6500110c0a0923646973706c6179000d494f4e616d65000d23646973706c6179000d636c6173732d636f64650011070a04ffffffff
+    printf "$(printf '%s' "$h" | sed 's/../\\x&/g')" > "$PA/EFI/OC/ACPI/SSDT-ARCOFF.aml"
+fi
+PAML=$PA/EFI/OC/ACPI/SSDT-ARCOFF.aml
+eval "$(sed -n '/^hexof()/p; /^namepath_hex()/,/^}/p; /^aml_names_card()/,/^}/p' "$S")"   # efi.sh's own check
+names() { CARD=$1 aml_names_card "$2"; }
+sum_ok() { [ $(( $(od -An -v -tu1 "$1" | tr -s ' \n' '+' | sed 's/^+//; s/+$//') & 255 )) = 0 ]; }
+len_ok() { [ "$(od -An -v -tu4 -j4 -N4 "$1" | tr -d ' ')" = "$(wc -c < "$1" | tr -d ' ')" ]; }
+IASL=$(command -v iasl || ls /opt/homebrew/bin/iasl /usr/local/bin/iasl 2>/dev/null | head -1 || true)
+F2=$ROOT/efi2
+fresh() { rm -rf "$F2"; mkdir -p "$F2/EFI/OC/ACPI" "$F2/EFI/OC/Kexts"; : > "$F2/EFI/OC/OpenCore.efi"; cp "$ROOT/config.stage1" "$F2/EFI/OC/config.plist"; }
+efi2() { "$S" --package "$PA" --efi "$F2" "$@"; }
+state2() { efi2 --status | sed -n "s/^$1=//p"; }
+PKGPATH_T='\_SB.PC00.PEG1.PEGP'
+names "$PKGPATH_T" "$PAML" && sum_ok "$PAML" && len_ok "$PAML" && ok "the package's table names $PKGPATH_T, checksum and length valid" || bad "the package's table"
+
+# the same depth, the card found through ioreg: \_SB.PC00.RP05.PXSX
+sed -e 's|PEG1@10000/PEGP@0|RP05@1c0004/PXSX@0|' -e 's|PEG1@10000"|RP05@1c0004"|' -e 's|PEG1@1 |RP05@1C,4 |' -e 's|PEGP@0 |PXSX@0 |' "$ROOT/ioreg" > "$ROOT/ioreg5"
+export INTELXE_IOREG_FILE=$ROOT/ioreg5; unset INTELXE_CARD_ACPI_PATH
+fresh
+[ "$(state2 card_acpi_path)" = '\_SB.PC00.RP05.PXSX' ] && ok "ioreg: the card at RP05/PXSX" || bad "ioreg5: card_acpi_path=$(state2 card_acpi_path)"
+[ "$(state2 ssdt_package_names_card)" = adaptable ] && ok "status: the table is adaptable" || bad "status: ssdt_package_names_card=$(state2 ssdt_package_names_card)"
+efi2 --plan > "$ROOT/plan2" 2>&1 || bad "--plan (RP05) exited with an error"
+has "plan: the table adapted to RP05" "$ROOT/plan2" "copy     EFI/OC/ACPI/SSDT-ARCOFF.aml (the package's table adapted to this card's port: names \\_SB.PC00.RP05.PXSX instead of \\_SB.PC00.PEG1.PEGP)"
+has "plan: its ACPI > Add entry" "$ROOT/plan2" "ACPI > Add, item 5 (SSDT-ARCOFF.aml): Enabled false -> true"
+hasnt "plan: no note about editing the table" "$ROOT/plan2" "not added"
+efi2 --plan > "$ROOT/plan2b" 2>&1; cmp -s "$ROOT/plan2" "$ROOT/plan2b" && ok "the plan is the same every time" || bad "the plan changes between runs"
+efi2 --apply --expect "$(hash "$ROOT/plan2")" > "$ROOT/out" 2>&1 || { bad "--apply (RP05) exited with an error"; cat "$ROOT/out"; }
+AD=$F2/EFI/OC/ACPI/SSDT-ARCOFF.aml
+names '\_SB.PC00.RP05.PXSX' "$AD" && ok "the EFI's table names \\_SB.PC00.RP05.PXSX" || bad "the EFI's table does not name RP05"
+names "$PKGPATH_T" "$AD" && bad "the EFI's table still names PEG1" || ok "... and no longer \\_SB.PC00.PEG1.PEGP"
+sum_ok "$AD" && len_ok "$AD" && ok "its checksum and length are valid" || bad "its checksum or length"
+a=$(hexof "$AD"); p=$(hexof "$PAML")
+a=${a//" 52 50 30 35 50 58 53 58"/" 50 45 47 31 50 45 47 50"}   # RP05PXSX -> PEG1PEGP
+[ "${#a}" = "${#p}" ] && [ "${a:0:27}${a:30}" = "${p:0:27}${p:30}" ] && [ "${a:27:3}" != "${p:27:3}" ] \
+    && ok "it differs from the package's only in those NameSegs and the checksum" || { bad "it differs elsewhere:"; cmp -l "$AD" "$PAML" | head; }
+[ "$(cmp -l "$AD" "$PAML" | wc -l | tr -d ' ')" -le 17 ] && ok "($(cmp -l "$AD" "$PAML" | wc -l | tr -d ' ') bytes differ)" || bad "too many bytes differ"
+[ "$(state2 ssdt_file)" = same ] && [ "$(state2 ssdt_entry)" = enabled ] && [ "$(state2 plan_changes)" = 0 ] \
+    && ok "after --apply: the adapted table counts as the same, nothing left to change" || bad "after --apply (RP05): $(efi2 --status | grep -E '^(ssdt|plan)')"
+if [ -n "$IASL" ]; then
+    rm -rf "$ROOT/dis"; mkdir "$ROOT/dis"; cp "$AD" "$ROOT/dis/a.aml"
+    "$IASL" -d "$ROOT/dis/a.aml" > "$ROOT/dis/log" 2>&1 || bad "iasl -d failed: $(tail -3 "$ROOT/dis/log")"
+    has "iasl: External names RP05" "$ROOT/dis/a.dsl" "External (_SB_.PC00.RP05.PXSX, DeviceObj)"
+    has "iasl: Scope names RP05" "$ROOT/dis/a.dsl" "Scope (\\_SB.PC00.RP05.PXSX)"
+    has "iasl: the devices below are kept" "$ROOT/dis/a.dsl" "Device (GFX0)"
+else echo "skip  iasl not found: no disassembly"; fi
+efi2 --undo > /dev/null 2>&1; [ ! -e "$AD" ] && ok "--undo removes the adapted table" || bad "--undo left the adapted table"
+unset INTELXE_IOREG_FILE
+
+# another depth: the PkgLengths and the length change; the result must be what iasl builds from the .dsl with that path
+for cpath in '\_SB.PCI0.GPP8' '\_SB.PCI0.GPP8.UP00.DP40.UP00' '\PEGP'; do
+    fresh
+    INTELXE_CARD_ACPI_PATH=$cpath efi2 --plan > "$ROOT/plan3" 2>&1
+    has "depth $cpath: plan adapts the table" "$ROOT/plan3" "adapted to this card's port: names $cpath instead of"
+    INTELXE_CARD_ACPI_PATH=$cpath efi2 --apply --expect "$(hash "$ROOT/plan3")" > "$ROOT/out" 2>&1 || { bad "--apply ($cpath) exited with an error"; cat "$ROOT/out"; }
+    names "$cpath" "$AD" && ! names "$PKGPATH_T" "$AD" && sum_ok "$AD" && len_ok "$AD" \
+        && ok "depth $cpath: names it, checksum and length valid" || bad "depth $cpath: the table is wrong"
+    if [ -n "$IASL" ]; then
+        rm -rf "$ROOT/dis"; mkdir "$ROOT/dis"
+        sed -e "s/_SB_\\.PC00\\.PEG1\\.PEGP/${cpath//\\/\\\\}/" -e "s/\\\\_SB\\.PC00\\.PEG1\\.PEGP/${cpath//\\/\\\\}/" "$R/../efi/SSDT-ARCOFF.dsl" > "$ROOT/dis/x.dsl"
+        "$IASL" -p "$ROOT/dis/x" "$ROOT/dis/x.dsl" > "$ROOT/dis/log" 2>&1 || bad "iasl could not compile the .dsl for $cpath"
+        # the same bytes but the checksum (9) and iasl's version (32-35)
+        x=$(hexof "$ROOT/dis/x.aml"); a=$(hexof "$AD")
+        [ "${x:0:27}${x:30:66}${x:108}" = "${a:0:27}${a:30:66}${a:108}" ] && ok "depth $cpath: the bytes iasl builds from the .dsl" || { bad "depth $cpath: differs from iasl's"; cmp -l "$ROOT/dis/x.aml" "$AD" | head; }
+    fi
+    INTELXE_CARD_ACPI_PATH=$cpath efi2 --undo > /dev/null 2>&1
+done
+export INTELXE_CARD_ACPI_PATH='\_SB.PC00.PEG1.PEGP'
 
 # the Safari setting (system-volume copy): SecureBootModel to Disabled, apart from stage 2, and back
 plutil -replace Misc.Security.SecureBootModel -string Default "$C"; cp "$C" "$ROOT/config.sbm"

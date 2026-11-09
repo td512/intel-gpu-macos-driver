@@ -205,8 +205,10 @@ Take the files from `intel-gpu-macos-driver-@VER@-efi.zip` (the macOS package ha
 Mount the EFI partition as in stage 2; on the PC itself, `sudo diskutil mount disk0s1` with your partition.
 
 On the PC itself, `efi.sh` in the macOS package does steps 1 to 3 (and stage 2's settings) for you: it finds the EFI
-OpenCore booted from, backs up the whole EFI folder, copies the files, enables their `config.plist` entries, and adds
-`SSDT-ARCOFF.aml` only when its ACPI path is your card's. `./efi.sh --plan` shows the changes, `sudo ./efi.sh --apply`
+OpenCore booted from, backs up the whole EFI folder, copies the files and enables their `config.plist` entries. It reads
+your card's ACPI path (step 2) from the I/O Registry; when it is not the shipped table's, it writes your path into a copy
+of `SSDT-ARCOFF.aml` and adds that (the plan says "adapted to this card's port"), so there is no table to edit or
+compile. `./efi.sh --plan` shows the changes, `sudo ./efi.sh --apply`
 makes them, `sudo ./efi.sh --undo` takes them back; `--settings-plan` / `--settings-apply` do stage 2. `./efi.sh` alone
 lists every option. The IntelXe Manager app has the same on its EFI page.
 
@@ -229,7 +231,8 @@ Manager when Windows runs on the PC with the card). See `README-Windows.md` in t
    | Linux | `lspci -nn \| grep e20b` gives the GPU (e.g. `03:00.0`); `lspci -tv` shows the card's upstream port two levels above it (e.g. `01:00.0`); `cat /sys/bus/pci/devices/0000:01:00.0/firmware_node/path` prints its ACPI path, e.g. `\_SB_.PC00.PEG1.PEGP` |
    | macOS | [gfxutil](https://github.com/acidanthera/gfxutil/releases) lists every PCI device with its ACPI path: take the `8086:e20b` line. IORegistryExplorer shows the same names in the IOService plane (`PC00@0` → `PEG1@1` → `PEGP@0` → ...) |
 
-   If your path is the shipped one (`\_SB.PC00.PEG1.PEGP`), use `SSDT-ARCOFF.aml` as it is. Otherwise put your path in
+   If your path is the shipped one (`\_SB.PC00.PEG1.PEGP`), use `SSDT-ARCOFF.aml` as it is. Otherwise, on macOS, let
+   `efi.sh` or the app's EFI page adapt it (above); it does this for a path of any length. By hand, put your path in
    the two places of `SSDT-ARCOFF.dsl` that name it (the `External` line and the `Scope` line) and compile it with
    `iasl SSDT-ARCOFF.dsl`. `iasl` is part of ACPICA: on Windows ACPICA's Windows binary tools (acpica.org, Downloads),
    on Linux the `acpica-tools` (or `iasl`) package, on macOS `brew install acpica` or the `iasl` inside
