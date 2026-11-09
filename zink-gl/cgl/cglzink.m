@@ -594,8 +594,12 @@ static void update_layer(Adopted *a) {
     if (!layer || !layer.superlayer) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    layer.frame = layer.superlayer.bounds;
-    layer.contentsScale = layer_scale(a);
+    const CGRect bounds = layer.superlayer.bounds;
+    const CGFloat scale = layer_scale(a);
+    layer.frame = bounds;
+    layer.contentsScale = scale;
+    // as the prototype that ran Chess did: in case the Vulkan WSI presents into this layer itself
+    ((CAMetalLayer *)layer).drawableSize = CGSizeMake(bounds.size.width * scale, bounds.size.height * scale);
     [CATransaction commit];
 }
 
