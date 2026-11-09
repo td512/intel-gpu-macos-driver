@@ -948,6 +948,9 @@ static NVMTLTexture *nvmtl_texbuf_make(NVMTLBuffer *b, MTLTextureDescriptor *d, 
     return buf;
 }
 - (NSUInteger)allocatedSize { return (NSUInteger)_b.size; }
+// No buffer here is sparse in Metal's sense: every one is backed in full when it is made, and the plugin has neither
+// placement-sparse buffers nor sparse page mapping (supportsPlacementSparse NO).
+- (MTLBufferSparseTier)sparseBufferTier API_AVAILABLE(macos(26.0)) { return MTLBufferSparseTierNone; }
 - (id<MTLDevice>)device { return (id<MTLDevice>)gNVMTLMainDevice; }
 - (MTLCPUCacheMode)cpuCacheMode { NVMTLBuffer *r = self; return nvmtl_res_cache(r->_heap ? r->_heap : r->_subHeap, r->_ropt); }
 - (MTLHazardTrackingMode)hazardTrackingMode { NVMTLBuffer *r = self; return nvmtl_res_hazard(r->_heap ? r->_heap : r->_subHeap, r->_ropt); }
@@ -2112,6 +2115,10 @@ static void nvmtl_vram_tag_bump_later(NVMTLTexture *r, uint32_t seed) {
 - (BOOL)isShareable { return _parent ? NO : _shareable; }
 - (MTLTextureSwizzleChannels)swizzle { return _hasSwz ? _swz : MTLTextureSwizzleChannelsMake(MTLTextureSwizzleRed, MTLTextureSwizzleGreen, MTLTextureSwizzleBlue, MTLTextureSwizzleAlpha); }
 - (BOOL)isSparse { NVMTLTexture *r = _parent ? _parent : self; return (r->_heap && r->_heap->_type == MTLHeapTypeSparse) || (r->_subHeap && r->_subHeap->_type == MTLHeapTypeSparse); }
+// None even for a texture on a sparse heap (isSparse YES): such a heap is backed in full here and nothing maps tiles
+// (resourceStateCommandEncoder is nil), so none of tier 1's partial backing, defined unbacked reads or residency
+// feedback exists.
+- (MTLTextureSparseTier)sparseTextureTier API_AVAILABLE(macos(26.0)) { return MTLTextureSparseTierNone; }
 - (uint32_t)swizzleKey { MTLTextureSwizzleChannels c = [self swizzle]; return (uint32_t)c.red | (uint32_t)c.green << 8 | (uint32_t)c.blue << 16 | (uint32_t)c.alpha << 24; }
 - (BOOL)allowGPUOptimizedContents { return YES; }
 - (MTLTextureCompressionType)compressionType { return MTLTextureCompressionTypeLossless; }
@@ -3473,6 +3480,16 @@ static uint64_t nvmtl_resid_pipe(id o, uint64_t *slot) {
 - (BOOL)supportIndirectCommandBuffers { return _descriptor.supportIndirectCommandBuffers; }
 - (MTLResourceID)gpuResourceID {
     MTLResourceID r; r._impl = _descriptor.supportIndirectCommandBuffers ? nvmtl_resid_pipe(self, &_resid) : 0; return r; }
+// The mesh and object stage limits are answered by the AppsPSOMesh category (NVMTLLibraryLoad.m) from the pipeline's
+// mesh info; declared here so the compiler knows they exist.
+@dynamic objectThreadExecutionWidth, meshThreadExecutionWidth, maxTotalThreadsPerObjectThreadgroup,
+         maxTotalThreadsPerMeshThreadgroup, maxTotalThreadgroupsPerMeshGrid;
+// Metal's header: the property is nil for a pipeline made by an MTLDevice; only an MTL4Compiler asked for shader
+// reflection fills it, and this plugin has no MTL4Compiler. Reflection is handed out through the reflection: arguments.
+- (MTLRenderPipelineReflection *)reflection API_AVAILABLE(macos(26.0)) { return nil; }
+// The memory a residency set has to keep for the pipeline: none that Metal sees. The shader code lives in the Vulkan
+// driver's own memory, whose size Vulkan does not report (the indirect command buffer answers 0 the same way).
+- (NSUInteger)allocatedSize { return 0; }
 - (NSUInteger)imageblockSampleLength { return 0; }
 - (NSUInteger)imageblockMemoryLengthForDimensions:(MTLSize)d { return 0; }
 - (MTLShaderValidation)shaderValidation { return MTLShaderValidationDisabled; }
@@ -5078,6 +5095,10 @@ void nvmtl_heap_back(NVMTLHeap *h, NSUInteger size, int shared) {
 - (BOOL)writesDepth { return _write != 0; }
 - (BOOL)readsStencil { return _stencil != 0; }
 - (BOOL)writesStencil { if (!_stencil) return NO; for (int k = 1; k <= 3; k++) if ((_sf[k] && _sf[5]) || (_sb[k] && _sb[5])) return YES; return NO; }
+// No handle: a depth-stencil state reaches a draw only as the object itself (the encoder, and an indirect command's
+// setDepthStencilState:, keep the object); nothing here reads a depth-stencil handle out of an argument buffer, so a
+// token would name a state no GPU-side path could find. 0 is what the forwarding net answered before.
+- (MTLResourceID)gpuResourceID API_AVAILABLE(macos(26.0)) { MTLResourceID r; r._impl = 0; return r; }
 @end
 
 @implementation NVMTLSamplerState
@@ -5099,6 +5120,10 @@ void nvmtl_heap_back(NVMTLHeap *h, NSUInteger size, int shared) {
 - (NSUInteger)imageblockMemoryLengthForDimensions:(MTLSize)d { return 0; }
 - (id<MTLDevice>)device { return (id<MTLDevice>)gNVMTLMainDevice; }
 - (MTLShaderValidation)shaderValidation { return MTLShaderValidationDisabled; }
+// nil and 0 for the reasons given at NVMTLRenderPipelineState: no MTL4Compiler to ask for reflection, and the kernel's
+// code lives in the Vulkan driver's memory, whose size Vulkan does not report.
+- (MTLComputePipelineReflection *)reflection API_AVAILABLE(macos(26.0)) { return nil; }
+- (NSUInteger)allocatedSize { return 0; }
 static NSUInteger nvmtl_env_uint(NSString *k, NSUInteger dflt) {
     NSString *s = [[NSProcessInfo processInfo] environment][k];
     return s.length ? (NSUInteger)s.integerValue : dflt;

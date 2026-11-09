@@ -1958,6 +1958,37 @@ int nvmtl_vk_format_mip_blit(uint32_t vkfmt)
     if ((fp.optimalTilingFeatures & blit) != blit) return 0;
     return (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) ? 2 : 1;
 }
+/* 1 when every listed format can be sampled through a linear filter at optimal tiling (the device's
+   supports32BitFloatFiltering asks this of R32, RG32 and RGBA32 float); 0 otherwise, or when Vulkan is down. */
+int nvmtl_vk_formats_filter_linear(const uint32_t *vkfmts, int n)
+{
+    static PFN_vkGetPhysicalDeviceFormatProperties gfp;
+    if (nvmtl_vk_init()) return 0;
+    if (!gfp) gfp = (PFN_vkGetPhysicalDeviceFormatProperties)pvkGetInstanceProcAddr(g_inst, "vkGetPhysicalDeviceFormatProperties");
+    if (!gfp) return 0;
+    for (int i = 0; i < n; i++) {
+        VkFormatProperties fp; memset(&fp, 0, sizeof fp); gfp(g_pdev, (VkFormat)vkfmts[i], &fp);
+        if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) return 0;
+    }
+    return 1;
+}
+/* 1 when every listed format can be a 2D optimal-tiling colour attachment that is also sampled, with the given sample
+   count (VkSampleCountFlagBits; the device's supports32BitMSAA asks 4x of the 32-bit formats); 0 otherwise, or when
+   Vulkan is down. */
+int nvmtl_vk_formats_msaa(const uint32_t *vkfmts, int n, uint32_t samples)
+{
+    static PFN_vkGetPhysicalDeviceImageFormatProperties gif;
+    if (nvmtl_vk_init()) return 0;
+    if (!gif) gif = (PFN_vkGetPhysicalDeviceImageFormatProperties)pvkGetInstanceProcAddr(g_inst, "vkGetPhysicalDeviceImageFormatProperties");
+    if (!gif) return 0;
+    for (int i = 0; i < n; i++) {
+        VkImageFormatProperties p; memset(&p, 0, sizeof p);
+        if (gif(g_pdev, (VkFormat)vkfmts[i], VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, &p) != VK_SUCCESS) return 0;
+        if (!(p.sampleCounts & samples)) return 0;
+    }
+    return 1;
+}
 static int nvmtl_vk_cube_compat(uint32_t mtl_type, uint32_t w, uint32_t h, uint32_t layers)
 { return mtl_type == 3 && w == h && w <= 0x8000 && layers >= 6; }
 static uint32_t nvmtl_vk_srgb_pair(uint32_t f)
@@ -3691,6 +3722,9 @@ uint32_t nvmtl_vk_bindless_sampler_slot(void *vksampler)
     if (!slot) { static int said; if (!said++) nvlog("vk: BINDLESS sampler heap FULL (%d states) - an argument-buffer sampler reads the default", NVMTL_BINDLESS_SAMPLER_SLOTS - 1); }
     return slot;
 }
+/* The distinct samplers argument buffers can name at once: the heap's sampler slots less slot 0, the dummy (the
+   device's maxArgumentBufferSamplerCount). */
+uint32_t nvmtl_vk_bindless_sampler_capacity(void) { return NVMTL_BINDLESS_SAMPLER_SLOTS - 1; }
 uint32_t nvmtl_vk_bindless_put(void *view)
 {
     if (!view || ensure_descriptors() || !g_heap_ready) return 0;
