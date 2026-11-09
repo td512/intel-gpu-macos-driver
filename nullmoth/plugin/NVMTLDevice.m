@@ -2337,7 +2337,7 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
     id sass = f ? (f->_sassKernel ?: nvmtl_sass_kernel_for_function(f)) : nil;
     if (sass && f.functionType == MTLFunctionTypeKernel) {
         NVMTLComputePipelineState *ps = [NVMTLComputePipelineState new];
-        ps->_function = f; ps->_attrT = nvmtl_air_max_tg(f); ps->_sassKernel = sass; ps->_sassOnly = YES;
+        ps->_function = f; ps->_attrT = nvmtl_air_max_tg(f); ps->_staticTG = nvmtl_air_static_tg(f); ps->_sassKernel = sass; ps->_sassOnly = YES;
         nvlog("newComputePipelineStateWithFunction: %s -> %p from compiled machine code",
               f->_fname.UTF8String, (__bridge void *)ps);
         return ps;
@@ -2352,7 +2352,7 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
     }
     NVMTLComputePipelineState *ps = [NVMTLComputePipelineState new];
     ps->_function = f;
-    ps->_attrT = nvmtl_air_max_tg(f);
+    ps->_attrT = nvmtl_air_max_tg(f); ps->_staticTG = nvmtl_air_static_tg(f);
     if (nvmtl_vk_compute_pipeline_create(f->_spirv.bytes, f->_spirv.length, &ps->_p)) {
         return nvmtl_fail(err, @"newComputePipelineState: vkCreateComputePipelines FAILED"); }
     strlcpy(ps->_p.ktname, f->_fname.UTF8String ?: "?", sizeof ps->_p.ktname);

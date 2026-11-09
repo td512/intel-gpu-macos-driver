@@ -318,6 +318,8 @@ void nvmtl_texture_desc_swizzle(NVMTLTexture *t, MTLTextureDescriptor *d);
 @interface NVMTLSamplerState () { @public NSString *_label; } @end
 @interface NVMTLComputePipelineState () { @public NSString *_label; } @end
 @interface NVMTLComputePipelineState () { @public uint64_t _resid; NSUInteger _attrT, _askT; } @end
+// _staticTG: the function's own threadgroup variables in bytes (staticThreadgroupMemoryLength), from its AIR
+@interface NVMTLComputePipelineState () { @public NSUInteger _staticTG; } @end
 // _sassKernel: machine code that runs before the Vulkan pipeline; _sassOnly: there is no Vulkan pipeline
 @interface NVMTLComputePipelineState () { @public id _sassKernel; BOOL _sassOnly; } @end
 @interface NVMTLRenderPipelineState () { @public uint64_t _resid; } @end
@@ -337,6 +339,7 @@ static inline MTLSize nvmtl_desc_size(id d, SEL sel) {
 @interface NVMTLIndirectCommandBuffer () { @public uint64_t _resid; } @end
 @interface NVMTLIndirectCommand () - (void)nvmtlCopyFrom:(NVMTLIndirectCommand *)o; @end
 NSUInteger nvmtl_air_max_tg(NVMTLFunction *fn);
+NSUInteger nvmtl_air_static_tg(NVMTLFunction *fn);
 BOOL nvmtl_air_grid_only(NVMTLFunction *fn);
 // _gridOnly: 0 not yet asked, 1 the kernel's result does not depend on its threadgroup shape, -1 it may
 @interface NVMTLComputePipelineState () { @public int8_t _gridOnly; } @end

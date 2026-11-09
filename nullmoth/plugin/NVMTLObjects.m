@@ -5103,7 +5103,8 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
     return n && n < v ? n : v; }
 - (MTLSize)requiredThreadsPerThreadgroup { return _reqTG; }
 - (NSUInteger)threadExecutionWidth { static NSUInteger v; if (!v) { const uint32_t f = nvmtl_vk_cs_simd(); v = f ? f : nvmtl_env_uint(@"NVMTL_TEW", 32); } return v; }
-- (NSUInteger)staticThreadgroupMemoryLength { return 0; }
+// Static only, as Apple's: the function's own threadgroup variables, not setThreadgroupMemoryLength:atIndex:'s memory.
+- (NSUInteger)staticThreadgroupMemoryLength { return _staticTG; }
 - (NSString *)label { return _label; }
 - (void)setLabel:(NSString *)l {}
 @end

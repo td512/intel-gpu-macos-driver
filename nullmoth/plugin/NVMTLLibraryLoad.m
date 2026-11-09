@@ -1971,6 +1971,107 @@ NSUInteger nvmtl_air_max_tg(NVMTLFunction *fn)
     return 0;
 }
 
+// The size and ABI alignment of one LLVM type written in AIR text, as AIR's data layout lays it out (pointers 8 bytes,
+// vectors aligned to their power-of-two size up to 128 bytes, structs naturally padded unless packed). Returns the end
+// of the type, or NULL for a type it does not know (an opaque struct, a function type).
+typedef struct { unsigned long long size, align; } nvmtl_ll_layout;
+static unsigned long long nvmtl_ll_pow2(unsigned long long v) { unsigned long long a = 1; while (a < v) a <<= 1; return a; }
+static unsigned long long nvmtl_ll_round(unsigned long long v, unsigned long long a) { return a > 1 ? (v + a - 1) / a * a : v; }
+static const char *nvmtl_ll_ws(const char *p) { while (*p == ' ' || *p == '\t') p++; return p; }
+static const char *nvmtl_ll_word(const char *p, const char *w) {
+    size_t n = strlen(w);
+    if (strncmp(p, w, n) || isalnum((unsigned char)p[n]) || p[n] == '_' || p[n] == '.') return NULL;
+    return p + n;
+}
+static const char *nvmtl_ll_type(const char *p, NSDictionary<NSString *, NSString *> *named, int depth, nvmtl_ll_layout *out)
+{
+    if (depth > 32) return NULL;
+    p = nvmtl_ll_ws(p); const char *q;
+    if (*p == '[' || (*p == '<' && p[1] != '{')) {   // [N x T] or <N x T>
+        const BOOL vec = *p == '<'; char *e = NULL;
+        unsigned long long n = strtoull(nvmtl_ll_ws(p + 1), &e, 10);
+        if (!e || !(q = nvmtl_ll_word(nvmtl_ll_ws(e), "x"))) return NULL;
+        nvmtl_ll_layout el; if (!(q = nvmtl_ll_type(q, named, depth + 1, &el))) return NULL;
+        q = nvmtl_ll_ws(q); if (*q != (vec ? '>' : ']')) return NULL;
+        if (vec) { unsigned long long b = n * el.size; out->align = MIN(nvmtl_ll_pow2(b ?: 1), 128ull); out->size = nvmtl_ll_round(b, out->align); }
+        else { out->size = n * el.size; out->align = el.align; }
+        p = q + 1;
+    } else if (*p == '{' || (*p == '<' && p[1] == '{')) {   // { T, ... } or <{ T, ... }>
+        const BOOL packed = *p == '<'; p = nvmtl_ll_ws(p + (packed ? 2 : 1));
+        unsigned long long off = 0, al = 1;
+        while (*p != '}') {
+            nvmtl_ll_layout f; if (!(p = nvmtl_ll_type(p, named, depth + 1, &f))) return NULL;
+            if (!packed) { off = nvmtl_ll_round(off, f.align); al = MAX(al, f.align); }
+            off += f.size; p = nvmtl_ll_ws(p);
+            if (*p == ',') p = nvmtl_ll_ws(p + 1); else if (*p != '}') return NULL;
+        }
+        p++;
+        if (packed) { if (*p != '>') return NULL; p++; }
+        out->align = al; out->size = nvmtl_ll_round(off, al);
+    } else if (*p == '%') {   // a named struct: %name or %"quoted name"
+        const char *s = p + 1;
+        if (*s == '"') { const char *c = strchr(s + 1, '"'); if (!c) return NULL; q = c + 1; }
+        else { q = s; while (isalnum((unsigned char)*q) || *q == '.' || *q == '_' || *q == '$' || *q == '-') q++; }
+        NSString *body = named[[[NSString alloc] initWithBytes:p length:(NSUInteger)(q - p) encoding:NSUTF8StringEncoding] ?: @""];
+        if (!body || !nvmtl_ll_type(body.UTF8String, named, depth + 1, out)) return NULL;
+        p = q;
+    } else if (*p == 'i' && isdigit((unsigned char)p[1])) {
+        char *e = NULL; unsigned long long bits = strtoull(p + 1, &e, 10);
+        out->size = out->align = nvmtl_ll_pow2((bits + 7) / 8 ?: 1); p = e;
+    } else if ((q = nvmtl_ll_word(p, "half")) || (q = nvmtl_ll_word(p, "bfloat"))) { out->size = out->align = 2; p = q; }
+    else if ((q = nvmtl_ll_word(p, "float"))) { out->size = out->align = 4; p = q; }
+    else if ((q = nvmtl_ll_word(p, "double"))) { out->size = out->align = 8; p = q; }
+    else if ((q = nvmtl_ll_word(p, "ptr"))) {
+        out->size = out->align = 8; p = q;
+        const char *a = nvmtl_ll_ws(p);
+        if (!strncmp(a, "addrspace(", 10)) { const char *c = strchr(a, ')'); if (!c) return NULL; p = c + 1; }
+    } else return NULL;
+    // a typed pointer (older AIR): T*, T addrspace(N)*
+    for (;;) {
+        const char *a = nvmtl_ll_ws(p);
+        if (!strncmp(a, "addrspace(", 10)) { const char *c = strchr(a, ')'); if (!c || *nvmtl_ll_ws(c + 1) != '*') break; a = nvmtl_ll_ws(c + 1); }
+        if (*a != '*') break;
+        out->size = out->align = 8; p = a + 1;
+    }
+    return p;
+}
+
+// MTLComputePipelineState.staticThreadgroupMemoryLength: the threadgroup memory the function declares itself, its
+// program-scope threadgroup variables (AIR `addrspace(3) global`), laid out one after another at their alignment.
+// [[threadgroup(n)]] arguments are not counted: their memory is setThreadgroupMemoryLength:atIndex:'s, as on Apple's
+// driver. Each function is its own AIR module, so every threadgroup global in the module is the function's (a linked
+// pipeline's module also holds its visible functions', which the pipeline allocates too).
+NSUInteger nvmtl_air_static_tg(NVMTLFunction *fn)
+{
+    NSString *ll = fn ? fn->_air : nil;
+    if (!ll.length || [ll rangeOfString:@"addrspace(3) global " options:NSLiteralSearch].location == NSNotFound) return 0;
+    NSMutableDictionary<NSString *, NSString *> *named = [NSMutableDictionary new];
+    NSMutableArray<NSString *> *globals = [NSMutableArray new];
+    [ll enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
+        if ([line hasPrefix:@"%"]) {
+            NSRange t = [line rangeOfString:@" = type " options:NSLiteralSearch];
+            if (t.location != NSNotFound) named[[line substringToIndex:t.location]] = [line substringFromIndex:NSMaxRange(t)];
+        } else if ([line hasPrefix:@"@"] && [line rangeOfString:@" addrspace(3) global " options:NSLiteralSearch].location != NSNotFound)
+            [globals addObject:line];
+    }];
+    unsigned long long total = 0;
+    for (NSString *line in globals) {
+        NSRange eq = [line rangeOfString:@" = " options:NSLiteralSearch];
+        NSRange g = [line rangeOfString:@" addrspace(3) global " options:NSLiteralSearch];
+        if (eq.location == NSNotFound || eq.location > g.location) continue;
+        NSString *linkage = [line substringWithRange:NSMakeRange(NSMaxRange(eq), g.location - NSMaxRange(eq))];
+        if ([linkage rangeOfString:@"external"].location != NSNotFound) continue;   // a declaration, defined elsewhere
+        nvmtl_ll_layout lay; __attribute__((objc_precise_lifetime)) NSString *rest = [line substringFromIndex:NSMaxRange(g)];
+        const char *end = nvmtl_ll_type(rest.UTF8String, named, 0, &lay);
+        if (!end) { nvlog("static threadgroup memory: %s: the type of %s is not understood — NOT COUNTED", fn->_fname.UTF8String,
+                          [line substringToIndex:eq.location].UTF8String); continue; }
+        unsigned long long al = lay.align; const char *a = strstr(end, ", align ");
+        if (a) { unsigned long long v = strtoull(a + 8, NULL, 10); if (v) al = v; }
+        total = nvmtl_ll_round(total, al) + lay.size;
+    }
+    return (NSUInteger)total;
+}
+
 NSArray<NSDictionary *> *nvmtl_argbuf_fields(NVMTLFunction *function, NSUInteger ownerBufferIndex)
 {
     NSDictionary *refl = nvmtl_function_reflection(function);
