@@ -1,15 +1,16 @@
-# intel-gpu-macos-driver @VER@ for @MACOS@ (Intel Arc B580)
+# intel-gpu-macos-driver @VER@ for @MACOS@ (Intel Arc B580 / B570)
 
 [Türkçe](README-INSTALL.tr.md)
 
 @TESTED@ Unsigned, unsupported, and it changes how your PC boots macOS. **Keep a USB stick with a working OpenCore EFI
 before you start**, and know how to boot from it (your firmware's boot menu key). Noncommercial use only (see `LICENSES/`).
 
-What you get when it works: the desktop composited on the B580 with Metal (window dragging at the monitor's refresh
+What you get when it works: the desktop composited on the card with Metal (window dragging at the monitor's refresh
 rate, up to 180 Hz tested), desktop widgets, Metal apps and games, Safari on the GPU (with the optional
 system-volume copy, 3.3), VideoToolbox decode (H.264, HEVC, AV1, VP9) and encode (H.264, HEVC, AV1) on the GPU,
 one DisplayPort monitor with VRR, sleep and wake. Optional: OpenGL through Mesa's zink for LWJGL games such as
-Minecraft Java (the `-zink-gl.zip`, [below](#optional-opengl-through-zink)).
+Minecraft Java (the `-zink-gl.zip`, [below](#optional-opengl-through-zink)); for 12th-14th gen hybrid Intel CPUs,
+`HybridPM.kext` ([below](#hybrid-intel-cpus-12th-14th-gen-hybridpmkext)).
 Known issues: the first seconds after login are still less smooth than later (less so from 0.1.3, when WindowServer keeps
 its compiled shaders; the first login after an install compiles them once); a light grey band on the
 login screen after a restart; ffmpeg-style tools that bring Metal up through a VideoToolbox encode miss our encoders in
@@ -21,8 +22,9 @@ Already running an earlier build of this driver? Go to [Upgrading](#upgrading-fr
 
 ## What you need
 
-- A PC that OpenCore can boot macOS on (Intel CPU, x86_64), with the Arc B580 and **one monitor on the B580's
-  DisplayPort**. An integrated GPU is not needed: on the test machine macOS was installed on the B580 alone.
+- A PC that OpenCore can boot macOS on (Intel CPU, x86_64), with an Arc B580 or B570 and **one monitor on the card's
+  DisplayPort**. The B570 is supported but untested by us: please report how it goes. An integrated GPU is not needed:
+  on the test machine macOS was installed on the B580 alone.
 - Any computer with Windows, Linux or macOS to prepare the USB stick and edit the EFI. You do not need a Mac.
 - Files from the [release page](https://github.com/yusufklncc/intel-gpu-macos-driver/releases/tag/v@VER@):
 
@@ -44,12 +46,12 @@ Already running an earlier build of this driver? Go to [Upgrading](#upgrading-fr
 
 | Stage | Done on | What | The screen afterwards |
 |---|---|---|---|
-| 1 | Windows, Linux or macOS, then the PC | macOS installed with a plain OpenCore EFI | the B580's firmware output: no acceleration, slow |
+| 1 | Windows, Linux or macOS, then the PC | macOS installed with a plain OpenCore EFI | the card's firmware output: no acceleration, slow |
 | 2 | config.plist, from any system | SIP, AMFI, two quirks, one output setting | the same |
 | 3 | macOS on the PC | the app's **Install**, or `sudo ./install.sh --apply`; **no reboot yet** | the same |
-| 4 | the EFI, from macOS on the PC or any system | `IntelXe.kext` and `SSDT-ARCOFF.aml` (the app's EFI page, `efi.sh`, `IntelXe-EFI.ps1` or by hand), then reboot | accelerated |
+| 4 | the EFI, from macOS on the PC or any system | `IntelXe.kext` and `SSDT-ARCOFF.aml`, and `HybridPM.kext` on a hybrid Intel CPU (the app's EFI page, `efi.sh`, `IntelXe-EFI.ps1` or by hand), then reboot | accelerated |
 
-Do not put `IntelXe.kext` or `SSDT-ARCOFF.aml` into the EFI before stage 4: the table hides the B580 from the generic
+Do not put `IntelXe.kext` or `SSDT-ARCOFF.aml` into the EFI before stage 4: the table hides the card from the generic
 display driver that shows the installer, and nothing takes its place until stage 3 has installed the driver's own
 display kext. Each stage's end state is one the test machine ran in; the four stages were not repeated end to end on a
 fresh install.
@@ -72,12 +74,12 @@ fresh install.
    for the installer. The tools run on Windows too:
    [SSDTTime](https://github.com/corpnewt/SSDTTime) (the SSDTs from your board's DSDT; Windows and Linux can dump the
    DSDT), [USBToolBox](https://github.com/USBToolBox/tool) (USB map, on Windows) and
-   [GenSMBIOS](https://github.com/corpnewt/GenSMBIOS) (serial numbers). Nothing GPU-specific for the B580 yet: no
-   `DeviceProperties` and no WhateverGreen settings for it. Two settings for the B580 already now: keep
+   [GenSMBIOS](https://github.com/corpnewt/GenSMBIOS) (serial numbers). Nothing GPU-specific for the card yet: no
+   `DeviceProperties` and no WhateverGreen settings for it. Two settings for the card already now: keep
    `UEFI > Output > ReconnectGraphicsOnConnect = false` (Dortania's sample has it so), and set
    `Booter > Quirks > ResizeAppleGpuBars = 10` (Dortania's default is `-1`). The test machine installed macOS with
    both; with `-1` and Resizable BAR on, the install on the B580 was not tried. Stage 2 explains both.
-4. Install macOS and finish the setup assistant. The screen runs on the B580's firmware output (UEFI GOP) through
+4. Install macOS and finish the setup assistant. The screen runs on the card's firmware output (UEFI GOP) through
    macOS's generic display driver: one resolution, no acceleration, everything slow, and sleep does not work yet.
    That is expected.
 
@@ -101,7 +103,7 @@ or `sudo ./efi.sh --settings-apply` from the macOS package make the same changes
 
 In `config.plist`:
 
-1. `Booter > Quirks > ResizeAppleGpuBars = 10`. macOS cannot map the B580's 16 GB BAR; this gives it a 1 GB window.
+1. `Booter > Quirks > ResizeAppleGpuBars = 10`. macOS cannot map the card's 16 GB BAR; this gives it a 1 GB window.
 2. `Kernel > Quirks > DisableIoMapper = true`.
 3. `NVRAM > Add > 7C436110-AB2A-4BBB-A880-FE41995C9F82`:
    - `csr-active-config` = `03080000` (Data): SIP relaxed, so that unsigned kexts load from the Auxiliary Kernel
@@ -111,7 +113,7 @@ In `config.plist`:
 4. `NVRAM > Delete > 7C436110-AB2A-4BBB-A880-FE41995C9F82` must list `csr-active-config` and `boot-args` (Dortania's
    sample config does), so that the new values replace the old ones.
 5. `UEFI > Output > ReconnectGraphicsOnConnect = false`. With `true`, OpenCore's RELEASE build sets up the console
-   before the B580's firmware display (GOP) is back from the reconnect; macOS then boots without a console framebuffer,
+   before the card's firmware display (GOP) is back from the reconnect; macOS then boots without a console framebuffer,
    Lilu never completes its start, VirtualSMC's SMC device is not hooked up, and `watchdogd` panics the boot about
    20 seconds in. OpenCore's DEBUG build is slow enough to hide this.
 6. For the system-volume copy (Safari on the GPU, 3.3):
@@ -139,20 +141,26 @@ password; `install.sh` and `efi.sh` from the package do the work, so it is the s
    The app is signed ad hoc, not by an Apple developer ID. Downloaded with a browser, macOS refuses to open it; then
    run `xattr -dr com.apple.quarantine ~/Applications/"IntelXe Manager.app"`, or open it once and allow it under System
    Settings > Privacy & Security (*Open Anyway*).
-2. **System** shows what the driver needs (macOS, SIP, the AMFI boot-arg, the card) and what is installed.
+
+   On its first start the app opens its **setup assistant**, which goes through the steps below one page at a time,
+   picks up where it stopped when you open the app again after a restart, and ends with a GPU test and the optional extras (Safari on the GPU,
+   Zink, HiDPI, the menu bar item). Its first step can prepare Safari's setting in the same change (*Also prepare
+   Safari on the GPU*). The steps by hand, on the app's pages:
+2. **Overview** shows what the driver needs (macOS, SIP, the AMFI boot-arg, the card) and what is installed.
 3. **Driver:** *Download v@VER@* fetches the package for your macOS and compares it with the release's checksum list.
    The EFI page takes its files from this package too.
 4. Stage 2 not done yet? The install needs it (it refuses to run without relaxed SIP and the AMFI boot-arg): on
-   **EFI (OpenCore)** choose the EFI partition OpenCore booted from (or *Use an EFI folder…*), press *Change these
-   settings* under "Settings (stage 2)", reboot, and open the app again.
+   **EFI (OpenCore)** press *Change these settings* under "Settings (stage 2)" (when OpenCore did not record the EFI it
+   booted from, choose the partition first, or *Use an EFI folder…*), reboot, and open the app again.
 5. **Driver:** *Install this package* (the same as `sudo ./install.sh --apply`). **Do not reboot yet.**
 6. **EFI (OpenCore):** *Make these changes* under "IntelXe.kext and SSDT-ARCOFF (stage 4)"; stage 4 below explains
    what it changes. Every EFI change shows its list of changes and asks first. Then reboot.
 
-The app also repairs, undoes and uninstalls the driver, installs the optional zink package, and later installs a new
-release over the old one. The system-volume copy for Safari (3.3) is not in the app: it is two commands in Terminal,
-in the `system-volume` folder of the package the app downloaded (the Driver page shows its folder). It contacts only GitHub and sends no data. The Driver page was used on the test machine; the
-EFI page was used there on the EFI of its SSD; *Undo* on a real EFI and a whole install from a fresh macOS were not
+The app also repairs, undoes and uninstalls the driver, installs the optional zink package, installs the
+system-volume copy for Safari (3.3; the Driver page's *Safari and WebKit*, with `SecureBootModel` on the EFI page),
+turns the HiDPI modes on (Display page), tests the GPU, makes a diagnostics report, and later installs a new release
+over the old one. It contacts only GitHub and sends no data. The Driver page was used on the test machine; the EFI
+page was used there on the EFI of its SSD; *Undo* on a real EFI and a whole install from a fresh macOS were not
 repeated with the app.
 
 ### 3.2 In Terminal
@@ -208,14 +216,15 @@ On the PC itself, `efi.sh` in the macOS package does steps 1 to 3 (and stage 2's
 OpenCore booted from, backs up the whole EFI folder, copies the files and enables their `config.plist` entries. It reads
 your card's ACPI path (step 2) from the I/O Registry; when it is not the shipped table's, it writes your path into a copy
 of `SSDT-ARCOFF.aml` and adds that (the plan says "adapted to this card's port"), so there is no table to edit or
-compile. `./efi.sh --plan` shows the changes, `sudo ./efi.sh --apply`
+compile. On a 12th-14th gen hybrid Intel CPU it adds `HybridPM.kext` as well
+([below](#hybrid-intel-cpus-12th-14th-gen-hybridpmkext)). `./efi.sh --plan` shows the changes, `sudo ./efi.sh --apply`
 makes them, `sudo ./efi.sh --undo` takes them back; `--settings-plan` / `--settings-apply` do stage 2. `./efi.sh` alone
 lists every option. The IntelXe Manager app has the same on its EFI page.
 
 **On Windows**, `IntelXe-EFI.ps1` in the `-efi.zip` does steps 1 and 3 (*Driver: plan*, *Driver: apply*) in the EFI
 folder you choose, with a backup and an undo. Windows cannot check the ACPI path the way `efi.sh` does on macOS, so it
 adds `SSDT-ARCOFF.aml` only when you tick its box and give your card's path from step 2 (it reads it from Device
-Manager when Windows runs on the PC with the card). See `README-Windows.md` in the zip.
+Manager when Windows runs on the PC with the card). It does not add `HybridPM.kext` yet. See `README-Windows.md` in the zip.
 
 1. Copy `IntelXe.kext` to `EFI/OC/Kexts/` and add it under `Kernel > Add`: `BundlePath IntelXe.kext`,
    `ExecutablePath Contents/MacOS/IntelXe`, `PlistPath Contents/Info.plist`, `Enabled true`. This is the GPU driver
@@ -227,9 +236,9 @@ Manager when Windows runs on the PC with the card). See `README-Windows.md` in t
 
    | System | How |
    |---|---|
-   | Windows | Device Manager → Display adapters → the B580 (or "Microsoft Basic Display Adapter" without Intel's driver) → Properties → Details → **Location paths**. The `ACPI(...)` line looks like `ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000)`, which is `\_SB.PC00.PEG1.PEGP` |
-   | Linux | `lspci -nn \| grep e20b` gives the GPU (e.g. `03:00.0`); `lspci -tv` shows the card's upstream port two levels above it (e.g. `01:00.0`); `cat /sys/bus/pci/devices/0000:01:00.0/firmware_node/path` prints its ACPI path, e.g. `\_SB_.PC00.PEG1.PEGP` |
-   | macOS | [gfxutil](https://github.com/acidanthera/gfxutil/releases) lists every PCI device with its ACPI path: take the `8086:e20b` line. IORegistryExplorer shows the same names in the IOService plane (`PC00@0` → `PEG1@1` → `PEGP@0` → ...) |
+   | Windows | Device Manager → Display adapters → the Arc card (or "Microsoft Basic Display Adapter" without Intel's driver) → Properties → Details → **Location paths**. The `ACPI(...)` line looks like `ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000)`, which is `\_SB.PC00.PEG1.PEGP` |
+   | Linux | `lspci -nn \| grep -e e20b -e e20c` gives the GPU (e.g. `03:00.0`); `lspci -tv` shows the card's upstream port two levels above it (e.g. `01:00.0`); `cat /sys/bus/pci/devices/0000:01:00.0/firmware_node/path` prints its ACPI path, e.g. `\_SB_.PC00.PEG1.PEGP` |
+   | macOS | [gfxutil](https://github.com/acidanthera/gfxutil/releases) lists every PCI device with its ACPI path: take the `8086:e20b` line (`8086:e20c` on a B570). IORegistryExplorer shows the same names in the IOService plane (`PC00@0` → `PEG1@1` → `PEGP@0` → ...) |
 
    If your path is the shipped one (`\_SB.PC00.PEG1.PEGP`), use `SSDT-ARCOFF.aml` as it is. Otherwise, on macOS, let
    `efi.sh` or the app's EFI page adapt it (above); it does this for a path of any length. By hand, put your path in
@@ -241,7 +250,7 @@ Manager when Windows runs on the PC with the card). See `README-Windows.md` in t
    level: open an issue with your Location paths line.
 3. Copy the `.aml` to `EFI/OC/ACPI/` and add it under `ACPI > Add` (`Path SSDT-ARCOFF.aml`, `Enabled true`).
 4. Reboot. The desktop should now be accelerated: transparency and blur, smooth window dragging, and `About This Mac`
-   names the Arc B580 with 12 GB. In Terminal, `kmutil showloaded | grep -i intelxe` lists `IntelXe` and `IntelXeFB`,
+   names the card (the Arc B580 with 12 GB). In Terminal, `kmutil showloaded | grep -i intelxe` lists `IntelXe` and `IntelXeFB`,
    and `sysctl debug.nmxaccelfb` prints `1`.
 
 ## Hybrid Intel CPUs (12th-14th gen): HybridPM.kext
@@ -307,7 +316,9 @@ sudo ./install.sh --global on    # every LWJGL 3 application started afterwards 
 `--global off` switches back, `--undo` removes it; `README.md` in the zip has the rest. Measured on the test machine
 (macOS 26.7.1, Minecraft 1.21.1 with Sodium and Iris, windowed, the same spot): with the BSL shader pack 197–205 fps with
 zink, 214–218 on the same PC under Windows with Intel's driver; without a shader pack 1400–1500 fps with
-zink against 700–1000 on Windows. A launcher that macOS reopens by itself at login can start before the setting is in
+zink against 700–1000 on Windows. Experimental: a native macOS OpenGL application (CGL/NSOpenGL) can go through zink
+too, one application at a time: `./cglzink-app.sh add /Applications/X.app` makes `~/Applications/X (zink).app` (the
+zip's `README.md`, "Native OpenGL applications"). A launcher that macOS reopens by itself at login can start before the setting is in
 place and then runs on Apple's OpenGL: quit it and start it again (Java prints "Picked up JAVA_TOOL_OPTIONS" when zink
 is on).
 
@@ -350,7 +361,7 @@ off as well (the switch is the NVRAM variable).
   ```
 
   (`sudo nvram -d intelxe-accel-off` reports no error on macOS 26 but leaves the variable in place; `=ok` works on every
-  version. The kernel log of 0.1.0 and 0.1.1 still named `nvram -d`.) The IntelXe Manager app's System page has a
+  version. The kernel log of 0.1.0 and 0.1.1 still named `nvram -d`.) The IntelXe Manager app's Overview page has a
   *Clear the boot guard* button for the boots in between, when the guard is armed but the desktop runs.
 - **Panic about 20 seconds into the boot, `watchdogd ... exited`** (the report in
   `/Library/Logs/DiagnosticReports/Kernel-*.panic` names `watchdogd`): `UEFI > Output > ReconnectGraphicsOnConnect`
@@ -365,13 +376,24 @@ off as well (the switch is the NVRAM variable).
 
 ## Upgrading from an earlier build
 
-**From 0.1.2:** `IntelXeFB.kext`, `NMXAGDC.kext`, `NMXAccel.kext`, the Metal plugin, the video decoder and Mesa's
-Vulkan driver are new (refresh rates above the firmware's, Adaptive-Sync modes on by default, the optional HiDPI modes
-at the full refresh rate, full-range video decoded as full range, WindowServer keeping its compiled shaders). Install
-the package (the app: *Download v@VER@*, then *Install this package*; or `sudo ./install.sh --apply`) and restart.
-`IntelXe.kext` in the EFI is that of 0.1.2 and stays as it is. If you installed the system-volume copy (3.3), install this package's too
-(`sudo ./system-volume/ssv-install.sh --apply`) and then `sudo rm /Library/GPUBundles/NVMTLDriver.use-library`, which
-`install.sh --apply` creates because the copy holds the older Mesa; then restart.
+**From 0.1.3:** `IntelXe.kext` (in the EFI), `IntelXeFB.kext`, `NMXAccel.kext` and the Metal driver are new (lock V2,
+the translator fix, the B570's ID, the GPU clock and temperature readings, direct submission); Mesa and the video
+codecs are those of 0.1.3. Install the package (the app: *Download v@VER@*, then *Install this package*; or
+`sudo ./install.sh --apply`), then replace `IntelXe.kext` in the EFI before you restart (the app's EFI page or
+`sudo ./efi.sh --apply` on macOS, which also add `HybridPM.kext` on a hybrid Intel CPU; `IntelXe-EFI.ps1` on Windows;
+or by hand; its `config.plist` entry stays as it is). If you installed the system-volume copy (3.3), install this
+package's too (the Driver page's *Safari and WebKit*, or `sudo ./system-volume/ssv-install.sh --apply`), so that
+Safari gets the new Metal driver. The GuC low-latency hint that keeps the GPU clock up for apps is off by default
+from 0.1.4 (with it, a GPU fault followed a long idle in testing); the app's *Power and app* page (*Fast GPU response
+for apps*) or `sudo touch /Library/GPUBundles/NVMTLDriver.low-latency` turns it on. Direct submission is off as well:
+`sudo sysctl debug.intelxe.direct=1` turns it on until the next restart.
+
+**From 0.1.2:** as from 0.1.3, and `NMXAGDC.kext`, the video decoder and Mesa's Vulkan driver are new too (refresh rates
+above the firmware's, Adaptive-Sync modes on by default, the optional HiDPI modes at the full refresh rate, full-range
+video decoded as full range, WindowServer keeping its compiled shaders). If you installed the system-volume copy,
+`install.sh --apply` creates `/Library/GPUBundles/NVMTLDriver.use-library`, because the copy holds the older Mesa;
+installing this package's copy from the app's Driver page removes it, after `ssv-install.sh --apply` in Terminal run
+`sudo rm /Library/GPUBundles/NVMTLDriver.use-library`; then restart.
 
 **From 0.1.0 or 0.1.1:** every kext, the Metal driver and the video libraries are new, **`IntelXe.kext` in the EFI
 too** (it closes a security hole: an unprivileged process could get writable GPU mappings of pages it may only read).

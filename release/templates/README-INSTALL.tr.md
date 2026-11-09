@@ -1,4 +1,4 @@
-# intel-gpu-macos-driver @VER@: @MACOS@ için kurulum (Intel Arc B580)
+# intel-gpu-macos-driver @VER@: @MACOS@ için kurulum (Intel Arc B580 / B570)
 
 [English](README-INSTALL.md)
 
@@ -6,11 +6,12 @@
 **Başlamadan önce çalışan bir OpenCore EFI'si olan bir USB bellek hazırlayın** ve anakartınızın önyükleme menüsünden o
 belleği nasıl seçeceğinizi öğrenin. Yalnızca ticari olmayan kullanım içindir (`LICENSES/`).
 
-Her şey yolunda giderse elinize şunlar geçer: masaüstü B580'de Metal ile çizilir (pencere sürüklemesi monitörün yenileme
+Her şey yolunda giderse elinize şunlar geçer: masaüstü kartta Metal ile çizilir (pencere sürüklemesi monitörün yenileme
 hızında, 180 Hz'e kadar denendi), masaüstü widget'ları, Metal uygulamaları ve oyunlar çalışır, Safari
 GPU'da çalışır (sistem diski kopyasıyla, 3.3), H.264, HEVC, AV1 ve VP9 çözme ile H.264, HEVC ve AV1 kodlama GPU'da yapılır.
 DisplayPort'tan tek monitör, VRR, uyku ve uyanma da çalışır. İsteğe bağlı olarak Minecraft Java gibi LWJGL oyunları
-OpenGL'i Mesa'nın zink'iyle çalıştırabilir (`-zink-gl.zip`, aşağıda "İsteğe bağlı: zink ile OpenGL").
+OpenGL'i Mesa'nın zink'iyle çalıştırabilir (`-zink-gl.zip`, aşağıda "İsteğe bağlı: zink ile OpenGL"); 12.-14. nesil hibrit
+Intel işlemciler için `HybridPM.kext` var (aşağıda).
 
 Bilinen sorunlar:
 
@@ -26,8 +27,9 @@ Bu sürücünün eski bir sürümünü kullanıyorsanız doğrudan [Yükseltme](
 
 ## Neler gerekiyor?
 
-- OpenCore'un macOS açabildiği bir bilgisayar (Intel işlemci, x86_64), Arc B580 ve **B580'in DisplayPort çıkışına bağlı tek
-  monitör**. Dahili GPU gerekmiyor: test makinesinde macOS yalnızca B580'le kuruldu.
+- OpenCore'un macOS açabildiği bir bilgisayar (Intel işlemci, x86_64), Arc B580 ya da B570 ve **kartın DisplayPort çıkışına
+  bağlı tek monitör**. B570 destekleniyor ama bizim tarafımızda test edilmedi: nasıl gittiğini bildirin. Dahili GPU
+  gerekmiyor: test makinesinde macOS yalnızca B580'le kuruldu.
 - USB belleği hazırlamak ve EFI'yi düzenlemek için Windows, Linux ya da macOS çalışan herhangi bir bilgisayar. Mac şart
   değil.
 - [Sürüm sayfasından](https://github.com/yusufklncc/intel-gpu-macos-driver/releases/tag/v@VER@) dosyalar:
@@ -50,13 +52,13 @@ Bu sürücünün eski bir sürümünü kullanıyorsanız doğrudan [Yükseltme](
 
 | Aşama | Nerede yapılıyor | Ne yapılıyor | Sonrasında ekran |
 |---|---|---|---|
-| 1 | Windows, Linux ya da macOS, sonra kurulacak bilgisayar | macOS'u sürücüsüz, düz bir OpenCore EFI'siyle kurmak | B580'in UEFI çıktısı: hızlandırma yok, yavaş |
+| 1 | Windows, Linux ya da macOS, sonra kurulacak bilgisayar | macOS'u sürücüsüz, düz bir OpenCore EFI'siyle kurmak | kartın UEFI çıktısı: hızlandırma yok, yavaş |
 | 2 | `config.plist`, herhangi bir sistemden | SIP, AMFI, iki quirk ve bir çıktı ayarı | aynı |
 | 3 | Bilgisayardaki macOS | uygulamada **Bu paketi kur** ya da `sudo ./install.sh --apply`; **henüz yeniden başlatmadan** | aynı |
-| 4 | EFI, bilgisayardaki macOS'tan ya da herhangi bir sistemden | `IntelXe.kext` ve `SSDT-ARCOFF.aml` (uygulamanın EFI sayfası, `efi.sh`, `IntelXe-EFI.ps1` ya da elle), sonra yeniden başlatma | hızlandırmalı |
+| 4 | EFI, bilgisayardaki macOS'tan ya da herhangi bir sistemden | `IntelXe.kext` ve `SSDT-ARCOFF.aml`, hibrit bir Intel işlemcide `HybridPM.kext` de (uygulamanın EFI sayfası, `efi.sh`, `IntelXe-EFI.ps1` ya da elle), sonra yeniden başlatma | hızlandırmalı |
 
 `IntelXe.kext` ve `SSDT-ARCOFF.aml`'yi 4. aşamadan önce EFI'ye koymayın. Bu tablo, kurulum ekranını gösteren genel ekran
-sürücüsünden B580'i gizliyor; 3. aşamada sürücünün kendi ekran kext'i kurulana kadar onun yerini alacak bir şey yok.
+sürücüsünden kartı gizliyor; 3. aşamada sürücünün kendi ekran kext'i kurulana kadar onun yerini alacak bir şey yok.
 
 Her aşamanın sonundaki durumda test makinesi çalıştı, ama bu dört aşama temiz bir kurulumda baştan sona hiç uygulanmadı.
 Takıldığınız yeri bildirirseniz rehberi düzeltiriz.
@@ -82,11 +84,11 @@ Takıldığınız yeri bildirirseniz rehberi düzeltiriz.
    SSDT'ler; DSDT'yi Windows ve Linux'ta alabilir), [USBToolBox](https://github.com/USBToolBox/tool) (USB haritası, Windows'ta)
    ve [GenSMBIOS](https://github.com/corpnewt/GenSMBIOS) (seri numaraları).
 
-   B580'e özel bir şey eklemeyin: `DeviceProperties` ve WhateverGreen ayarı gerekmiyor. B580 için iki ayar şimdiden:
+   Karta özel bir şey eklemeyin: `DeviceProperties` ve WhateverGreen ayarı gerekmiyor. Kart için iki ayar şimdiden:
    `UEFI > Output > ReconnectGraphicsOnConnect` ayarını `false` bırakın (Dortania'nın örneğinde öyle) ve
    `Booter > Quirks > ResizeAppleGpuBars = 10` yapın (Dortania'da varsayılan `-1`). Test makinesi macOS'u ikisiyle
    kurdu; `-1` ve açık Resizable BAR ile B580'de kurulum denenmedi. İkisinin nedeni 2. aşamada.
-4. macOS'u kurup ilk açılış sihirbazını bitirin. Ekran, macOS'un genel ekran sürücüsüyle B580'in UEFI çıktısında (GOP) çalışır:
+4. macOS'u kurup ilk açılış sihirbazını bitirin. Ekran, macOS'un genel ekran sürücüsüyle kartın UEFI çıktısında (GOP) çalışır:
    tek çözünürlük, hızlandırma yok, her şey yavaş, uyku da henüz çalışmaz. Bu aşamada bu normal.
 
 ## 2. SIP, AMFI, quirk'ler ve konsol ayarı (`config.plist`)
@@ -109,7 +111,7 @@ değişiklikleri OpenCore'un açıldığı EFI'de yapar (bkz. 3.1).
 
 `config.plist`'te:
 
-1. `Booter > Quirks > ResizeAppleGpuBars = 10`. macOS, B580'in 16 GB'lık BAR'ını eşleyemiyor; bu ayar 1 GB'lık bir pencere
+1. `Booter > Quirks > ResizeAppleGpuBars = 10`. macOS, kartın 16 GB'lık BAR'ını eşleyemiyor; bu ayar 1 GB'lık bir pencere
    açıyor.
 2. `Kernel > Quirks > DisableIoMapper = true`.
 3. `NVRAM > Add > 7C436110-AB2A-4BBB-A880-FE41995C9F82` altında:
@@ -119,7 +121,7 @@ değişiklikleri OpenCore'un açıldığı EFI'de yapar (bkz. 3.1).
      `intelxe_surfvram=2` (süreçler arasında VRAM'de paylaşılan IOSurface'ler) ekleyin.
 4. `NVRAM > Delete > 7C436110-AB2A-4BBB-A880-FE41995C9F82` listesinde `csr-active-config` ve `boot-args` olmalı (Dortania'nın
    örnek yapılandırmasında var); yeni değerler eskilerin yerine böyle geçiyor.
-5. `UEFI > Output > ReconnectGraphicsOnConnect = false`. Bu ayar `true` olursa OpenCore'un RELEASE sürümü, B580'in UEFI
+5. `UEFI > Output > ReconnectGraphicsOnConnect = false`. Bu ayar `true` olursa OpenCore'un RELEASE sürümü, kartın UEFI
    ekran sürücüsü (GOP) yeniden bağlanmadan konsolu kurmaya çalışıyor. macOS konsol ekranı olmadan açılıyor, Lilu başlatmasını
    tamamlayamıyor, VirtualSMC'nin SMC aygıtı bağlanmıyor ve `watchdogd` açılışın yaklaşık 20. saniyesinde panik veriyor.
    OpenCore'un DEBUG sürümü yavaş olduğu için bu sorunu gizliyor.
@@ -147,20 +149,26 @@ gösterir. İşi paketteki `install.sh` ve `efi.sh` yapıyor; yani 3.2'deki Term
    Uygulama bir Apple geliştirici kimliğiyle değil, ad hoc imzalı. Tarayıcıyla indirdiyseniz macOS açmayı reddeder; o
    zaman `xattr -dr com.apple.quarantine ~/Applications/"IntelXe Manager.app"` çalıştırın ya da bir kez açmayı deneyip
    Sistem Ayarları > Gizlilik ve Güvenlik'te izin verin (*Yine de Aç*).
-2. **Sistem** sürücünün neye ihtiyaç duyduğunu (macOS, SIP, AMFI boot-arg'ı, kart) ve neyin kurulu olduğunu gösterir.
+
+   Uygulama ilk açılışta **kurulum yardımcısını** açar: aşağıdaki adımları sayfa sayfa yürütür, yeniden başlattıktan sonra
+   uygulamayı açtığınızda kaldığı yerden devam eder ve bir GPU testi ile isteğe bağlı eklerle (GPU'da Safari, Zink, HiDPI,
+   menü çubuğu öğesi) biter. İlk adımı Safari'nin ayarını da aynı değişiklikte yapabilir (*Safari'yi de GPU için
+   hazırla*). Adımlar elle, uygulamanın sayfalarında:
+2. **Genel bakış** sürücünün neye ihtiyaç duyduğunu (macOS, SIP, AMFI boot-arg'ı, kart) ve neyin kurulu olduğunu gösterir.
 3. **Sürücü:** *v@VER@ sürümünü indir* macOS'unuza uygun paketi indirir ve sürümün sağlama listesiyle karşılaştırır. EFI
    sayfası da dosyalarını bu paketten alır.
 4. 2. aşamayı henüz yapmadınız mı? Kurulum ona ihtiyaç duyuyor (SIP gevşetilmeden ve AMFI boot-arg'ı olmadan çalışmayı
-   reddediyor): **EFI (OpenCore)** sayfasında OpenCore'un açıldığı EFI bölümünü seçin (ya da *Bir EFI klasörü kullan…*),
-   "Ayarlar (2. aşama)" altında *Bu ayarları değiştir*'e basın, yeniden başlatın ve uygulamayı yeniden açın.
+   reddediyor): **EFI (OpenCore)** sayfasında "Ayarlar (2. aşama)" altında *Bu ayarları değiştir*'e basın (OpenCore
+   açıldığı EFI'yi kaydetmediyse önce bölümü seçin ya da *Bir EFI klasörü kullan…*), yeniden başlatın ve uygulamayı
+   yeniden açın.
 5. **Sürücü:** *Bu paketi kur* (`sudo ./install.sh --apply` ile aynı). **Henüz yeniden başlatmayın.**
 6. **EFI (OpenCore):** "IntelXe.kext ve SSDT-ARCOFF (4. aşama)" altında *Bu değişiklikleri yap*; neyi değiştirdiği
    aşağıda 4. aşamada anlatılıyor. Her EFI değişikliği önce değişiklik listesini gösterip sorar. Sonra yeniden başlatın.
 
-Uygulama ayrıca sürücüyü onarır, geri alır, kaldırır, isteğe bağlı zink paketini kurar ve sonraki sürümleri eskisinin
-üzerine kurar. Yalnızca GitHub'a bağlanır, veri göndermez. Safari için sistem diski kopyası (3.3) uygulamada yok:
-uygulamanın indirdiği paketin `system-volume` klasöründe Terminal'den iki komut (Sürücü sayfası klasörü gösteriyor).
-Sürücü sayfası test makinesinde kullanıldı; EFI sayfası da orada SSD'nin EFI'sinde kullanıldı. Gerçek bir EFI'de
+Uygulama ayrıca sürücüyü onarır, geri alır, kaldırır, isteğe bağlı zink paketini kurar, Safari için sistem diski
+kopyasını kurar (3.3; Sürücü sayfasında *Safari ve WebKit*, `SecureBootModel` EFI sayfasında), HiDPI modlarını açar
+(Ekran sayfası), GPU'yu test eder, tanı raporu hazırlar ve sonraki sürümleri eskisinin üzerine kurar. Yalnızca
+GitHub'a bağlanır, veri göndermez. Sürücü sayfası test makinesinde kullanıldı; EFI sayfası da orada SSD'nin EFI'sinde kullanıldı. Gerçek bir EFI'de
 *Undo* ve temiz bir macOS'tan baştan sona uygulamayla kurulum henüz denenmedi. Arayüz sistem diline göre İngilizce ya
 da Türkçe; buradaki adlar Türkçe arayüzdeki adlar.
 
@@ -217,14 +225,16 @@ Kurulacak bilgisayarın kendisinde, macOS paketindeki `efi.sh` 1-3. maddeleri (v
 yapar: OpenCore'un açıldığı EFI'yi bulur, EFI klasörünün tamamını yedekler, dosyaları kopyalar, `config.plist` kayıtlarını
 açar. Kartınızın ACPI yolunu (2. madde) I/O Registry'den okur; yol paketteki tablonunkinden farklıysa `SSDT-ARCOFF.aml`'ın
 bir kopyasına sizin yolunuzu yazıp onu ekler (plan bunu "adapted to this card's port" diye belirtir); düzenlenecek ya da
-derlenecek bir tablo kalmaz. `./efi.sh --plan` değişiklikleri gösterir,
+derlenecek bir tablo kalmaz. 12.-14. nesil hibrit bir Intel işlemcide `HybridPM.kext`'i de ekler (aşağıda, "Hibrit
+Intel işlemciler"). `./efi.sh --plan` değişiklikleri gösterir,
 `sudo ./efi.sh --apply` yapar, `sudo ./efi.sh --undo` geri alır; `--settings-plan` / `--settings-apply` 2. aşamayı yapar.
 Bütün seçenekler için yalnızca `./efi.sh`. IntelXe Manager uygulamasının EFI sayfası da aynısını yapar.
 
 **Windows'ta** `-efi.zip`'teki `IntelXe-EFI.ps1` 1. ve 3. maddeleri (*Driver: plan*, *Driver: apply*) seçtiğiniz EFI
 klasöründe, yedek ve geri alma ile yapar. Windows, ACPI yolunu `efi.sh`'in macOS'ta yaptığı gibi denetleyemez; bu
 yüzden `SSDT-ARCOFF.aml`'ı yalnızca kutusunu işaretleyip 2. maddedeki kart yolunuzu yazdığınızda ekler (Windows kartın
-takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur). Zip'teki `README-Windows.md`'ye bakın.
+takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur). `HybridPM.kext`'i henüz eklemiyor. Zip'teki
+`README-Windows.md`'ye bakın.
 
 1. `IntelXe.kext`'i `EFI/OC/Kexts/` klasörüne kopyalayın ve `Kernel > Add` altına ekleyin: `BundlePath IntelXe.kext`,
    `ExecutablePath Contents/MacOS/IntelXe`, `PlistPath Contents/Info.plist`, `Enabled true`. GPU sürücüsü bu (GuC/HuC yazılımları
@@ -236,9 +246,9 @@ takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur)
 
    | Sistem | Nasıl |
    |---|---|
-   | Windows | Aygıt Yöneticisi → Görüntü bağdaştırıcıları → B580 (Intel'in sürücüsü yoksa "Microsoft Temel Görüntü Bağdaştırıcısı") → Özellikler → Ayrıntılar → **Konum yolları**. `ACPI(...)` ile başlayan satır `ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000)` gibi görünür; bu `\_SB.PC00.PEG1.PEGP` demektir |
-   | Linux | `lspci -nn \| grep e20b` GPU'yu verir (ör. `03:00.0`); `lspci -tv` kartın iki seviye üstündeki portu gösterir (ör. `01:00.0`); `cat /sys/bus/pci/devices/0000:01:00.0/firmware_node/path` ACPI yolunu yazar, ör. `\_SB_.PC00.PEG1.PEGP` |
-   | macOS | [gfxutil](https://github.com/acidanthera/gfxutil/releases) bütün PCI aygıtlarını ACPI yollarıyla listeler: `8086:e20b` satırına bakın. IORegistryExplorer aynı adları IOService düzleminde gösterir (`PC00@0` → `PEG1@1` → `PEGP@0` → ...) |
+   | Windows | Aygıt Yöneticisi → Görüntü bağdaştırıcıları → Arc kartı (Intel'in sürücüsü yoksa "Microsoft Temel Görüntü Bağdaştırıcısı") → Özellikler → Ayrıntılar → **Konum yolları**. `ACPI(...)` ile başlayan satır `ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000)` gibi görünür; bu `\_SB.PC00.PEG1.PEGP` demektir |
+   | Linux | `lspci -nn \| grep -e e20b -e e20c` GPU'yu verir (ör. `03:00.0`); `lspci -tv` kartın iki seviye üstündeki portu gösterir (ör. `01:00.0`); `cat /sys/bus/pci/devices/0000:01:00.0/firmware_node/path` ACPI yolunu yazar, ör. `\_SB_.PC00.PEG1.PEGP` |
+   | macOS | [gfxutil](https://github.com/acidanthera/gfxutil/releases) bütün PCI aygıtlarını ACPI yollarıyla listeler: `8086:e20b` satırına bakın (B570'te `8086:e20c`). IORegistryExplorer aynı adları IOService düzleminde gösterir (`PC00@0` → `PEG1@1` → `PEGP@0` → ...) |
 
    Yolunuz paketteki gibiyse (`\_SB.PC00.PEG1.PEGP`) `SSDT-ARCOFF.aml`'yi olduğu gibi kullanın. Değilse macOS'ta tabloyu
    `efi.sh` ya da uygulamanın EFI sayfası uyarlasın (yukarıda); yolun uzunluğu ne olursa olsun bunu yapar. Elle yapmak için
@@ -249,7 +259,7 @@ takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur)
    seviyesi daha gerekiyor: Konum yolları satırınızla bir issue açın.
 3. `.aml` dosyasını `EFI/OC/ACPI/` klasörüne kopyalayın ve `ACPI > Add` altına ekleyin (`Path SSDT-ARCOFF.aml`, `Enabled true`).
 4. Yeniden başlatın. Masaüstü artık hızlandırmalı olmalı: saydamlık ve bulanıklık, akıcı pencere sürükleme, `Bu Mac Hakkında`'da
-   12 GB'lık Arc B580. Terminal'de `kmutil showloaded | grep -i intelxe` `IntelXe` ve `IntelXeFB`'yi listeler, `sysctl
+   kartın adı görünür (12 GB'lık Arc B580). Terminal'de `kmutil showloaded | grep -i intelxe` `IntelXe` ve `IntelXeFB`'yi listeler, `sysctl
    debug.nmxaccelfb` de `1` yazar.
 
 ## Hibrit Intel işlemciler (12.-14. nesil): HybridPM.kext
@@ -313,7 +323,9 @@ sudo ./install.sh --global on    # bundan sonra açılan bütün LWJGL 3 uygulam
 `--global off` geri alır, `--undo` kaldırır; ayrıntılar zip'teki `README.md`'de. Test makinesinde ölçüldü (macOS 26.7.1,
 Minecraft 1.21.1, Sodium ve Iris ile, pencereli, aynı nokta): BSL shader paketiyle zink'te 197–205 fps, aynı bilgisayarda
 Windows'ta Intel'in sürücüsüyle 214–218; shader paketi olmadan zink'te
-1400–1500 fps, Windows'ta 700–1000. macOS'un girişte kendiliğinden
+1400–1500 fps, Windows'ta 700–1000. Deneysel: CGL/NSOpenGL kullanan yerel bir macOS uygulaması da tek tek zink'e
+geçebilir: `./cglzink-app.sh add /Applications/X.app` `~/Applications/X (zink).app`'i oluşturur (zip'teki `README.md`,
+"Native OpenGL applications"). macOS'un girişte kendiliğinden
 yeniden açtığı bir başlatıcı, ayar yerine oturmadan başlayıp Apple'ın OpenGL'inde kalabilir: kapatıp yeniden açın
 (zink açıkken Java "Picked up JAVA_TOOL_OPTIONS" yazar).
 
@@ -357,7 +369,7 @@ de modları kapatır (anahtar NVRAM değişkenidir).
 
   (`sudo nvram -d intelxe-accel-off` macOS 26'da hata vermez ama değişkeni silmez; `=ok` her sürümde çalışır. 0.1.0 ve
   0.1.1'in kernel log mesajı hâlâ `nvram -d` diyordu.) Koruma kurulmuş ama masaüstü çalışıyorsa, IntelXe Manager'ın
-  Sistem sayfasındaki *Açılış korumasını sıfırla* düğmesi de korumayı temizler.
+  Genel bakış sayfasındaki *Açılış korumasını sıfırla* düğmesi de korumayı temizler.
 - **Açılışın yaklaşık 20. saniyesinde panik, `watchdogd ... exited`** (`/Library/Logs/DiagnosticReports/Kernel-*.panic` içinde `watchdogd`
   geçiyorsa): `UEFI > Output > ReconnectGraphicsOnConnect` `true` kalmıştır; `false` yapın (2. aşama, 5. madde).
 - **Her şeyi geri almak:** `sudo ./install.sh --undo`, sonra `IntelXe.kext` ve `SSDT-ARCOFF.aml` EFI'den çıkarılmış olarak yeniden başlatın.
@@ -368,13 +380,25 @@ de modları kapatır (anahtar NVRAM değişkenidir).
 
 ## Yükseltme
 
-**0.1.2'den:** `IntelXeFB.kext`, `NMXAGDC.kext`, `NMXAccel.kext`, Metal eklentisi, video çözücü ve Mesa'nın Vulkan
-sürücüsü yeni (firmware'inkinden yüksek tazeleme hızları, varsayılan olarak açık Adaptive-Sync modları, monitörün tam
-tazeleme hızında isteğe bağlı HiDPI modları, tam aralıklı videonun tam aralıklı çözülmesi, WindowServer'ın derlenmiş
-shader'larını saklaması). Paketi kurun (uygulamada *v@VER@ sürümünü indir*, sonra *Bu paketi kur*; ya da
-`sudo ./install.sh --apply`) ve yeniden başlatın. EFI'deki `IntelXe.kext` 0.1.2'ninki; olduğu gibi kalır. Sistem diski kopyasını kurduysanız (3.3) bu paketinkini de kurun
-(`sudo ./system-volume/ssv-install.sh --apply`), sonra `install.sh --apply`'ın, kopya eski Mesa'yı taşıdığı için
-oluşturduğu `/Library/GPUBundles/NVMTLDriver.use-library` dosyasını silin (`sudo rm ...`) ve yeniden başlatın.
+**0.1.3'ten:** `IntelXe.kext` (EFI'de), `IntelXeFB.kext`, `NMXAccel.kext` ve Metal sürücüsü yeni (lock V2, çevirici
+düzeltmesi, B570'in kimliği, GPU saati ve sıcaklık okumaları, doğrudan gönderim); Mesa ve video kodekleri 0.1.3'ünkiler.
+Paketi kurun (uygulamada *v@VER@ sürümünü indir*, sonra *Bu paketi kur*; ya da `sudo ./install.sh --apply`), sonra
+yeniden başlatmadan önce EFI'deki `IntelXe.kext`'i değiştirin (macOS'ta uygulamanın EFI sayfası ya da
+`sudo ./efi.sh --apply`, ikisi de hibrit bir Intel işlemcide `HybridPM.kext`'i de ekler; Windows'ta `IntelXe-EFI.ps1`;
+ya da elle; `config.plist` kaydı olduğu gibi kalır). Sistem diski kopyasını kurduysanız (3.3) bu paketinkini de kurun
+(Sürücü sayfasında *Safari ve WebKit* ya da `sudo ./system-volume/ssv-install.sh --apply`); Safari yeni Metal
+sürücüsünü böyle alır. Uygulamalar için GPU saatini yüksek tutan GuC düşük gecikme ipucu 0.1.4'ten beri varsayılan
+olarak kapalı (açıkken testlerde uzun bir boşta kalmanın ardından GPU hatası görüldü); uygulamanın *Güç ve uygulama*
+sayfası (*Uygulamalar için hızlı GPU yanıtı*) ya da `sudo touch /Library/GPUBundles/NVMTLDriver.low-latency` açar.
+Doğrudan gönderim de kapalı: `sudo sysctl debug.intelxe.direct=1` bir sonraki yeniden başlatmaya kadar açar.
+
+**0.1.2'den:** 0.1.3'ten olduğu gibi; ayrıca `NMXAGDC.kext`, video çözücü ve Mesa'nın Vulkan sürücüsü de yeni
+(firmware'inkinden yüksek tazeleme hızları, varsayılan olarak açık Adaptive-Sync modları, monitörün tam tazeleme
+hızında isteğe bağlı HiDPI modları, tam aralıklı videonun tam aralıklı çözülmesi, WindowServer'ın derlenmiş
+shader'larını saklaması). Sistem diski kopyasını kurduysanız `install.sh --apply`, kopya eski Mesa'yı taşıdığı için
+`/Library/GPUBundles/NVMTLDriver.use-library` dosyasını oluşturur; bu paketin kopyasını uygulamanın Sürücü sayfasından
+kurmak onu siler, Terminal'de `ssv-install.sh --apply`'dan sonra `sudo rm /Library/GPUBundles/NVMTLDriver.use-library`
+çalıştırın; sonra yeniden başlatın.
 
 **0.1.0 ya da 0.1.1'den:** Bütün kext'ler, Metal sürücüsü ve video kütüphaneleri yeni, **EFI'deki `IntelXe.kext` de**
 (bir güvenlik açığını kapatıyor: yetkisiz bir süreç yalnızca okuyabileceği sayfalara yazılabilir GPU eşlemesi
