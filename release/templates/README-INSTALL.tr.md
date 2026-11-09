@@ -34,7 +34,7 @@ Bu sürücünün eski bir sürümünü kullanıyorsanız doğrudan [Yükseltme](
 
   | Dosya | İçinde ne var | Nerede açılmalı |
   |---|---|---|
-  | `intel-gpu-macos-driver-@VER@-efi.zip` | OpenCore parçaları: `IntelXe.kext`, `SSDT-ARCOFF.aml` ve kaynağı; Windows'ta 2. ve 4. aşamaları yapan `IntelXe-EFI.ps1` | herhangi bir sistemde |
+  | `intel-gpu-macos-driver-@VER@-efi.zip` | OpenCore parçaları: `IntelXe.kext`, `SSDT-ARCOFF.aml` ve kaynağı, `HybridPM.kext` (isteğe bağlı, [hibrit Intel işlemciler](#hibrit-intel-işlemciler-12-14-nesil-hybridpmkext)); Windows'ta 2. ve 4. aşamaları yapan `IntelXe-EFI.ps1` | herhangi bir sistemde |
   | `IntelXe-Manager-@VER@.zip` | IntelXe Manager uygulaması: 3. ve 4. aşamalar (ve sonraki güncellemeler) Terminal yerine düğmelerle; sonraki dosyayı kendisi indirir | bilgisayardaki macOS'ta |
   | `intel-gpu-macos-driver-@VER@-@CODENAME@.zip` | geri kalan her şey, `install.sh` ve `efi.sh` ile | **bilgisayardaki macOS'ta** (3. aşama) |
   | `intel-gpu-macos-driver-@VER@-zink-gl.zip` | isteğe bağlı: LWJGL oyunları için zink ile OpenGL | bilgisayardaki macOS'ta, 4. aşamadan sonra |
@@ -249,6 +249,43 @@ takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur)
    12 GB'lık Arc B580. Terminal'de `kmutil showloaded | grep -i intelxe` `IntelXe` ve `IntelXeFB`'yi listeler, `sysctl
    debug.nmxaccelfb` de `1` yazar.
 
+## Hibrit Intel işlemciler (12.-14. nesil): HybridPM.kext
+
+macOS'un işlemci güç yönetimi (XCPM), performans ve verimlilik çekirdekli işlemcilerden eski. Alder Lake ve Raptor Lake'te
+P çekirdeklerini sınırlıyor (bir i7-14700K 5,6 yerine 4,4 GHz'de kaldı) ve tam yüklü çekirdekleri 800 MHz'de tutabiliyor. GPU
+sürücüsü her komut arabelleği için işlemcide epey iş yapıyor, bu yüzden GPU da yavaş görünüyor: test makinesinde Geekbench'in
+GPU puanları `HybridPM.kext` ile yaklaşık üçte bir yüksekti, tek işlemci iş parçacığı iki kattan fazla hızlıydı. HybridPM GPU
+sürücüsünden ayrı ve isteğe bağlı; `-efi.zip`'te ve macOS paketinde `EFI/OC/Kexts/` altında.
+
+**Hangi işlemciler:** P ve E çekirdekli 12., 13. ve 14. nesil Core i3/i5/i7/i9 (Alder Lake ve Raptor Lake, masaüstü ve dizüstü;
+örneğin i5-12600K, i5-13400F, i7-14700K, i7-13620H). Core Ultra değil: onlara dokunmuyor; E çekirdeği olmayan ve daha eski
+işlemcilere de dokunmuyor (yalnızca nedenini günlüğe yazıyor). Model listesi depodaki `kernel/HybridPM/README.md`'de.
+
+**Eklemek** (elle; `efi.sh` ve uygulama eklemiyor):
+
+1. Bir Lilu eklentisi. Çoğu OpenCore EFI'sinde VirtualSMC için `Lilu.kext` zaten var; sizinkinde yoksa
+   [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases)'dan ekleyin (test makinesinde 1.7.2). Bu paket Lilu
+   içermiyor.
+2. `HybridPM.kext`'i `EFI/OC/Kexts/` klasörüne kopyalayın ve `Kernel > Add` altına `Lilu.kext`'in **altına** ekleyin:
+   `BundlePath HybridPM.kext`, `ExecutablePath Contents/MacOS/HybridPM`, `PlistPath Contents/Info.plist`, `Enabled true`.
+3. Yeniden başlatın. Açılıştan 20 saniye sonra devreye giriyor.
+
+**Kontrol etmek:**
+
+```sh
+sysctl debug.hybridpm.enabled debug.hybridpm.why debug.hybridpm.route
+# debug.hybridpm.enabled: 1, debug.hybridpm.why: on (model 0xB7), debug.hybridpm.route: 1
+./hpmstat 1000 3     # paket klasöründe: her çekirdeğin saati ve yükü, HWP sınırları, paket gücü
+```
+
+`enabled` 0 ise `why` nedenini söyler: `not hybrid` ya da `unsupported model` (Core Ultra ve diğerleri), ya da bir macOS
+güncellemesi düzelttiği rutini değiştirdiyse `route 3`; macOS o zaman onsuzmuş gibi çalışır. `debug.hybridpm` hiç yoksa
+HybridPM ya da Lilu yüklenmemiştir (`kmutil showloaded | grep -i -e lilu -e hybridpm`).
+
+**Kapatmak:** boot-args'a `-hpmoff` ekleyin ya da `Kernel > Add` kaydını `Enabled false` yapın. Bir sonraki yeniden başlatmaya
+kadar `sudo sysctl debug.hybridpm.hwp=0 debug.hybridpm.autonomous=0 debug.hybridpm.epp=-1 debug.hybridpm.eet_off=0`
+macOS'un kendi ayarlarını geri verir.
+
 ## İsteğe bağlı: zink ile OpenGL
 
 macOS'un kendi OpenGL'i Metal'in üzerinde çalışıyor ve bu sürücüde yavaş. LWJGL 3 Java oyunları (Minecraft Java 1.13 ve
@@ -356,12 +393,14 @@ kullandırır. `config.plist`'te `UEFI > Output > ReconnectGraphicsOnConnect = f
 |---|---|
 | `EFI/OC/Kexts/IntelXe.kext` | EFI, `Kernel > Add` (4. aşama); `-efi.zip`'tekiyle aynı dosya |
 | `EFI/OC/ACPI/SSDT-ARCOFF.aml`, `.dsl` | EFI, `ACPI > Add`, yolu kontrol ettikten sonra (4. aşama) |
+| `EFI/OC/Kexts/HybridPM.kext` | isteğe bağlı: EFI, `Kernel > Add`'de Lilu'nun altına; 12.-14. nesil hibrit Intel işlemciler için |
 | `Library/Extensions/IntelXeFB.kext`, `NMXAccel.kext`, `NMXAGDC.kext` | `/Library/Extensions` (ekran, hızlandırıcı), `install.sh` ile |
 | `Library/GPUBundles/NVMTLDriverLib.bundle`, `nvmtl/`, `nvmtl-allow.txt` | `/Library/GPUBundles` (Metal sürücüsü, Mesa, codec'ler), `install.sh` ile |
 | (`install.sh` oluşturur) | `/Library/LaunchDaemons/io.github.yusufklncc.intelxe.guard.plist`: bir açılış bir dakika çalışınca açılış korumasını temizler |
 | `system-volume/` | isteğe bağlı: Metal sürücüsünün sistem diskindeki kopyası (GPU'da Safari, 3.3) |
 | `efi.sh` | isteğe bağlı, macOS'ta: OpenCore'un açıldığı EFI'de 2. ve 4. aşamalar, yedek ve geri alma ile |
 | `hidpi.sh` | isteğe bağlı: monitör için HiDPI modları (ekran ölçeklendirme), açma ve kapama |
+| `hpmstat` | isteğe bağlı: HybridPM yüklüyken çekirdek saatleri ve paket gücü |
 | `SHA256SUMS`, `sigcheck` | `install.sh`'nin yaptığı kontroller |
 | `SOURCES.md`, `LICENSES/` | hangi kaynağın ve betiğin hangi dosyayı ürettiği; lisans metinleri |
 
