@@ -508,48 +508,76 @@ struct BusyBar: View {
 struct Banners: View {
     @EnvironmentObject var manager: Manager
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 1) {
             if let notice = manager.efiNotice {
-                Banner(symbol: "externaldrive.badge.exclamationmark", tint: .orange, text: notice.text) {
-                    Button("Open the EFI page") { manager.requestedSection = .efi }
-                    Button("Done") { manager.efiNotice = nil }
-                }
+                Banner(symbol: "externaldrive.badge.exclamationmark", tint: .orange, text: notice.text,
+                       fixTitle: "Open the EFI page", fix: { manager.requestedSection = .efi },
+                       dismissHelp: "Done", dismiss: { manager.efiNotice = nil })
             }
             ForEach(manager.health) { issue in
-                Banner(symbol: "exclamationmark.triangle", tint: .orange, text: LocalizedStringKey(issue.text)) {
-                    switch issue.code {
-                    case "accel-off": Button("Clear the boot guard") { manager.clearBootGuard() }
-                    case "hidpi-half", "hidpi-stale": Button("Open the Display page") { manager.requestedSection = .display }
-                    case "ssv-mesa", "ssv-gone", "kext-version": Button("Open the Driver page") { manager.requestedSection = .driver }
-                    default: EmptyView()
-                    }
-                    Button("Create a report") { manager.requestedSection = .report }
-                    Button("Dismiss") { manager.dismiss(issue) }
-                }
+                let fix = fix(for: issue)
+                Banner(symbol: issue.code == "panics" ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill",
+                       tint: issue.code == "panics" ? .red : .orange, text: LocalizedStringKey(issue.text),
+                       fixTitle: fix?.0 ?? "Create a report", fix: fix?.1 ?? { manager.requestedSection = .report },
+                       dismissHelp: "Dismiss", dismiss: { manager.dismiss(issue) },
+                       report: fix == nil ? nil : { manager.requestedSection = .report })
             }
             if manager.rebootNeeded {
-                Banner(symbol: "arrow.clockwise", tint: .accentColor, text: "Restart to use the change.") {
-                    Button("Later") { manager.rebootNeeded = false }
-                }
+                Banner(symbol: "arrow.clockwise.circle.fill", tint: .accentColor, text: "Restart to use the change.",
+                       fixTitle: "Restart now", fix: { manager.restartNow() },
+                       dismissHelp: "Later", dismiss: { manager.rebootNeeded = false })
             }
+        }
+        .animation(.easeInOut(duration: 0.3), value: manager.health)
+        .animation(.easeInOut(duration: 0.3), value: manager.rebootNeeded)
+    }
+
+    /// the one thing the app can do about an issue itself; the others say what to do in their text
+    func fix(for issue: HealthIssue) -> (LocalizedStringKey, () -> Void)? {
+        switch issue.code {
+        case "accel-off": return ("Clear the boot guard", { manager.clearBootGuard() })
+        case "hidpi-half", "hidpi-stale": return ("Open the Display page", { manager.requestedSection = .display })
+        case "ssv-mesa", "ssv-gone", "kext-version": return ("Open the Driver page", { manager.requestedSection = .driver })
+        default: return nil
         }
     }
 }
 
-struct Banner<Actions: View>: View {
+/// A warning or notice across the top of the page: a coloured strip and icon on the left, the text, one fix button and a
+/// close button on the right. Creating a report, when that is not the fix, is in the banner's context menu.
+struct Banner: View {
     let symbol: String
     let tint: Color
     let text: LocalizedStringKey
-    @ViewBuilder let actions: Actions
+    var fixTitle: LocalizedStringKey?
+    var fix: (() -> Void)?
+    var dismissHelp: LocalizedStringKey = "Dismiss"
+    var dismiss: (() -> Void)?
+    var report: (() -> Void)?
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(tint)
-            Text(text).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            actions
+        HStack(spacing: 0) {
+            Rectangle().fill(tint).frame(width: 4)
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.title3).foregroundStyle(tint).frame(width: 22)
+                Text(text).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                if let fixTitle, let fix {
+                    Button(fixTitle, action: fix).fixedSize()
+                }
+                if let dismiss {
+                    Button(action: dismiss) { Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+                        .buttonStyle(.borderless)
+                        .help(Text(dismissHelp))
+                        .accessibilityLabel(Text(dismissHelp))
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
         }
-        .padding(.horizontal, 16).padding(.vertical, 9)
-        .background(tint.opacity(0.1))
+        .background(tint.opacity(0.12))
+        .contextMenu {
+            if let report { Button("Create a report", action: report) }
+            if let dismiss { Button(dismissHelp, action: dismiss) }
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
 

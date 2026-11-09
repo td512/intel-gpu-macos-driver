@@ -29,6 +29,9 @@ func renderSnapshots(into folder: String) {
         + "candidate=00000000-0000-4000-8000-000000000001|disk0s1|WD Blue SN550 1TB|1000 GB||unknown\n"
         + "candidate=00000000-0000-4000-8000-000000000002|disk5s1|SanDisk Ultra|31 GB|/Volumes/EFI|yes\n")
     choosing.efiNotice = .unchecked
+    choosing.health = [HealthIssue(code: "accel-off", text: String(localized: "The boot guard holds acceleration off: earlier boots did not reach a healthy desktop. Clear it once you know why."), key: "on"),
+                       HealthIssue(code: "panics", text: String(localized: "macOS restarted after a kernel panic (\("9 Nov 2026 10:15")). A diagnostics report holds its text."), key: "x")]
+    choosing.rebootNeeded = true
     // the Display page as on the B580 test machine: supported and off, and on after --on before the restart
     let hidpiOff = Manager(), hidpiPending = Manager()
     hidpiOff.hidpi = HiDPIStatus(text: "hidpi_supported=1\nhidpi_nvram=0\nhidpi_override=none\nhidpi_windowserver=0\nhidpi_active=0\ndisplay=4c2d:750c\nnative=2560x1440\n")
@@ -80,7 +83,7 @@ func renderSnapshots(into folder: String) {
         ("setup-installing", AnyView(SetupView(close: {}).environmentObject(installing.copySetup(from: setupDriver)).background(Color(nsColor: .windowBackgroundColor))), 520), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
         ("efi", AnyView(EFIView().environmentObject(manager)), 1500), ("efi-choose", AnyView(EFIView().environmentObject(choosing)), 640),
         ("zink", AnyView(ZinkView().environmentObject(manager)), 640),
-        ("display-off", AnyView(DisplayView().environmentObject(hidpiOff)), 480), ("display-pending", AnyView(DisplayView().environmentObject(hidpiPending)), 480), ("banners", AnyView(Banners().environmentObject(choosing).background(Color(nsColor: .windowBackgroundColor))), 120),
+        ("display-off", AnyView(DisplayView().environmentObject(hidpiOff)), 480), ("display-pending", AnyView(DisplayView().environmentObject(hidpiPending)), 480), ("banners", AnyView(Banners().environmentObject(choosing).frame(maxHeight: .infinity, alignment: .top).background(Color(nsColor: .windowBackgroundColor))), 260),
     ]
     // each page in the light appearance (name.png) and the dark one (name-dark.png), in a key window so that the
     // default and prominent buttons show their accent colour as they do in the app
