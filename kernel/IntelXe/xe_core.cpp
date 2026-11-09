@@ -346,6 +346,12 @@ struct XeVm {
 	struct Fault { uint64_t addr; uint8_t access, type, level, srcid; } faults[50];
 	uint32_t nFaults;
 	XeVm *faultNext;
+	// rb8b: for the CAT-fault dump (engineDump): when PTEs of it were last removed or replaced (a VM_BIND unbind or
+	// remap over live entries, a purge; nowNs, 0 never), how often, and the TLB invalidation that removal issued; when
+	// a BO move last rewrote its PTEs (boRemap); when it was last bound (VM_BIND with ops). Written under the client
+	// lock, read racily by the dump.
+	uint64_t unbindNs, remapNs, bindNs;
+	uint32_t unbinds, unbindTlb;
 };
 
 // A job waiting in its queue's FIFO (drm_sched_job): the batch, its seqno (reserved at exec time, so out-fences exist
@@ -1413,7 +1419,9 @@ void IntelXe::gucPollGt(uint32_t gt) {
 // ─── TLB invalidation (xe_guc_tlb_inval.c): the full heavy invalidation with cache flush, on every GuC whose engines
 // may hold the VM's translations (media included). gTlbLock keeps seqnos and the order the GuCs see them the same, so
 // "done up to N" means every earlier one is done too.
+static uint64_t gTlbIssueNs;   // rb8b: when the last TLB invalidation went to the GuC (engineDump)
 static uint32_t tlbInvalidateIssue() {
+	gTlbIssueNs = nowNs();
 	IOLockLock(gTlbLock);
 	const uint32_t seq = ++gTlbSeq;
 	gDev->tlbSeqno = seq;
@@ -1452,6 +1460,7 @@ static uint32_t tlbInvalidateRange(uint32_t asid, uint64_t start, uint64_t end) 
 		if (len < (16ull << 20)) len = 16ull << 20;
 		start = orig & ~(len - 1);
 	}
+	gTlbIssueNs = nowNs();
 	IOLockLock(gTlbLock);
 	const uint32_t seq = ++gTlbSeq;
 	gDev->tlbSeqno = seq;
@@ -3154,9 +3163,52 @@ static uint32_t jobKarma(XeQueue *q, uint32_t seq) {
 // ring head and tail, ACTHD, the context on it (RING_CURRENT_LRCA, matched to the queue whose LRC holds it), the
 // execlist status, MI_MODE, ESR and EIR, IPEHR and INSTDONE; then every primary-GT queue with work pending: completed,
 // started and submitted seqno and the GuC state the driver knows. gSchedLock.
-static void engineDump(const char *why) {
+// rb8b (2026-11-10: two MEMORY_CAT_ERRORs of a Geekbench OpenCL run after a long idle, no page-fault descriptor: a VM
+// without fault mode touched an unmapped VA): then what could have taken a page from under the job. A BAR-window BO move
+// or an unbind racing the job or its TLB invalidation shows as a recent move / remap / unbind, a queue that last
+// invalidated at an older page-table generation than its VM's, or an invalidation still in flight. Lines:
+//   moves: BO moves into / out of the BAR window, to system memory (maps the window could not take), purges, eviction
+//          scans; the last move, its kind and how long ago
+//   tlb:   invalidations issued and completed on each GuC (pending when done < issued), the last one's age, deferred
+//          frees still waiting for one
+//   vm:    the faulting queue's VM (fq): ASID, scratch, ptGen against the generation the queue's last invalidating job
+//          saw (flushedGen), its bindings, its last unbind (and whether that unbind's invalidation completed), remap
+//          by a move and bind, as ages
+// gSchedLock (the queue and its VM stay); the VM fields are read without its client's lock.
+static struct { uint64_t ns; char kind; } gLastMove;   // rb8b: the last BO move: i/o window, s system memory, p purge
+static void lastMoveSet(char kind) {
+	gLastMove.ns = nowNs();
+	gLastMove.kind = kind;
+}
+static bool tlbSeqDone(uint32_t seq);
+static uint32_t purgedCount();
+static const char *msAgo(uint64_t ns, uint64_t now, char *b, size_t n) {
+	if (!ns) snprintf(b, n, "never");
+	else snprintf(b, n, "%llu ms ago", now > ns ? (now - ns) / 1000000 : 0);
+	return b;
+}
+static void engineDumpMm(const XeQueue *fq) {   // g2hLog lines are at most 159 characters
+	const uint64_t now = nowNs();
+	char a[24], b[24], d[24];
+	g2hLog("  moves: in %u out %u sys %u purge %u fail %u busy %u evict %u; last %c %s\n", gStats.movesIn, gStats.movesOut,
+		gStats.mapSpills, purgedCount(), gStats.moveFails, gStats.moveBusy, gStats.evictScans,
+		gLastMove.ns ? gLastMove.kind : '-', msAgo(gLastMove.ns, now, a, sizeof(a)));
+	const uint32_t issued = gTlbSeq, done = gDev ? gDev->tlbDone : 0, mdone = gDev ? gDev->mTlbDone : 0;
+	g2hLog("  tlb: issued %u done %u/%u%s, last %s; deferred frees %u\n", issued, done, mdone,
+		gDev && !tlbSeqDone(issued) ? " PENDING" : "", msAgo(gTlbIssueNs, now, a, sizeof(a)), gNDef);
+	if (!fq || fq == kBindQueue || !fq->vm) return;
+	const XeVm *vm = fq->vm;
+	g2hLog("  vm asid %u%s: ptGen %u, queue flushed at %u%s; binds %u\n", vm->asid, vm->scratch ? " scratch" : "",
+		vm->ptGen, fq->flushedGen, vm->ptGen != fq->flushedGen ? " (changed since)" : "", vm->nBinds);
+	g2hLog("  vm unbind %s (n %u, tlb %u %s), remap %s, bind %s\n", msAgo(vm->unbindNs, now, a, sizeof(a)), vm->unbinds,
+		vm->unbindTlb, !vm->unbindTlb ? "-" : tlbSeqDone(vm->unbindTlb) ? "done" : "PENDING",
+		msAgo(vm->remapNs, now, b, sizeof(b)), msAgo(vm->bindNs, now, d, sizeof(d)));
+}
+
+static void engineDump(const char *why, const XeQueue *fq = nullptr) {
 	if (!gDev || !gDev->fwOn(true)) {
 		g2hLog("  dump (%s): no forcewake\n", why);
+		engineDumpMm(fq);
 		return;
 	}
 	const uint32_t f = gDev->mmioRead(0xcec4), d0 = gDev->mmioRead(0xceb8), d1 = gDev->mmioRead(0xcebc);
@@ -3187,6 +3239,7 @@ static void engineDump(const char *why) {
 			q->kernel ? "kernel" : q->name, q->cls, done, slotWord(q->slot, 1), q->submitted, gGucState[0][q->gucId], q->tdr,
 			q->banned ? " banned" : "", q->schedOffSent ? " off-sent" : "");
 	}
+	engineDumpMm(fq);
 }
 
 // ─── the submit worker (drm_sched's run_job work): ban requests from G2H, then every queue's FIFO in order ─────────
@@ -3210,7 +3263,7 @@ static void workRun(thread_call_param_t, thread_call_param_t) {
 					g2hLog("  guc_id %u%s reset by the GuC: %s (pid %d), class %u, seqno %u done %u%s\n", q->gucId,
 						g ? " media" : "", q->kernel ? "kernel" : q->name, q->pid, q->cls, q->submitted, seqnoOf(q->slot),
 						queueWhere(q, wh, sizeof(wh)));
-					if (!g) engineDump("GuC reset");
+					if (!g) engineDump("GuC reset", q);
 					if (q->kernel && !g) requestReset("kernel queue reset by the GuC");
 					else queueKickOff(q);
 				}
@@ -3378,7 +3431,7 @@ static void watchRun(thread_call_param_t, thread_call_param_t) {
 				if (!g && jobKarma(q, done + 1) <= 2) {
 					g2hLog("job timeout: queue guc_id %u (class %u) seqno %u never started in %llu ms: GT reset\n", q->gucId,
 						q->cls, done + 1, (now - q->wdSince) / 1000000);
-					engineDump("never started");
+					engineDump("never started", q);
 					reset = "a job the GuC never started";
 					continue;
 				}
@@ -4053,6 +4106,7 @@ static int boRemap(XeVm **vms, uint32_t nv, XeBo *bo) {
 		}
 		asm volatile("sfence" : : : "memory");
 		OSIncrementAtomic(reinterpret_cast<volatile SInt32 *>(&vm->ptGen));
+		vm->remapNs = nowNs();
 		if (ctx.unmapped) deferSeal(&ctx, tlbInvalidateRange(vm->asid, ctx.lo, ctx.hi));
 	}
 	return err;
@@ -4136,6 +4190,7 @@ static int boMove(XeClientState *c, XeBo *bo, bool toWindow, bool mayWait, const
 		if (!err) {
 			(toWindow ? gStats.movesIn : gStats.movesOut)++;
 			gStats.movedBytes += bo->size;
+			lastMoveSet(toWindow ? 'i' : 'o');
 		}
 	} else if (!nb) {
 	} else if (f.slot == ~0u ||
@@ -4333,7 +4388,10 @@ static int boMoveSys(XeClientState *c, XeBo *bo) {
 		sys->release();
 	}
 	if (err) gStats.mapSpillFails++;
-	else gStats.mapSpills++;
+	else {
+		gStats.mapSpills++;
+		lastMoveSet('s');
+	}
 	c->migrating--;
 	moveSetEnd(bo, &ms);
 	boPut(bo);
@@ -4362,6 +4420,7 @@ static struct {
 	uint32_t purged, purgedVram, purgedSys, notIdle, cpuMapped, held, failed, passes;
 	uint64_t purgedBytes;
 } gPurgeSt;
+static uint32_t purgedCount() { return gPurgeSt.purged; }
 static volatile SInt32 gPurgeScan;
 static uint32_t boMapsPrune(XeClientState *c, XeBo *bo, bool closing);
 
@@ -4412,7 +4471,13 @@ static int boPurge(XeClientState *c, XeBo *bo) {
 	asm volatile("sfence" : : : "memory");   // PTE writes (BAR2, write-combined) before the invalidation
 	for (uint32_t v = 0; v < nv; v++) {
 		OSIncrementAtomic(reinterpret_cast<volatile SInt32 *>(&vms[v]->ptGen));
-		if (ctx[v].unmapped || ctx[v].parked) deferSeal(&ctx[v], tlbInvalidateRange(vms[v]->asid, ctx[v].lo, ctx[v].hi));
+		if (ctx[v].unmapped || ctx[v].parked) {
+			const uint32_t seq = tlbInvalidateRange(vms[v]->asid, ctx[v].lo, ctx[v].hi);
+			deferSeal(&ctx[v], seq);
+			vms[v]->unbindNs = nowNs();   // rb8b
+			vms[v]->unbinds++;
+			vms[v]->unbindTlb = seq;
+		}
 	}
 	if (err) {   // a huge leaf could not be split: its PTEs back to the backing, the BO stays DONTNEED (xe keeps the state)
 		boRemap(vms, nv, bo);
@@ -4460,6 +4525,7 @@ static int boPurge(XeClientState *c, XeBo *bo) {
 	boMapsPrune(c, bo, true);       // the maps never used: their descriptors name the freed VRAM
 	gPurgeSt.purged++;
 	gPurgeSt.purgedBytes += size;
+	lastMoveSet('p');
 	return 0;
 }
 
@@ -8107,7 +8173,14 @@ static int xeIoctlLocked(XeClientState *c, uint32_t request, uint8_t *buf) {
 			// A bind over scratch entries needs no invalidation here: the next batch's ring prologue invalidates the TLB
 			// (batch_invalidate_tlb). What an unbind removed may still be in a TLB: the BOs it released are freed only
 			// once this invalidation has completed.
-			if (ctx.unmapped || ctx.parked) deferSeal(&ctx, tlbInvalidateRange(vm->asid, ctx.lo, ctx.hi));
+			if (ctx.unmapped || ctx.parked) {
+				const uint32_t seq = tlbInvalidateRange(vm->asid, ctx.lo, ctx.hi);
+				deferSeal(&ctx, seq);
+				vm->unbindNs = nowNs();   // rb8b: engineDump
+				vm->unbinds++;
+				vm->unbindTlb = seq;
+			}
+			if (b->num_binds) vm->bindNs = nowNs();
 			vmKernAdd(vm, ctx.clear);   // the clears of the BOs just bound: later execs wait for them even without this out-fence
 			// Signal the out-fences even when an op failed: Mesa allocates a bind-timeline point per bind and every
 			// later exec waits on it; a failed userptr import (ENOMEM) left the point unmaterialized and WindowServer's
