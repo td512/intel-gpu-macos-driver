@@ -2808,6 +2808,10 @@ static void dsExit(XeQueue *q, uint32_t *why) {
 	if (q->seqno != q->submitted || q->jobHead) {   // never: a fence has the slot's seqno and must not signal early
 		g2hLog("direct: queue guc_id %u armed with seqno %u handed out, %u submitted: banned\n", q->gucId, q->seqno,
 			q->submitted);
+		// the armed slot runs a no-op first, so the context stops polling and can leave the engine (the ban floor keeps
+		// the fences right whatever seqno the slot stores)
+		dsStubWrite(q, q->submitted + 1, 0, false, true);
+		dsMboxSet(q, q->submitted + 1);
 		queueBan(q);
 		return;
 	}
@@ -2880,6 +2884,9 @@ static bool dsEnter(XeQueue *q, const uint32_t *dw, uint32_t n, uint32_t seq, ui
 	// 9 Nov: any application queue, not only those with the low-latency hint (off by default now), and render too, where
 	// Metal and OpenCL apps run their work; WindowServer's next frame on the render class makes an armed queue leave
 	if (q->kernel || dsSystemUi(q) || nInl || !alone || !recent || !gDsMem || !gDsCall) return false;
+	// one armed queue in the whole device: since the render class may arm too, a compute and a render queue could
+	// otherwise both arm, and the one gDsQ no longer names would keep a slot nobody releases (review 9 Nov)
+	if (gDsQ && gDsQ != q) return false;
 	if (q->banned || q->closed || q->tdr || gResetting || gSuspended || gWedged) return false;
 	if (q->jobHead || seq != q->seqno + 1 || seq + 1 == 0) return false;
 	const uint32_t done = seqnoOf(q->slot);

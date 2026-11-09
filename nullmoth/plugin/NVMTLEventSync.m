@@ -1132,8 +1132,9 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
         }
         part->inflight = f;
         nvmtl_evfold_promise_part(part);   // before AHEAD: the worker may complete the part as soon as it sees it
-        nvmtl_part_release(&part->v2state, NVMTL_PART_AHEAD);
+        // counted before AHEAD too: the worker's nvmtl_gsub_finish may run as soon as it sees the part (review 9 Nov)
         const unsigned long long n = atomic_fetch_add(&gsub_inflight, 1) + 1;
+        nvmtl_part_release(&part->v2state, NVMTL_PART_AHEAD);
         if (n > atomic_load(&gsub_peak)) atomic_store(&gsub_peak, n);
         atomic_fetch_add(&gsub_ahead, 1);
         nvmtl_gsub_census();
@@ -1493,9 +1494,21 @@ static void nvmtl_v2_worker(void) {
     for (;;) { @autoreleasepool {
         nvmtl_vk_clock_refresh();
         if (nvmtl_gsub_ahead_on()) nvmtl_v2_ahead();
+        // every queue's head each round (review 9 Nov: a fixed 32 could leave a 33rd queue's ready command buffer
+        // until the next commit while the first 32 wait on events); arrays on the stack up to 32 queues, else from
+        // the heap, sized before the lock (a list that grew meanwhile counts as progress: the next round is larger)
         enum { MAXH = 32 };
-        __unsafe_unretained NVMTLCommandBuffer *heads[MAXH]; unsigned nh = 0;
-        __unsafe_unretained NVMTLCommandQueue *seen[MAXH]; unsigned ns = 0;
+        __unsafe_unretained NVMTLCommandBuffer *hbuf[MAXH]; __unsafe_unretained NVMTLCommandQueue *sbuf[MAXH];
+        nvmtl_plock_lock(&gV2State);
+        const NSUInteger want = nvmtl_pending_buffers.count;
+        os_unfair_lock_unlock(&gV2State);
+        const NSUInteger cap = want > MAXH ? want : MAXH;
+        __unsafe_unretained NVMTLCommandBuffer **heads = hbuf; __unsafe_unretained NVMTLCommandQueue **seen = sbuf;
+        if (cap > MAXH) {
+            heads = (__unsafe_unretained NVMTLCommandBuffer **)calloc(cap, sizeof(void *));
+            seen = (__unsafe_unretained NVMTLCommandQueue **)calloc(cap, sizeof(void *));
+        }
+        unsigned nh = 0, ns = 0; BOOL truncated = NO;
         uint64_t generation;
         nvmtl_plock_lock(&gV2State);
         generation = nvmtl_pump_generation;
@@ -1504,7 +1517,7 @@ static void nvmtl_v2_worker(void) {
             BOOL dup = NO;
             for (unsigned k = 0; k < ns; k++) if (seen[k] == q) { dup = YES; break; }
             if (dup) continue;
-            if (ns == MAXH) break;   // more queues than this: the rest next round (progress keeps the worker going)
+            if (ns == cap) { truncated = YES; break; }   // the list grew since it was sized: the rest next round
             seen[ns++] = q;
             NSMutableArray *res = q->_reservations;
             __autoreleasing NVMTLCommandBuffer *head = nil;
@@ -1517,7 +1530,7 @@ static void nvmtl_v2_worker(void) {
             if (head && head->_v2pending) heads[nh++] = head;
         }
         os_unfair_lock_unlock(&gV2State);
-        BOOL progress = NO;
+        BOOL progress = truncated;
         for (unsigned i = 0; i < nh; i++) {
             NVMTLCommandBuffer *cb = heads[i];
             sc_on_worker = 1;
@@ -1539,6 +1552,7 @@ static void nvmtl_v2_worker(void) {
             r = nil;
             [cb nvmtlFinishCallbacks];
         }
+        if (heads != hbuf) { free(heads); free(seen); }
         if (progress) continue;
         nvmtl_plock_lock(&gV2State);
         const BOOL quit = generation == nvmtl_pump_generation;
