@@ -448,6 +448,10 @@ static void present(Adopted *a) {
     if (a->window) {
         if (!egl.SwapBuffers(g_display, a->window)) LOG("eglSwapBuffers 0x%x", egl.GetError());
         if (++a->swaps <= 2 || !(a->swaps % 256)) LOG("%u swaps of %p", a->swaps, (void *)a->cgl);
+        if (a->swaps == 1 && g_log) {
+            const GLubyte *(*get_string)(GLenum) = (const GLubyte *(*)(GLenum))egl.GetProcAddress("glGetString");
+            if (get_string) LOG("%p draws with %s | %s", (void *)a->cgl, get_string(GL_RENDERER), get_string(GL_VERSION));
+        }
     } else {
         // No window: as Apple's GL, the swap only flushes.
         static void (*flush)(void);
