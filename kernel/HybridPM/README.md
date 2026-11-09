@@ -70,6 +70,14 @@ sysctl debug.hybridpm.enabled debug.hybridpm.why
 The model comes from the CPUID instruction itself, so OpenCore's `Cpuid1Data` (which changes what the kernel records)
 does not hide it.
 
+## Installing
+
+It ships in the release's `-efi.zip` and macOS package (`EFI/OC/Kexts/HybridPM.kext`, with `hpmstat`). On macOS,
+stage 4 of the install guide adds it: `efi.sh` and IntelXe Manager's EFI page copy it and put its `Kernel > Add` entry
+right below `Lilu.kext`'s when the CPU's name is one of these models, and leave it out with a note when the EFI does
+not load Lilu (Lilu is required and not shipped here). The Windows EFI tool (`IntelXe-EFI.ps1`) does not add it yet;
+by hand, see the install guide's *Hybrid Intel CPUs* section.
+
 ## Controls
 
 Live, as root (`sudo sysctl ...`):

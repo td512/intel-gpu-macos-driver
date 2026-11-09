@@ -29,7 +29,7 @@ This directory holds notes and the source of one ACPI table (`SSDT-ARCOFF.dsl`):
 
 ## ACPI
 
-- **An SSDT that sets the B580's `class-code` to `FFFFFFFF`** (here: `SSDT-ARCOFF`). It keeps `IONDRVFramebuffer` and Apple's display drivers off the card.
+- **An SSDT that sets the card's `class-code` to `FFFFFFFF`** (here: `SSDT-ARCOFF`; `efi.sh` and the app write the card's own ACPI path into a copy of it). It keeps `IONDRVFramebuffer` and Apple's display drivers off the card.
   - `IOPCIMatch` still lets IntelXe.kext match.
   - Once IntelXeFB holds the IOFramebuffer category, it writes a display class code back to the PCI nub, because IOPresentment's GPU node match needs one.
 
@@ -37,7 +37,8 @@ This directory holds notes and the source of one ACPI table (`SSDT-ARCOFF.dsl`):
 
 | Kext | Where | Why |
 |---|---|---|
-| `IntelXe.kext` | OpenCore `Kernel > Add` (EFI), `OSBundleRequired = Root` | plain IOKit, no Lilu; matches `8086:e20b`, brings the GPU up at start |
+| `IntelXe.kext` | OpenCore `Kernel > Add` (EFI), `OSBundleRequired = Root` | plain IOKit, no Lilu; matches `8086:e20b` (B580) and `8086:e20c` (B570), brings the GPU up at start |
+| `HybridPM.kext` (optional) | OpenCore `Kernel > Add` (EFI), below `Lilu.kext` | Lilu plugin for 12th-14th gen hybrid Intel CPUs (`kernel/HybridPM/`); `efi.sh` and the app add it where the CPU needs it |
 | `IntelXeFB.kext` | `/Library/Extensions` + Auxiliary KC | links IOGraphicsFamily, which is not available to OpenCore-injected kexts at that stage; matches at boot from the AuxKC |
 | `NMXAccel.kext`, `NMXAGDC.kext` | `/Library/Extensions` + Auxiliary KC | IOAccelerator and AppleGraphicsDeviceControl services for WindowServer |
 | `NVMTLDriverLib.bundle` | `/Library/GPUBundles/` | Metal driver plugin; `/Library/GPUBundles/nvmtl/` holds Mesa's `libvulkan_intel.dylib` and the codecs, `/Library/GPUBundles/nvmtl-allow.txt` the allow-list. The optional system-volume copy (Safari WebGL) is `/System/Library/Extensions/NVMTLDriver.bundle` |
@@ -72,7 +73,7 @@ Rebuild the AuxKC after changing any of the AuxKC kexts (`kmutil create` with al
 | `-nvoff` | NMXAccel stays off |
 | `nmxgamma=`, `nmxearlyreg=` | NMXAccel gamma / early registration |
 
-NVRAM variables: `intelxefb-vrr-modes` (Adaptive-Sync modes, the "Variable" refresh in Displays: on by default from 0.1.3; `0` turns them off, as does the boot-arg `intelxefb_vrrmodes=0`), `intelxe-guard` / `intelxe-accel-off` (panic-loop guard of the boot-time arming).
+NVRAM variables: `intelxefb-vrr-modes` (Adaptive-Sync modes, the "Variable" refresh in Displays: on by default from 0.1.3; `0` turns them off, as does the boot-arg `intelxefb_vrrmodes=0`), `intelxefb-hidpi` (the opt-in HiDPI modes, 0.1.3; also the boot-arg `intelxefb_hidpi=1`), `intelxe-guard` / `intelxe-accel-off` (panic-loop guard of the boot-time arming). From 0.1.4 the app's *Power and app* and *Display* pages write the user settings the kexts read at start: `intelxe-gpu-profile`, `intelxe-gpu-min-mhz`, `intelxe-gpu-max-mhz`, `intelxefb-hwcursor`, `intelxefb-dpms`, `intelxefb-vrr-lfc`, `intelxefb-vrr-floor`.
 
 Before 0.1.0 (private builds) these boot-args started with `b580` (`-b580off`, `b580surfvram=`, `-b580fbnovrr`, ...; the full list is in <!-- intelxe-rename: keep -->
 `kernel/IntelXe/uapi/intelxe_bootargs.h`). Release 0.1.x still reads an earlier name when the new one is absent and
