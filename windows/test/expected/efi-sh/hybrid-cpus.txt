@@ -1,0 +1,19 @@
+no|Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz
+yes|13th Gen Intel(R) Core(TM) i5-13400F
+yes|12th Gen Intel(R) Core(TM) i9-12900K
+no|12th Gen Intel(R) Core(TM) i5-12400F
+no|12th Gen Intel(R) Core(TM) i5-12500
+yes|12th Gen Intel(R) Core(TM) i5-12500H
+no|12th Gen Intel(R) Core(TM) i5-12600
+yes|12th Gen Intel(R) Core(TM) i5-12600K
+yes|12th Gen Intel(R) Core(TM) i5-12600H
+no|12th Gen Intel(R) Core(TM) i5-12490F
+no|12th Gen Intel(R) Core(TM) i3-12100F
+no|12th Gen Intel(R) Core(TM) i3-12300
+no|13th Gen Intel(R) Core(TM) i3-13100
+yes|13th Gen Intel(R) Core(TM) i7-13620H
+yes|14th Gen Intel(R) Core(TM) i9-14900K
+yes|14th Gen Intel(R) Core(TM) i5-14400F
+no|Intel(R) Core(TM) i3-14100
+no|Intel(R) Core(TM) Ultra 7 155H
+no|12th Gen Intel(R) Core(TM) i7-1255U

@@ -8,13 +8,14 @@ partition of a disk. It does not build an EFI: you keep the one you made with Do
 only what the driver needs, the rest of `config.plist` as it is (key order, comments, layout). These are the same
 changes as `efi.sh` makes on macOS.
 
-It comes in `intel-gpu-macos-driver-VERSION-efi.zip`, next to `EFI/OC/Kexts/IntelXe.kext` and
-`EFI/OC/ACPI/SSDT-ARCOFF.aml`. It runs in Windows PowerShell 5.1 (part of Windows 10 and 11) or PowerShell 7; nothing
+It comes in `intel-gpu-macos-driver-VERSION-efi.zip`, next to `EFI/OC/Kexts/IntelXe.kext`,
+`EFI/OC/Kexts/HybridPM.kext` and `EFI/OC/ACPI/SSDT-ARCOFF.aml`. It runs in Windows PowerShell 5.1 (part of Windows 10 and 11) or PowerShell 7; nothing
 needs to be installed.
 
 **Tested by its test suite only.** `windows/test/Test-IntelXe-EFI.ps1` runs every step against a throwaway EFI folder
 and passes on the test PC in Windows PowerShell 5.1 (November 2026), and its config-editing engine was checked
-on macOS against `efi.sh` (see [Testing](#testing)). The window and the EFI partition mounting have not been used on an
+on macOS against `efi.sh` (see [Testing](#testing)). The `HybridPM.kext` and adapted `SSDT-ARCOFF.aml` steps (10 November)
+are checked on macOS only so far, not yet on Windows. The window and the EFI partition mounting have not been used on an
 EFI that a PC then booted. Keep a USB stick with a working EFI, and read each plan before you confirm it.
 
 ## Starting it
@@ -54,15 +55,24 @@ starts it again elevated (Windows asks), with your folders filled in.
    copy `IntelXe.kext` (when missing or different), add or enable its `Kernel > Add` entry, turn off an earlier
    `B580.kext` entry, and add 1 to `Misc > Security > ExposeSensitiveData` (so that macOS tools find the EFI
    OpenCore booted from).
+   **On a 12th-14th gen Intel CPU with efficiency cores** (Alder Lake / Raptor Lake; not Core Ultra, not the desktop
+   models with P-cores only) it also copies `HybridPM.kext` and adds or enables its `Kernel > Add` entry **right below
+   `Lilu.kext`'s** (it is a Lilu plugin), as `efi.sh` does. The CPU is the one of the PC the tool runs on (its name
+   as Windows reports it, `hybridpm_cpu=` in `-Status`): run it on the PC that boots the EFI. Without `Lilu.kext` in
+   the EFI (its file and an enabled entry) it adds nothing and says so; an earlier build (`org.hackintosh.HybridPM`)
+   is replaced; an entry above Lilu's gets a note.
 6. **SSDT-ARCOFF.aml** is added only when you tick its box and give your card's ACPI path. **Not before macOS is
    installed:** the table hides the B580 from the display driver that the macOS installer runs on. Its path depends
    on the board; the shipped table is for `\_SB.PC00.PEG1.PEGP`. In Device Manager > Display adapters > the B580 (or
    "Microsoft Basic Display Adapter") > Properties > Details > **Location paths**, the line
    `ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000)` is `\_SB.PC00.PEG1.PEGP`; you can paste that
-   line. *Read from Windows* reads it when Windows runs on the PC with the card. With another path the tool does not
-   copy the table and says what to do (stage 4, step 2 of the install guide).
+   line. *Read from Windows* reads it when Windows runs on the PC with the card. **For another path** the tool
+   adapts the shipped table to it, as `efi.sh` does: it writes that path into both places of the table (and, for a
+   path with more or fewer parts, the lengths), checks the result and copies it ("the package's table adapted to
+   this card's port" in the plan); the bytes are those `efi.sh` writes. Your own `SSDT-ARCOFF.aml` that names the
+   card's path stays. Only a table the tool cannot read as the shipped one is left to you (the plan says why).
 7. **Undo last change...** puts back, from the newest backup, the files that change touched (`config.plist`,
-   `IntelXe.kext`, `SSDT-ARCOFF.aml`); each undo goes one change further back. It warns when `config.plist` was edited
+   `IntelXe.kext`, `HybridPM.kext`, `SSDT-ARCOFF.aml`); each undo goes one change further back. It warns when `config.plist` was edited
    after that change (putting it back loses those edits). The backups stay.
 
 Every change is planned first and carries the plan's SHA-256: if the EFI changed between the plan you read and your
@@ -96,7 +106,10 @@ EFI partition Windows booted from; when OpenCore is on another disk, use `-ListE
   `efi/sample-z790/config.plist` as stage 1 leaves it (`stage1/config.plist`), in `%TEMP%`, without administrator
   rights: status, both plans, apply with a wrong hash and with the right one, undo step by step, the confirmed and
   unconfirmed ACPI path, a damaged package, a different kext, an earlier `B580.kext` entry, a wider SIP value, adding
-  missing entries, the default backup place. Each `config.plist` it writes must hold the same keys and values as
+  missing entries, `HybridPM.kext` with a hybrid CPU's name (the sample's disabled entry turned on; a new entry
+  inserted below `Lilu.kext`; no Lilu), `SSDT-ARCOFF.aml` adapted to three other ports (byte for byte the tables
+  `efi.sh` writes from the 0.1.3 table), the default backup place. Each `config.plist` it writes must hold the same
+  keys and values as
   `efi.sh` writes for that step (`expected/efi-sh/`) and the same text as the engine writes on macOS
   (`expected/engine/`, layout kept). Run it with both PowerShells:
 
@@ -105,7 +118,8 @@ EFI partition Windows booted from; when OpenCore is on another disk, use `-ListE
   pwsh -File windows\test\Test-IntelXe-EFI.ps1
   ```
 
-  `-RealPackage DIR` uses an unpacked package's `IntelXe.kext` and `SSDT-ARCOFF.aml` instead of stand-ins.
+  `-RealPackage DIR` uses an unpacked package's `IntelXe.kext`, `HybridPM.kext` and `SSDT-ARCOFF.aml` instead of
+  stand-ins.
 - `make-expected.sh`, on macOS: makes `stage1/` and `expected/` with `efi.sh`, builds the script's engine (C# 5,
   compiled by `Add-Type` on Windows) with `dotnet` and checks it against them (`macos/EngineTest.cs`). `--check` only
   compares.
@@ -120,13 +134,14 @@ diskin EFI bölümü. EFI oluşturmaz: Dortania rehberiyle hazırladığınız E
 gerektirdiklerini değiştirir; `config.plist`'in geri kalanı olduğu gibi kalır (anahtar sırası, açıklamalar, düzen).
 macOS'ta `efi.sh`'in yaptığı değişikliklerin aynısıdır.
 
-`intel-gpu-macos-driver-SÜRÜM-efi.zip` içinde, `EFI/OC/Kexts/IntelXe.kext` ve `EFI/OC/ACPI/SSDT-ARCOFF.aml` ile birlikte
-gelir. Windows PowerShell 5.1'de (Windows 10 ve 11'de hazır gelir) ya da PowerShell 7'de çalışır; hiçbir şey kurmak
+`intel-gpu-macos-driver-SÜRÜM-efi.zip` içinde, `EFI/OC/Kexts/IntelXe.kext`, `EFI/OC/Kexts/HybridPM.kext` ve
+`EFI/OC/ACPI/SSDT-ARCOFF.aml` ile birlikte gelir. Windows PowerShell 5.1'de (Windows 10 ve 11'de hazır gelir) ya da PowerShell 7'de çalışır; hiçbir şey kurmak
 gerekmez.
 
 **Yalnızca deneme takımıyla denendi.** `windows/test/Test-IntelXe-EFI.ps1` her adımı geçici bir EFI klasöründe
 çalıştırıyor ve test bilgisayarında Windows PowerShell 5.1'de hatasız geçti (Kasım 2026); `config.plist`
-düzenleyen çekirdeği de macOS'ta `efi.sh`'e karşı denendi (bkz. [Deneme](#deneme)). Pencere ve EFI bölümünü bağlama,
+düzenleyen çekirdeği de macOS'ta `efi.sh`'e karşı denendi (bkz. [Deneme](#deneme)). `HybridPM.kext` ve uyarlanan
+`SSDT-ARCOFF.aml` adımları (10 Kasım) şimdilik yalnızca macOS'ta denendi, Windows'ta henüz değil. Pencere ve EFI bölümünü bağlama,
 ardından bilgisayarın açıldığı bir EFI üzerinde henüz kullanılmadı. Çalışan bir EFI'si olan USB belleği elinizde tutun
 ve her planı onaylamadan önce okuyun.
 
@@ -167,15 +182,24 @@ aracı klasörleriniz doldurulmuş olarak yönetici olarak yeniden başlatır (W
    *Driver: apply...* `IntelXe.kext`'i kopyalar (yoksa ya da farklıysa), `Kernel > Add` kaydını ekler ya da açar,
    eski bir `B580.kext` kaydını kapatır ve `Misc > Security > ExposeSensitiveData`'ya 1 ekler (macOS araçları
    OpenCore'un açıldığı EFI'yi bulabilsin diye).
+   **Verimlilik çekirdekli 12.-14. nesil Intel işlemcide** (Alder Lake / Raptor Lake; Core Ultra ve yalnızca P
+   çekirdekli masaüstü modelleri değil) `efi.sh` gibi `HybridPM.kext`'i de kopyalar ve `Kernel > Add` kaydını
+   **`Lilu.kext`'in kaydının hemen altına** ekler ya da açar (bir Lilu eklentisidir). İşlemci, aracın çalıştığı
+   bilgisayarınkidir (Windows'un bildirdiği adıyla; `-Status`'ta `hybridpm_cpu=`): aracı EFI'yi açacak bilgisayarda
+   çalıştırın. EFI'de `Lilu.kext` yoksa (dosyası ve açık bir kaydı) hiçbir şey eklemez ve bunu söyler; eski bir
+   derleme (`org.hackintosh.HybridPM`) değiştirilir; Lilu'nun üstündeki bir kayıt için not düşer.
 6. **SSDT-ARCOFF.aml** yalnızca kutusunu işaretleyip kartınızın ACPI yolunu yazarsanız eklenir. **macOS kurulmadan
    önce değil:** bu tablo B580'i macOS kurulum programının çalıştığı ekran sürücüsünden gizler. Yolu anakarta göre
    değişir; paketteki tablo `\_SB.PC00.PEG1.PEGP` içindir. Aygıt Yöneticisi > Görüntü bağdaştırıcıları > B580 (ya da
    "Microsoft Temel Görüntü Bağdaştırıcısı") > Özellikler > Ayrıntılar > **Konum yolları**'ndaki
    `ACPI(_SB_)#ACPI(PC00)#ACPI(PEG1)#ACPI(PEGP)#PCI(0100)#PCI(0000)` satırı `\_SB.PC00.PEG1.PEGP` demektir; satırı olduğu
    gibi yapıştırabilirsiniz. *Read from Windows*, Windows kartın takılı olduğu bilgisayarda çalışıyorsa yolu okur.
-   Başka bir yolda araç tabloyu kopyalamaz ve ne yapılacağını söyler (kurulum rehberi, 4. aşama, 2. madde).
+   **Başka bir yolda** araç, `efi.sh` gibi paketteki tabloyu o yola uyarlar: yolu tablodaki iki yere yazar (daha
+   çok ya da daha az parçalı bir yolda uzunlukları da), sonucu denetler ve kopyalar (planda "the package's table
+   adapted to this card's port"); baytlar `efi.sh`'in yazdıklarıyla aynıdır. Kartın yolunu adlandıran kendi
+   `SSDT-ARCOFF.aml`'niz kalır. Yalnızca paketteki tablo gibi okuyamadığı bir tablo size kalır (plan nedenini söyler).
 7. **Undo last change...** en yeni yedekten, o değişikliğin dokunduğu dosyaları (`config.plist`, `IntelXe.kext`,
-   `SSDT-ARCOFF.aml`) geri koyar; her geri alma bir değişiklik daha geriye gider. O değişiklikten sonra `config.plist`
+   `HybridPM.kext`, `SSDT-ARCOFF.aml`) geri koyar; her geri alma bir değişiklik daha geriye gider. O değişiklikten sonra `config.plist`
    düzenlendiyse uyarır (geri koymak o düzenlemeleri siler). Yedekler kalır.
 
 Her değişiklik önce planlanır ve planın SHA-256'sını taşır: okuduğunuz planla onayınız arasında EFI değiştiyse hiçbir
@@ -193,7 +217,9 @@ bölümün birimiyle `-MountEsp` kullanın.
 
 Depodaki `windows/test/`: `Test-IntelXe-EFI.ps1` Windows'ta betiği, `efi/sample-z790/config.plist`'ten 1. aşama
 hâline getirilmiş geçici bir EFI klasörüne karşı çalıştırır (yönetici hakkı gerekmez) ve yazdığı her `config.plist`'i
-`efi.sh`'in sonucuyla (aynı anahtarlar ve değerler) ve çekirdeğin macOS'taki çıktısıyla (aynı metin) karşılaştırır:
+`efi.sh`'in sonucuyla (aynı anahtarlar ve değerler) ve çekirdeğin macOS'taki çıktısıyla (aynı metin) karşılaştırır;
+hibrit bir işlemci adıyla `HybridPM.kext`'i ve üç başka yola uyarlanan `SSDT-ARCOFF.aml`'yi de dener (tablolar,
+`efi.sh`'in yazdıklarıyla bayt bayt aynı olmalı):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File windows\test\Test-IntelXe-EFI.ps1
