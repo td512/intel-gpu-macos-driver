@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // xe uAPI argument checks (xe_uapi_args.h), function by function after Linux drivers/gpu/drm/xe (MIT, dl/linux-xe):
-// xe_bo.c.
+// xe_bo.c, xe_sync.c, xe_wait_user_fence.c.
 #include "xe_uapi_args.h"
 #include <sys/errno.h>
 
@@ -35,4 +35,75 @@ int xeGemCreateExtensions(uint64_t ext, XeUserRead rd, void *ctx) {
 		ext = u.next_extension;
 	}
 	return 0;
+}
+
+// xe_sync_entry_parse, up to the object lookups
+int xeSyncEntryCheck(const drm_xe_sync &s, uint32_t flags) {
+	if ((s.flags & ~(uint32_t)DRM_XE_SYNC_FLAG_SIGNAL) || s.reserved[0] || s.reserved[1]) return EINVAL;
+	const bool signal = s.flags & DRM_XE_SYNC_FLAG_SIGNAL;
+	switch (s.type) {
+		case DRM_XE_SYNC_TYPE_SYNCOBJ:
+			if ((flags & kXeSyncParseLrMode) && signal) return EOPNOTSUPP;
+			if (s.addr >> 32) return EINVAL;   // upper_32_bits(sync_in.addr): the handle shares a union with addr
+			return 0;
+		case DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ:
+			if ((flags & kXeSyncParseLrMode) && signal) return EOPNOTSUPP;
+			if (s.addr >> 32) return EINVAL;
+			if (!s.timeline_value) return EINVAL;
+			return 0;
+		case DRM_XE_SYNC_TYPE_USER_FENCE:
+			if (flags & kXeSyncParseDisallowUfence) return EOPNOTSUPP;
+			if (!signal) return EOPNOTSUPP;
+			if (s.addr & 0x7) return EINVAL;
+			return 0;
+		default:
+			return EINVAL;
+	}
+}
+
+// xe_wait_user_fence_ioctl: VALID_FLAGS = ABSTIME, MAX_OP = LTE
+int xeUfenceArgsCheck(const drm_xe_wait_user_fence &a) {
+	if (a.extensions || a.pad || a.pad2 || a.reserved[0] || a.reserved[1]) return EINVAL;
+	if (a.flags & ~(uint16_t)DRM_XE_UFENCE_WAIT_FLAG_ABSTIME) return EINVAL;
+	if (a.op > DRM_XE_UFENCE_WAIT_OP_LTE) return EINVAL;
+	if (a.addr & 0x7) return EINVAL;
+	return 0;
+}
+
+// do_compare after copy_from_user
+int xeUfenceCompare(uint64_t rvalue, uint64_t value, uint64_t mask, uint16_t op) {
+	bool passed;
+	switch (op) {
+		case DRM_XE_UFENCE_WAIT_OP_EQ: passed = (rvalue & mask) == (value & mask); break;
+		case DRM_XE_UFENCE_WAIT_OP_NEQ: passed = (rvalue & mask) != (value & mask); break;
+		case DRM_XE_UFENCE_WAIT_OP_GT: passed = (rvalue & mask) > (value & mask); break;
+		case DRM_XE_UFENCE_WAIT_OP_GTE: passed = (rvalue & mask) >= (value & mask); break;
+		case DRM_XE_UFENCE_WAIT_OP_LT: passed = (rvalue & mask) < (value & mask); break;
+		case DRM_XE_UFENCE_WAIT_OP_LTE: passed = (rvalue & mask) <= (value & mask); break;
+		default: return EINVAL;   // XE_WARN_ON("Not possible"): the ioctl checked op
+	}
+	return passed ? 0 : 1;
+}
+
+// to_jiffies_timeout: negative = forever (and the field becomes MAX_SCHEDULE_TIMEOUT); 0 = no wait; else relative or
+// absolute. xe never waits less than one jiffy for a nonzero timeout (`return timeout ?: 1`): a deadline already passed
+// still gets one more look (now + 1).
+int64_t xeUfenceDeadline(drm_xe_wait_user_fence &a, uint64_t now) {
+	if (a.timeout < 0) {
+		a.timeout = INT64_MAX;
+		return INT64_MAX;
+	}
+	if (a.timeout == 0) return 0;
+	const uint64_t n = now > (uint64_t)INT64_MAX - 2 ? (uint64_t)INT64_MAX - 2 : now;
+	if (a.flags & DRM_XE_UFENCE_WAIT_FLAG_ABSTIME) return (uint64_t)a.timeout <= n ? (int64_t)(n + 1) : a.timeout;
+	// beyond MAX_SCHEDULE_TIMEOUT is "very long", not forever (MAX_SCHEDULE_TIMEOUT - 1)
+	if ((uint64_t)a.timeout >= (uint64_t)INT64_MAX - n) return INT64_MAX - 1;
+	return (int64_t)(n + (uint64_t)a.timeout);
+}
+
+// the tail of xe_wait_user_fence_ioctl
+void xeUfenceTimeoutLeft(drm_xe_wait_user_fence &a, uint64_t start, uint64_t now) {
+	if (a.flags & DRM_XE_UFENCE_WAIT_FLAG_ABSTIME) return;
+	const uint64_t spent = now > start ? now - start : 0;
+	a.timeout = spent >= (uint64_t)a.timeout ? 0 : a.timeout - (int64_t)spent;
 }
