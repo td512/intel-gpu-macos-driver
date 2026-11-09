@@ -68,10 +68,20 @@ private func planarMD5(_ pb: CVPixelBuffer, tenBit: Bool) -> String {
     return md5.finalize().map { String(format: "%02x", $0) }.joined()
 }
 
+/// A clip's video tracks through loadTracks (tracks(withMediaType:) is deprecated since macOS 13). The tests run off the
+/// main thread, so waiting for the completion here blocks nothing the loader needs.
+private func videoTracks(of asset: AVURLAsset) -> [AVAssetTrack] {
+    final class Loaded: @unchecked Sendable { var tracks: [AVAssetTrack] = [] }
+    let loaded = Loaded(), done = DispatchSemaphore(value: 0)
+    asset.loadTracks(withMediaType: .video) { tracks, _ in loaded.tracks = tracks ?? []; done.signal() }
+    done.wait()
+    return loaded.tracks
+}
+
 /// The compressed samples and format of a clip's video track.
 private func readClip(_ url: URL) -> ([CMSampleBuffer], CMFormatDescription)? {
     let asset = AVURLAsset(url: url)
-    guard let track = asset.tracks(withMediaType: .video).first, let reader = try? AVAssetReader(asset: asset) else { return nil }
+    guard let track = videoTracks(of: asset).first, let reader = try? AVAssetReader(asset: asset) else { return nil }
     let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
     reader.add(out)
     guard reader.startReading() else { return nil }
