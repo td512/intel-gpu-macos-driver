@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """gen.py OUTDIR: from the SDK's gliDispatch.h and libGL's exports generate
   map.c       measures which gl* symbol goes to which dispatch entry (a numbered trap in every entry, call every symbol)
   thunks.h    one thunk per entry: same signature as the table (GLIContext first), calls backend[i] without the GLIContext
