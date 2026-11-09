@@ -54,6 +54,10 @@ final class Manager: ObservableObject {
     /// A folder holding EFI/OC that the user chose instead of the partition (for this session only).
     @Published var efiFolder: String?
     @Published var requestedSection: Section?
+    /// the last install.sh run from the Driver page or the setup assistant, for its step list (InstallProgress.swift)
+    @Published var driverRun: DriverRun?
+    /// where the output of the run that started last begins in `log`
+    private(set) var runLogStart = 0
     private var logTimer: Timer?
 
     init() {
@@ -209,6 +213,7 @@ final class Manager: ObservableObject {
         lastResult = nil
         log += "\n== \(title)\n"
         let start = log.count
+        runLogStart = start
         // install.sh writes to the log file as it works; rebuilding the kernel collection takes minutes.
         logTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -238,6 +243,10 @@ final class Manager: ObservableObject {
         let command = "\(shellQuoted(package.script.path)) \(action.argument)"
         var succeeded = false
         perform(title: action.title, command: command, needsRoot: action.needsRoot, then: { result in
+            if var run = self.driverRun, run.action == action, !run.finished {
+                run.finished = true; run.succeeded = result.succeeded; run.cancelled = result.cancelled; run.end = Date()
+                self.driverRun = run
+            }
             if result.cancelled {
                 self.lastResult = String(localized: "Cancelled. Nothing changed.")
             } else if result.succeeded {
@@ -251,6 +260,8 @@ final class Manager: ObservableObject {
             // the EFI as it is after the refresh: a notice only when its IntelXe.kext is not this package's or could not be read
             if succeeded { self.efiNotice = EFINotice.after(action, status: self.efi) }
         })
+        // perform(title:) has set runLogStart for this run: the step list reads the output from there
+        driverRun = action.steps.isEmpty ? nil : DriverRun(action: action, logStart: runLogStart)
     }
 
     /// An EFI change through efi.sh, with the hash of the plan that was shown: efi.sh refuses if the EFI changed since.
@@ -317,6 +328,25 @@ extension DriverAction {
         case .uninstall: return String(localized: "Removes the kexts and the Metal driver from /Library. Backups stay. Remove IntelXe.kext from your EFI before you restart, or macOS comes up without the driver.")
         }
     }
+    /// one short line for the Driver page; the explanation is behind its (i) button
+    var caption: String {
+        switch self {
+        case .check: return String(localized: "Checks the system and the package; changes nothing.")
+        case .install: return String(localized: "Backs up, copies into /Library and rebuilds the kernel collection: a few minutes.")
+        case .repair: return String(localized: "Puts back installed files that differ from this package.")
+        case .undo: return String(localized: "Puts the last backup back.")
+        case .uninstall: return String(localized: "Removes the driver from /Library; backups stay.")
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .check: return "checkmark.shield"
+        case .install: return "arrow.down.circle"
+        case .repair: return "wrench.and.screwdriver"
+        case .undo: return "arrow.uturn.backward"
+        case .uninstall: return "trash"
+        }
+    }
     var confirms: Bool { self != .check }
     var destructive: Bool { self == .undo || self == .uninstall }
 }
@@ -352,15 +382,15 @@ enum Section: String, CaseIterable, Identifiable {
     }
     var icon: String {
         switch self {
-        case .system: return "gauge.with.dots.needle.33percent"
-        case .monitor: return "waveform.path.ecg"
+        case .system: return "square.grid.2x2"
+        case .monitor: return "gauge.medium"
         case .driver: return "shippingbox"
-        case .efi: return "externaldrive"
-        case .zink: return "cube.transparent"
+        case .efi: return "internaldrive"
+        case .zink: return "gamecontroller"
         case .display: return "display"
-        case .settings: return "slider.horizontal.3"
+        case .settings: return "gearshape"
         case .tests: return "checkmark.seal"
-        case .report: return "stethoscope"
+        case .report: return "doc.text.magnifyingglass"
         case .log: return "text.alignleft"
         }
     }
@@ -422,7 +452,7 @@ struct RootView: View {
             .frame(minWidth: 560, minHeight: 460)
         }
         .disabled(manager.busy != nil)
-        .overlay(alignment: .bottom) { BusyBar() }
+        .overlay(alignment: .bottom) { BusyBar().animation(.easeInOut(duration: 0.3), value: manager.driverRun?.dismissed) }
         .onChange(of: manager.requestedSection) { _, section in
             if let section { page.section = section; manager.requestedSection = nil }
         }
@@ -453,7 +483,17 @@ struct RootView: View {
 struct BusyBar: View {
     @EnvironmentObject var manager: Manager
     var body: some View {
-        if let busy = manager.busy {
+        if let run = manager.driverRun, !run.dismissed {
+            // an install, repair, undo or uninstall: its steps, while it runs and after, until closed
+            DriverRunView(run: run, closable: true)
+                .frame(width: 470)
+                .padding(16)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+                .shadow(color: .black.opacity(0.18), radius: 14, y: 4)
+                .padding(14)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if let busy = manager.busy {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 Text(busy)
@@ -468,52 +508,80 @@ struct BusyBar: View {
 struct Banners: View {
     @EnvironmentObject var manager: Manager
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 1) {
             if let notice = manager.efiNotice {
-                Banner(symbol: "externaldrive.badge.exclamationmark", tint: .orange, text: notice.text) {
-                    Button("Open the EFI page") { manager.requestedSection = .efi }
-                    Button("Done") { manager.efiNotice = nil }
-                }
+                Banner(symbol: "externaldrive.badge.exclamationmark", tint: .orange, text: notice.text,
+                       fixTitle: "Open the EFI page", fix: { manager.requestedSection = .efi },
+                       dismissHelp: "Done", dismiss: { manager.efiNotice = nil })
             }
             ForEach(manager.health) { issue in
-                Banner(symbol: "exclamationmark.triangle", tint: .orange, text: LocalizedStringKey(issue.text)) {
-                    switch issue.code {
-                    case "accel-off": Button("Clear the boot guard") { manager.clearBootGuard() }
-                    case "hidpi-half", "hidpi-stale": Button("Open the Display page") { manager.requestedSection = .display }
-                    case "ssv-mesa", "ssv-gone", "kext-version": Button("Open the Driver page") { manager.requestedSection = .driver }
-                    default: EmptyView()
-                    }
-                    Button("Create a report") { manager.requestedSection = .report }
-                    Button("Dismiss") { manager.dismiss(issue) }
-                }
+                let fix = fix(for: issue)
+                Banner(symbol: issue.code == "panics" ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill",
+                       tint: issue.code == "panics" ? .red : .orange, text: LocalizedStringKey(issue.text),
+                       fixTitle: fix?.0 ?? "Create a report", fix: fix?.1 ?? { manager.requestedSection = .report },
+                       dismissHelp: "Dismiss", dismiss: { manager.dismiss(issue) },
+                       report: fix == nil ? nil : { manager.requestedSection = .report })
             }
             if manager.rebootNeeded {
-                Banner(symbol: "arrow.clockwise", tint: .accentColor, text: "Restart to use the change.") {
-                    Button("Later") { manager.rebootNeeded = false }
-                }
+                Banner(symbol: "arrow.clockwise.circle.fill", tint: .accentColor, text: "Restart to use the change.",
+                       fixTitle: "Restart now", fix: { manager.restartNow() },
+                       dismissHelp: "Later", dismiss: { manager.rebootNeeded = false })
             }
+        }
+        .animation(.easeInOut(duration: 0.3), value: manager.health)
+        .animation(.easeInOut(duration: 0.3), value: manager.rebootNeeded)
+    }
+
+    /// the one thing the app can do about an issue itself; the others say what to do in their text
+    func fix(for issue: HealthIssue) -> (LocalizedStringKey, () -> Void)? {
+        switch issue.code {
+        case "accel-off": return ("Clear the boot guard", { manager.clearBootGuard() })
+        case "hidpi-half", "hidpi-stale": return ("Open the Display page", { manager.requestedSection = .display })
+        case "ssv-mesa", "ssv-gone", "kext-version": return ("Open the Driver page", { manager.requestedSection = .driver })
+        default: return nil
         }
     }
 }
 
-struct Banner<Actions: View>: View {
+/// A warning or notice across the top of the page: a coloured strip and icon on the left, the text, one fix button and a
+/// close button on the right. Creating a report, when that is not the fix, is in the banner's context menu.
+struct Banner: View {
     let symbol: String
     let tint: Color
     let text: LocalizedStringKey
-    @ViewBuilder let actions: Actions
+    var fixTitle: LocalizedStringKey?
+    var fix: (() -> Void)?
+    var dismissHelp: LocalizedStringKey = "Dismiss"
+    var dismiss: (() -> Void)?
+    var report: (() -> Void)?
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(tint)
-            Text(text).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            actions
+        HStack(spacing: 0) {
+            Rectangle().fill(tint).frame(width: 4)
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.title3).foregroundStyle(tint).frame(width: 22)
+                Text(text).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                if let fixTitle, let fix {
+                    Button(fixTitle, action: fix).fixedSize()
+                }
+                if let dismiss {
+                    Button(action: dismiss) { Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+                        .buttonStyle(.borderless)
+                        .help(Text(dismissHelp))
+                        .accessibilityLabel(Text(dismissHelp))
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
         }
-        .padding(.horizontal, 16).padding(.vertical, 9)
-        .background(tint.opacity(0.1))
+        .background(tint.opacity(0.12))
+        .contextMenu {
+            if let report { Button("Create a report", action: report) }
+            if let dismiss { Button(dismissHelp, action: dismiss) }
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
 
-/// One figure on the Overview page: a title, a value, a line under it and an optional action.
+/// One figure on the Overview page: a title, a value, a line under it and an optional action, on a card tinted by its state.
 struct OverviewCard<Action: View>: View {
     let title: LocalizedStringKey
     let symbol: String
@@ -522,30 +590,124 @@ struct OverviewCard<Action: View>: View {
     let detail: String
     @ViewBuilder var action: Action
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 6) {
-                Label(title, systemImage: symbol).font(.subheadline).foregroundStyle(tint)
-                Text(value).font(.title3.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                action
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).foregroundStyle(tint).frame(width: 18)
+                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+            Text(value).font(.title3.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            action
+        }
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+        .tintedCard(tint)
+        .animation(.easeInOut(duration: 0.35), value: value)
+        .animation(.easeInOut(duration: 0.35), value: tint)
+    }
+}
+
+/// Where the driver stands, for the Overview page's header.
+enum OverviewState: Equatable {
+    case working, update, problem, notInstalled
+    var color: Color {
+        switch self { case .working: return .green; case .update: return .orange; case .problem: return .red; case .notInstalled: return neutralTint }
+    }
+}
+
+extension Manager {
+    var driverInstalled: Bool { facts.installedVersion != nil || facts.driverFilesPresent }
+    var overviewState: OverviewState {
+        if !driverInstalled { return .notInstalled }
+        if !health.isEmpty || testResults.contains(where: { $0.state == .bad }) || !facts.kextLoaded || facts.bootGuardOff { return .problem }
+        return updateAvailable ? .update : .working
+    }
+}
+
+/// The top of the Overview page: the card, one line on its state, a coloured badge and the action that matters now.
+struct StatusHeader: View {
+    @EnvironmentObject var manager: Manager
+    var body: some View {
+        let state = manager.overviewState, f = manager.facts
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "cpu.fill")
+                .font(.system(size: 30, weight: .medium))
+                .foregroundStyle(state.color)
+                .frame(width: 58, height: 58)
+                .background(state.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(f.hasCard ? "Intel Arc B580" : f.metalDevice.isEmpty ? String(localized: "No Arc B580 found") : f.metalDevice)
+                    .font(.title2.weight(.semibold)).lineLimit(1)
+                Text(line(state)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(line(state))
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 8) {
+                StatusBadge(text: badge(state), color: state.color)
+                if state == .update {
+                    Button("Update on the Driver page") { manager.requestedSection = .driver }.buttonStyle(.borderedProminent)
+                } else if state == .problem && manager.health.isEmpty && !f.kextLoaded {
+                    Button("Open the EFI page") { manager.requestedSection = .efi }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .animation(.easeInOut(duration: 0.35), value: state)
+    }
+
+    func badge(_ state: OverviewState) -> String {
+        switch state {
+        case .working: return String(localized: "Driver working · \(manager.facts.installedVersion ?? "?")")
+        case .update: return String(localized: "Update available")
+        case .problem: return String(localized: "Problem")
+        case .notInstalled: return String(localized: "Not installed")
         }
     }
+
+    func line(_ state: OverviewState) -> String {
+        let f = manager.facts
+        switch state {
+        case .notInstalled:
+            return String(localized: "The driver is not installed on this Mac.")
+        case .problem:
+            if let issue = manager.health.first { return issue.text }
+            let bad = manager.testResults.filter { $0.state == .bad }.count
+            if bad > 0 { return String(localized: "\(bad) test(s) failed: see the Tests page.") }
+            return String(localized: "IntelXe.kext is not loaded: it comes from your EFI.")
+        case .update:
+            let latest = manager.release?.version?.description ?? "?"
+            if let installed = f.installedVersion { return String(localized: "Release \(latest) is out; this Mac has \(installed).") }
+            return String(localized: "Release \(latest) is out.")
+        case .working:
+            return f.metalDevice.isEmpty ? String(localized: "Installed and loaded.") : String(localized: "Metal runs on \(f.metalDevice).")
+        }
+    }
+}
+
+final class OptionalFlag: ObservableObject {
+    @Published var value: Bool?
 }
 
 struct SystemView: View {
     @EnvironmentObject var manager: Manager
     @StateObject var live = MonitorModel()
+    /// This Mac: open by itself while a requirement is not met, until the user opens or closes it
+    @StateObject var thisMacOpen = OptionalFlag()
     var body: some View {
+        let met = manager.facts.checks.allSatisfy { $0.state != .bad }
         Form {
-            Section2(title: "At a glance") {
+            SwiftUI.Section {
+                StatusHeader()
+            }
+            Section2(title: "At a glance", symbol: "square.grid.2x2") {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    OverviewCard(title: "Driver", symbol: "shippingbox", tint: manager.updateAvailable ? .orange : .accentColor,
+                    OverviewCard(title: "Driver", symbol: "shippingbox", tint: driverTint,
                                  value: installedText, detail: String(localized: "Latest release: \(releaseText)")) {
-                        if manager.updateAvailable { Button("Update on the Driver page") { manager.requestedSection = .driver }.controlSize(.small) }
+                        // the header carries the update button when the update is what matters now
+                        if manager.updateAvailable && manager.overviewState != .update {
+                            Button("Update on the Driver page") { manager.requestedSection = .driver }.controlSize(.small)
+                        }
                     }
-                    OverviewCard(title: "GPU", symbol: "cpu", tint: .accentColor,
+                    OverviewCard(title: "GPU", symbol: "cpu", tint: manager.facts.kextLoaded ? .green : neutralTint,
                                  value: live.now.actMHz.map { $0 == 0 ? String(localized: "Idle") : "\($0) MHz" } ?? (manager.facts.metalDevice.isEmpty ? String(localized: "No Metal device") : manager.facts.metalDevice),
                                  detail: [live.now.packageC.map { String(localized: "GPU \($0) °C") }, live.now.fps.map { String(format: "%.0f ", $0) + String(localized: "frames/s") }].compactMap { $0 }.joined(separator: " · ")) {
                         EmptyView()
@@ -557,28 +719,36 @@ struct SystemView: View {
                         EmptyView()
                     }
                     let bad = manager.testResults.filter { $0.state == .bad }.count, warn = manager.testResults.filter { $0.state == .warning }.count
-                    OverviewCard(title: "Last test", symbol: "checkmark.seal", tint: manager.testResults.isEmpty ? .secondary : bad > 0 ? .red : warn > 0 ? .orange : .green,
+                    OverviewCard(title: "Last test", symbol: "checkmark.seal", tint: manager.testResults.isEmpty ? neutralTint : bad > 0 ? .red : warn > 0 ? .orange : .green,
                                  value: manager.testResults.isEmpty ? String(localized: "Not run yet") : bad > 0 ? String(localized: "\(bad) failed") : warn > 0 ? String(localized: "\(warn) below expected") : String(localized: "All passed"),
                                  detail: manager.testResults.isEmpty ? String(localized: "About 25 seconds, on the Tests page.") : String(localized: "\(manager.testResults.count) checks this session.")) {
                         Button(manager.testResults.isEmpty ? "Run the GPU test" : "Open the Tests page") { manager.requestedSection = .tests }.controlSize(.small)
                     }
                 }
             }
-            Section2(title: "Setup") {
+            Section2(title: "Setup", symbol: "list.number") {
                 HStack {
                     Text("Step by step from a fresh macOS install to a working driver.").font(.callout).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Open the setup assistant") { manager.showSetup = true }
+                    if manager.overviewState == .notInstalled {
+                        Button("Open the setup assistant") { manager.showSetup = true }.buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Open the setup assistant") { manager.showSetup = true }
+                    }
                 }
             }
-            Section2(title: "This Mac") {
-                DisclosureGroup(manager.facts.checks.allSatisfy { $0.state != .bad } ? String(localized: "Requirements met") : String(localized: "Some requirements are not met")) {
+            Section2(title: "This Mac", symbol: "desktopcomputer") {
+                DisclosureGroup(isExpanded: Binding(get: { thisMacOpen.value ?? !met }, set: { thisMacOpen.value = $0 })) {
                     ForEach(manager.facts.checks) { check in
                         CheckRow(check: check)
                     }
                     if manager.facts.bootGuardOff {
                         Button("Clear the boot guard") { manager.clearBootGuard() }
                     }
+                } label: {
+                    Label(met ? String(localized: "Requirements met") : String(localized: "Some requirements are not met"),
+                          systemImage: met ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .foregroundStyle(met ? Color.green : Color.red)
                 }
             }
         }
@@ -591,6 +761,12 @@ struct SystemView: View {
                     .disabled(manager.probing)
             }
         }
+    }
+
+    var driverTint: Color {
+        if !manager.driverInstalled { return neutralTint }
+        if !manager.facts.kextLoaded { return .red }
+        return manager.updateAvailable ? .orange : .green
     }
 
     var installedText: String {
@@ -607,8 +783,18 @@ struct SystemView: View {
 
 struct Section2<Content: View>: View {
     let title: LocalizedStringKey
+    var symbol: String?
     @ViewBuilder let content: Content
-    var body: some View { SwiftUI.Section { content } header: { Text(title) } }
+    var body: some View {
+        SwiftUI.Section { content } header: {
+            if let symbol {
+                HStack(spacing: 7) {
+                    Image(systemName: symbol).foregroundStyle(Color.accentColor).frame(width: 20)
+                    Text(title)
+                }
+            } else { Text(title) }
+        }
+    }
 }
 
 struct CheckRow: View {
@@ -658,9 +844,9 @@ struct DriverView: View {
 
     var body: some View {
         Form {
-            Section2(title: "Package") {
+            Section2(title: "Package", symbol: "shippingbox") {
                 if let package = manager.package {
-                    LabeledContent("Folder") { Text(package.directory.path).textSelection(.enabled).lineLimit(2).truncationMode(.middle) }
+                    PathRow(title: "Folder", path: package.directory.path)
                     LabeledContent("Version") { Text(manager.packageStatus["package_version"] ?? "–") }
                     LabeledContent("Compared with what is installed") { Text(stateText) }
                     if !changedItems.isEmpty {
@@ -675,25 +861,32 @@ struct DriverView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    if let release = manager.release {
-                        Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: false) } }
-                    } else if let error = manager.releaseError {
-                        Text(error).foregroundStyle(.secondary)
+                    Caption("Downloads are checked against the release's published hashes.",
+                            detail: "The download is compared with the hashes published with the release. That finds a damaged file; it does not prove who made the release.")
+                    Spacer(minLength: 12)
+                    if let error = manager.releaseError, manager.release == nil {
+                        Text(error).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Button("Use a folder…") { manager.pickFolder(zink: false) }
+                    Button("Use a folder…") { manager.pickFolder(zink: false) }.fixedSize()
+                    if let release = manager.release {
+                        // the first thing to do on a machine without a package
+                        if manager.package == nil {
+                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: false) } }.buttonStyle(.borderedProminent).fixedSize()
+                        } else {
+                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: false) } }.fixedSize()
+                        }
+                    }
                 }
-                Text("The download is compared with the hashes published with the release. That finds a damaged file; it does not prove who made the release.")
-                    .font(.callout).foregroundStyle(.secondary)
             }
             if manager.package != nil {
-                Section2(title: "Install") {
-                    ActionRow(action: .install, enabled: enabled(.install), prominent: installRecommended) { page.confirming = .install }
+                Section2(title: "Install", symbol: "arrow.down.circle") {
+                    ActionRow(action: .install, enabled: enabled(.install), prominent: manager.installRecommended) { page.confirming = .install }
                     ActionRow(action: .repair, enabled: enabled(.repair)) { page.confirming = .repair }
                     ActionRow(action: .check, enabled: enabled(.check)) { manager.perform(.check) }
                 }
-                Section2(title: "Go back") {
+                Section2(title: "Go back", symbol: "arrow.uturn.backward") {
                     ActionRow(action: .undo, enabled: enabled(.undo)) { page.confirming = .undo }
-                    ActionRow(action: .uninstall, enabled: enabled(.uninstall), destructive: true) { page.confirming = .uninstall }
+                    ActionRow(action: .uninstall, enabled: enabled(.uninstall)) { page.confirming = .uninstall }
                 }
             }
             SSVSection()
@@ -725,8 +918,6 @@ struct DriverView: View {
         let missing = (st["items_missing"] ?? "").split(separator: ",").map { String($0) + "  " + String(localized: "(missing)") }
         return st["installed_state"] == "absent" ? [] : differ + missing
     }
-    var installRecommended: Bool { ["different", "partial", "absent"].contains(manager.packageStatus["installed_state"] ?? "") }
-
     var stateText: String {
         switch manager.packageStatus["installed_state"] {
         case "same": return String(localized: "The same")
@@ -738,19 +929,26 @@ struct DriverView: View {
     }
 }
 
+extension Manager {
+    /// the chosen package differs from what is installed: installing it is what the Driver page is for now
+    var installRecommended: Bool { package != nil && ["different", "partial", "absent"].contains(packageStatus["installed_state"] ?? "") }
+}
+
+/// A Driver page action: its symbol, one short line with the explanation behind (i), and its button (accent when it is
+/// the one that matters now, red when it takes something away).
 struct ActionRow: View {
     let action: DriverAction
     let enabled: Bool
     var prominent = false
-    var destructive = false
     let perform: () -> Void
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(action.explanation).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Spacer()
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: action.symbol).foregroundStyle(action.destructive ? Color.red : Color.accentColor).frame(width: 20)
+            Caption(text: Text(action.caption), detail: Text(action.explanation))
+            Spacer(minLength: 12)
             if prominent {
                 Button(action.title, action: perform).disabled(!enabled).fixedSize().buttonStyle(.borderedProminent)
-            } else if destructive {
+            } else if action.destructive {
                 Button(action.title, role: .destructive, action: perform).disabled(!enabled).fixedSize().foregroundStyle(.red)
             } else {
                 Button(action.title, action: perform).disabled(!enabled).fixedSize()
@@ -764,38 +962,41 @@ struct ZinkView: View {
     var body: some View {
         let f = manager.facts, ready = manager.zinkPackage != nil
         Form {
-            Section2(title: "Zink") {
-                Text("Optional. LWJGL 3 Java games such as Minecraft render through Mesa's Zink straight to Vulkan, instead of Apple's OpenGL. Native applications stay on Apple's OpenGL.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Section2(title: "Zink", symbol: "gamecontroller") {
+                Caption("Optional: Minecraft and other LWJGL 3 Java games through Mesa's Zink, straight to Vulkan.",
+                        detail: "Optional. LWJGL 3 Java games such as Minecraft render through Mesa's Zink straight to Vulkan, instead of Apple's OpenGL. Native applications stay on Apple's OpenGL.")
                 LabeledContent("Installed") {
                     Label(f.zinkInstalled ? String(localized: "Yes") : String(localized: "No"), systemImage: f.zinkInstalled ? "checkmark.circle.fill" : "circle.dashed")
                         .foregroundStyle(f.zinkInstalled ? .green : .secondary)
                 }
             }
-            Section2(title: "Every LWJGL application") {
+            Section2(title: "Every LWJGL application", symbol: "square.stack.3d.up") {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(f.zinkGlobal ? "On: LWJGL 3 applications use Zink." : "Off: they use Apple's OpenGL.")
-                        Text("It applies to applications started afterwards. Running ones must be restarted. A single game can use Zink without this, through its launcher's Java arguments.")
-                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Caption("It applies to applications started afterwards. Running ones must be restarted.",
+                                detail: "It applies to applications started afterwards. Running ones must be restarted. A single game can use Zink without this, through its launcher's Java arguments.")
                     }
                     Spacer()
                     if f.zinkGlobal {
                         Button(ZinkAction.globalOff.title) { manager.performZink(.globalOff) }.fixedSize()
+                    } else if f.zinkInstalled {
+                        // installed and not used yet: turning it on is what this page is for now
+                        Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.fixedSize().buttonStyle(.borderedProminent)
                     } else {
-                        Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.fixedSize().disabled(!f.zinkInstalled)
+                        Button(ZinkAction.globalOn.title) { manager.performZink(.globalOn) }.fixedSize().disabled(true)
                     }
                 }
             }
-            Section2(title: "Install") {
+            Section2(title: "Install", symbol: "arrow.down.circle") {
                 if let package = manager.zinkPackage {
-                    LabeledContent("Package") { Text(package.directory.path).lineLimit(2).truncationMode(.middle).textSelection(.enabled) }
+                    PathRow(title: "Package", path: package.directory.path)
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 14) {
                         Text("Installing, the self-test and removing need the Zink package.").foregroundStyle(.secondary)
                         Spacer()
                         if let release = manager.release, release.asset("-zink-gl.zip") != nil {
-                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: true) } }.fixedSize()
+                            Button("Download \(release.tag_name)") { Task { await manager.downloadLatest(zink: true) } }.fixedSize().buttonStyle(.borderedProminent)
                         } else if manager.release != nil {
                             Text("The latest release has no Zink package.").foregroundStyle(.secondary)
                         }

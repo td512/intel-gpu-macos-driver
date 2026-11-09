@@ -29,6 +29,9 @@ func renderSnapshots(into folder: String) {
         + "candidate=00000000-0000-4000-8000-000000000001|disk0s1|WD Blue SN550 1TB|1000 GB||unknown\n"
         + "candidate=00000000-0000-4000-8000-000000000002|disk5s1|SanDisk Ultra|31 GB|/Volumes/EFI|yes\n")
     choosing.efiNotice = .unchecked
+    choosing.health = [HealthIssue(code: "accel-off", text: String(localized: "The boot guard holds acceleration off: earlier boots did not reach a healthy desktop. Clear it once you know why."), key: "on"),
+                       HealthIssue(code: "panics", text: String(localized: "macOS restarted after a kernel panic (\("9 Nov 2026 10:15")). A diagnostics report holds its text."), key: "x")]
+    choosing.rebootNeeded = true
     // the Display page as on the B580 test machine: supported and off, and on after --on before the restart
     let hidpiOff = Manager(), hidpiPending = Manager()
     hidpiOff.hidpi = HiDPIStatus(text: "hidpi_supported=1\nhidpi_nvram=0\nhidpi_override=none\nhidpi_windowserver=0\nhidpi_active=0\ndisplay=4c2d:750c\nnative=2560x1440\n")
@@ -41,25 +44,83 @@ func renderSnapshots(into folder: String) {
     }
     setupDone.facts.installedVersion = "0.1.4"; setupDone.facts.kextLoaded = true
     setupDone.testResults = [TestResult(title: "Metal", value: "ok", state: .good)]
+    // the Overview page on a working B580 machine, and on one with a newer release out
+    let working = Manager(), outdated = Manager()
+    for m in [working, outdated] {
+        m.facts = setupDone.facts; m.facts.driverFilesPresent = true; m.facts.metalDevice = "Intel Arc B580"; m.facts.cardName = "Intel Arc B580 (8086:e20b)"
+        m.testResults = setupDone.testResults
+    }
+    outdated.release = try? JSONDecoder().decode(Release.self, from: Data(#"{"tag_name":"v0.1.5","html_url":"https://example.invalid/r","body":"","prerelease":false,"assets":[]}"#.utf8))
+    // an install half way (copying the Metal driver, the Kernel Collection next) and one that has finished
+    let installing = Manager(), installed = Manager()
+    let output = "== intel-gpu-macos-driver 0.1.4: checks\n  ok    macOS 26.7.1\n== 0 problem(s)\n== backup: /Library/Application Support/intel-gpu-macos-driver/backup-20261109-101500\n"
+        + "  ok    /Library/Extensions/IntelXeFB.kext\n  ok    /Library/Extensions/NMXAccel.kext\n  ok    /Library/GPUBundles/NVMTLDriverLib.bundle\n"
+    installing.log = output; installing.busy = DriverAction.install.title
+    installing.driverRun = DriverRun(action: .install, logStart: 0)
+    installed.log = output + "== rebuilding the Auxiliary Kernel Collection (log: /tmp/auxkc)\n  ok    /Library/KernelCollections/AuxiliaryKernelExtensions.kc\n== done. Reboot.\n"
+    var finishedRun = DriverRun(action: .install, logStart: 0); finishedRun.finished = true; finishedRun.succeeded = true; finishedRun.end = finishedRun.start.addingTimeInterval(207)
+    installed.driverRun = finishedRun
+    // the Monitor page with five minutes of made-up readings: a game started half way
+    let monitor = MonitorModel()
+    monitor.live = false
+    let now = Date()
+    for i in 0..<300 {
+        let t = now.addingTimeInterval(Double(i - 299)), busy = i > 150
+        let wave = sin(Double(i) / 9)
+        monitor.clockHistory.append(MonitorPoint(t: t, v: busy ? 2650 + 150 * wave : (i % 40 < 6 ? 1900 : 0)))
+        monitor.tempHistory.append(MonitorPoint(t: t, v: busy ? 58 + Double(i - 150) / 15 + 1.5 * wave : 44 + 0.8 * wave))
+        monitor.fpsHistory.append(MonitorPoint(t: t, v: busy ? 160 + 18 * wave : (i % 40 < 6 ? 60 : 2)))
+    }
+    monitor.now = MonitorSample(fps: 171, actMHz: 2780, reqMHz: 2850, maxMHz: 2850, packageC: 67, vramC: 72, vramUsedMB: 3420, mode: "2560x1440, 180 Hz")
+    // the Tests page after a quick test with one result below expectations
+    let tested = Manager()
+    tested.testResults = [TestResult(title: "Compute (vector add)", value: "correct", state: .good),
+                          TestResult(title: "Drawing", value: "correct", state: .good),
+                          TestResult(title: "Memory bandwidth", value: "391 GB/s", state: .good),
+                          TestResult(title: "FP32 compute", value: "9.1 TFLOPS", state: .warning, help: "Below what the card should reach: close other GPU work and run it again."),
+                          TestResult(title: "HEVC decode", value: "correct", state: .good)]
     print("setup steps: driver page \(setupDriver.setupStep.number), last page \(setupDone.setupStep.number)")
     let pages: [(String, AnyView, CGFloat)] = [
         ("setup-driver", AnyView(SetupView(close: {}).environmentObject(setupDriver).background(Color(nsColor: .windowBackgroundColor))), 520), ("setup-done", AnyView(SetupView(close: {}).environmentObject(setupDone).background(Color(nsColor: .windowBackgroundColor))), 520),
-        ("system", AnyView(SystemView().environmentObject(manager)), 640), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
+        ("system", AnyView(SystemView().environmentObject(manager)), 640), ("system-working", AnyView(SystemView().environmentObject(working)), 640),
+        ("system-update", AnyView(SystemView().environmentObject(outdated)), 640),
+        ("monitor", AnyView(MonitorView(model: monitor).environmentObject(working)), 640),
+        ("tests", AnyView(TestsView().environmentObject(tested)), 520), ("report", AnyView(ReportView().environmentObject(tested)), 560),
+        ("settings", AnyView(SettingsView().environmentObject(tested)), 760),
+        ("about", AnyView(AboutView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))), 760),
+        ("install-running", AnyView(BusyBar().environmentObject(installing).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 330),
+        ("install-done", AnyView(BusyBar().environmentObject(installed).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).background(Color(nsColor: .windowBackgroundColor))), 360),
+        ("setup-installing", AnyView(SetupView(close: {}).environmentObject(installing.copySetup(from: setupDriver)).background(Color(nsColor: .windowBackgroundColor))), 520), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
         ("efi", AnyView(EFIView().environmentObject(manager)), 1500), ("efi-choose", AnyView(EFIView().environmentObject(choosing)), 640),
         ("zink", AnyView(ZinkView().environmentObject(manager)), 640),
-        ("display-off", AnyView(DisplayView().environmentObject(hidpiOff)), 480), ("display-pending", AnyView(DisplayView().environmentObject(hidpiPending)), 480), ("banners", AnyView(Banners().environmentObject(choosing).background(Color(nsColor: .windowBackgroundColor))), 120),
+        ("display-off", AnyView(DisplayView().environmentObject(hidpiOff)), 480), ("display-pending", AnyView(DisplayView().environmentObject(hidpiPending)), 480), ("banners", AnyView(Banners().environmentObject(choosing).frame(maxHeight: .infinity, alignment: .top).background(Color(nsColor: .windowBackgroundColor))), 260),
     ]
+    // each page in the light appearance (name.png) and the dark one (name-dark.png), in a key window so that the
+    // default and prominent buttons show their accent colour as they do in the app
     for (name, page, height) in pages {
-        let host = NSHostingView(rootView: page.frame(width: 640, height: height))
-        host.frame = NSRect(x: 0, y: 0, width: 640, height: height)
-        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
-        host.cacheDisplay(in: host.bounds, to: bitmap)
-        try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/\(name).png"))
+        for (suffix, appearance) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
+            let host = NSHostingView(rootView: page.frame(width: 640, height: height).environment(\.controlActiveState, .key))
+            host.frame = NSRect(x: 0, y: 0, width: 640, height: height)
+            let window = SnapshotWindow(contentRect: NSRect(x: -20000, y: -20000, width: 640, height: height), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: appearance)
+            window.contentView = host
+            window.orderFrontRegardless()
+            window.makeKey()
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            if let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/\(name)\(suffix).png"))
+            }
+            window.orderOut(nil)
+        }
     }
+}
+
+/// A borderless window that can be the key window, for the snapshots.
+final class SnapshotWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
 
 /// The fake EFI the EFI test leaves behind, as stage 1 leaves it, for the EFI page's snapshot.
@@ -211,4 +272,9 @@ func selfTest() {
     if let folder = selfTestEFIFolder { try? FileManager.default.removeItem(at: URL(fileURLWithPath: folder).deletingLastPathComponent()) }
     print(failures == 0 ? "selftest passed" : "selftest: \(failures) failure(s)")
     exit(failures == 0 ? 0 : 1)
+}
+
+extension Manager {
+    /// this manager with another's facts and package, for a snapshot of the setup assistant during a run
+    @MainActor func copySetup(from other: Manager) -> Manager { facts = other.facts; package = other.package; return self }
 }

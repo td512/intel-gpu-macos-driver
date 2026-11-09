@@ -62,21 +62,25 @@ struct ReportView: View {
 
     var body: some View {
         Form {
-            Section2(title: "Diagnostics report") {
-                Text("Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop.")
-                    .font(.callout).foregroundStyle(.secondary)
+            Section2(title: "Diagnostics report", symbol: "doc.text.magnifyingglass") {
+                Caption("Changes and uploads nothing; private details are removed. About a minute.",
+                        detail: "Collects what we need to find a problem: the hardware, the driver's state, logs, kernel panics and the OpenCore config. It changes nothing and uploads nothing. Serial numbers, names, network addresses and Wi-Fi names are removed before the file is written. It takes about a minute; the file goes on your Desktop.")
                 CaptionedToggle(title: "Administrator mode", caption: "Asks for your password. Adds the OpenCore config from the EFI partitions, the driver's root-only counters and the CPU clock.", isOn: $admin)
                 CaptionedToggle(title: "ACPI tables", caption: "The DSDT and SSDTs as macOS loaded them; never the tables that hold the Windows licence.", isOn: $acpi)
                 CaptionedToggle(title: "Staged-probe results", caption: "Only for a GPU that is not supported yet.", isOn: $probe)
-                Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
-                    .keyboardShortcut(.defaultAction)
+                HStack {
+                    Spacer()
+                    Button("Create a diagnostics report") { manager.createReport(acpi: acpi, probe: probe, admin: admin) }
+                        .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                }
             }
             if let id = manager.reportID {
-                Section2(title: "Last report") {
+                Section2(title: "Last report", symbol: "doc.text") {
                     LabeledContent("Report ID") { Text(id).textSelection(.enabled).font(.body.monospaced()) }
                     HStack {
                         if let file = manager.reportFile {
                             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)]) }
+                                .help(displayPath(file))
                         }
                         Button("Copy the ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(id, forType: .string) }
                         Spacer()
@@ -84,7 +88,7 @@ struct ReportView: View {
                         Link("Ask for a new GPU", destination: issueFormURL(template: "2-new-hardware.yml", field: "reports", value: id))
                     }
                 }
-                Section2(title: "What the report found") {
+                Section2(title: "What the report found", symbol: "list.bullet") {
                     if manager.reportWarnings.isEmpty {
                         Label("No known problem was recognised.", systemImage: "checkmark.circle").foregroundStyle(.green)
                     }
@@ -96,7 +100,7 @@ struct ReportView: View {
                     }
                 }
             } else {
-                Section2(title: "Forms") {
+                Section2(title: "Forms", symbol: "exclamationmark.bubble") {
                     LabeledContent { Link("Report a bug", destination: issueFormURL(template: "1-bug.yml", field: "report", value: nil)) } label: {
                         Text("Something does not work").font(.callout) }
                     LabeledContent { Link("Ask for a new GPU", destination: issueFormURL(template: "2-new-hardware.yml", field: "reports", value: nil)) } label: {
@@ -124,11 +128,11 @@ struct TestsView: View {
     @EnvironmentObject var manager: Manager
     var body: some View {
         Form {
-            Section2(title: "GPU test") {
-                Text("About 25 seconds: checks that the GPU computes and draws correctly, checks the features apps use and video decoding and encoding, measures its compute rate, bandwidth and latency, and at the end opens a small window for 5 seconds to measure smoothness. Close games and other GPU-heavy apps first.")
-                    .font(.callout).foregroundStyle(.secondary)
+            Section2(title: "GPU test", symbol: "checkmark.seal") {
+                Caption("About 25 seconds. Close games and other GPU-heavy apps first.",
+                        detail: "About 25 seconds: checks that the GPU computes and draws correctly, checks the features apps use and video decoding and encoding, measures its compute rate, bandwidth and latency, and at the end opens a small window for 5 seconds to measure smoothness. Close games and other GPU-heavy apps first.")
                 HStack {
-                    Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil)
+                    Button("Test the GPU") { manager.runTest() }.disabled(manager.testing != nil).buttonStyle(.borderedProminent)
                     Button("Long test (about 2 minutes)") { manager.runTest(long: true) }.disabled(manager.testing != nil)
                         .help(String(localized: "Checks most of the video memory twice and keeps the GPU at full load for a minute, watching for errors, the clock and the temperature."))
                     if let step = manager.testing { ProgressView().controlSize(.small); Text(step).foregroundStyle(.secondary) }
@@ -146,7 +150,7 @@ struct TestsView: View {
                 }
             }
             if manager.testResults.contains(where: { $0.state == .bad }) {
-                Section2(title: "Something failed") {
+                Section2(title: "Something failed", symbol: "exclamationmark.triangle") {
                     HStack {
                         Text("A diagnostics report holds what we need to find out why.").font(.callout)
                         Spacer()

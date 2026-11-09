@@ -12,7 +12,13 @@ struct ManagerApp: App {
         }
         .windowToolbarStyle(.unified)
         .defaultSize(width: 980, height: 720)
-        .commands { CommandGroup(replacing: .newItem) {} }
+        .commands {
+            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .appInfo) { AboutMenuItem() }
+        }
+        Window("About IntelXe Manager", id: "about") { AboutView() }
+            .windowResizability(.contentSize)
+            .windowStyle(.hiddenTitleBar)
         MenuBarExtra(isInserted: $menuBarItem) {
             MenuBarContent(model: menuModel).onAppear { menuModel.start() }
         } label: {

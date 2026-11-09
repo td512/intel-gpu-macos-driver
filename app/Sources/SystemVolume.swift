@@ -131,9 +131,9 @@ struct SSVSection: View {
 
     var body: some View {
         let s = manager.ssv
-        Section2(title: "Safari and WebKit") {
-            Text("Safari draws its pages in a process that may load code only from the system volume. To use the GPU there, the Metal driver needs a second copy on the system volume; without it Safari works, drawing in software.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        Section2(title: "Safari and WebKit", symbol: "safari") {
+            Caption("Safari on the GPU needs a second copy of the Metal driver on the system volume.",
+                    detail: "Safari draws its pages in a process that may load code only from the system volume. To use the GPU there, the Metal driver needs a second copy on the system volume; without it Safari works, drawing in software.")
             LabeledContent("System-volume copy") {
                 Label(stateText(s), systemImage: symbol(s.state)).foregroundStyle(color(s.state))
                     .multilineTextAlignment(.trailing)
@@ -153,7 +153,8 @@ struct SSVSection: View {
                 }
             }
             if s.installed || s.recordedBuild != nil {
-                CaptionedToggle(title: "Tell me at login when a macOS update removed it", caption: "A macOS update replaces the system volume, and this copy with it; Safari then draws in software again until it is installed once more. The same check as Check the driver at login on the Power and app page.",
+                CaptionedToggle(title: "Tell me at login when a macOS update removed it", caption: "A macOS update replaces the system volume, and this copy with it.",
+                                detail: "A macOS update replaces the system volume, and this copy with it; Safari then draws in software again until it is installed once more. The same check as Check the driver at login on the Power and app page.",
                                 isOn: Binding(get: { page.loginCheck }, set: { setLoginCheck($0); page.loginCheck = loginCheckEnabled() }))
             }
             if s.packageScript == nil {
@@ -164,15 +165,16 @@ struct SSVSection: View {
                 HStack(spacing: 10) {
                     Button(SSVAction.preflight.title) { manager.performSSV(.preflight) }
                     Spacer()
+                    // accent only when the driver itself is installed as the package has it: that comes first
                     if s.state == .notUsed {
-                        Button(SSVAction.use.title) { page.confirming = .use }.buttonStyle(.borderedProminent)
+                        Button(SSVAction.use.title) { page.confirming = .use }.buttonStyle(ProminentUnless(plain: manager.installRecommended))
                     }
                     // a changed seal does not boot with Apple Secure Boot on: install only once the EFI says it is off
                     if s.state == .notPackage {
                         Button(String(localized: "Install this package's copy")) { page.confirming = .install }.disabled(secureBootOK != true)
                     } else if installable {
                         Button(s.installed || s.recordedBuild != nil ? String(localized: "Install this package's copy") : SSVAction.install.title) { page.confirming = .install }
-                            .buttonStyle(.borderedProminent).disabled(secureBootOK != true)
+                            .buttonStyle(ProminentUnless(plain: manager.installRecommended)).disabled(secureBootOK != true)
                     }
                     if s.installed {
                         Button(String(localized: "Remove…"), role: .destructive) { page.confirming = .uninstall }

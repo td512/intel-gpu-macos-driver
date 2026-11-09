@@ -527,3 +527,87 @@
 "A dialog after login only when something needs attention, such as a macOS update that removed the system-volume copy." = "Girişten sonra yalnızca ilgilenmeniz gereken bir şey varsa (örneğin bir macOS güncellemesi sistem birimi kopyasını sildiyse) bir pencere gösterir.";
 "Fast GPU response for apps" = "Uygulamalar için hızlı GPU yanıtı";
 "Keeps the GPU clock up while an app's GPU work runs, instead of letting short bursts run at the lowest clock: games, Metal and OpenCL apps and benchmarks respond faster (Geekbench 4-6 percent higher). The desktop itself is not affected; an idle GPU sleeps either way. Applies to apps started afterwards." = "Bir uygulamanın GPU işi çalışırken GPU saatini yüksek tutar; kısa iş patlamaları en düşük saatte çalışmaz: oyunlar, Metal ve OpenCL uygulamaları ve benchmark'lar daha hızlı yanıt verir (Geekbench yüzde 4-6 daha yüksek). Masaüstünün kendisi etkilenmez; boştaki GPU her iki durumda da uyur. Bundan sonra başlatılan uygulamalarda geçerlidir.";
+
+/* Look and feel: shared pieces */
+"More information" = "Ayrıntılar";
+
+/* Look and feel: the Overview page's header */
+"Driver working · %@" = "Sürücü çalışıyor · %@";
+"Update available" = "Güncelleme var";
+"The driver is not installed on this Mac." = "Sürücü bu Mac'te kurulu değil.";
+"%lld test(s) failed: see the Tests page." = "%lld test başarısız: Testler sayfasına bakın.";
+"IntelXe.kext is not loaded: it comes from your EFI." = "IntelXe.kext yüklü değil: Bu kext EFI'nizden gelir.";
+"Release %@ is out; this Mac has %@." = "%1$@ sürümü çıktı; bu Mac'te %2$@ var.";
+"Release %@ is out." = "%@ sürümü çıktı.";
+"Installed and loaded." = "Kurulu ve yüklü.";
+"Metal runs on %@." = "Metal, %@ üzerinde çalışıyor.";
+
+/* Look and feel: one short line per row, the rest behind (i) */
+"Checks the system and the package; changes nothing." = "Sistemi ve paketi denetler; hiçbir şeyi değiştirmez.";
+"Backs up, copies into /Library and rebuilds the kernel collection: a few minutes." = "Yedek alır, /Library'ye kopyalar ve kernel collection'ı yeniden oluşturur: Birkaç dakika sürer.";
+"Puts back installed files that differ from this package." = "Kurulu dosyalardan bu paketle uyuşmayanları yeniden kopyalar.";
+"Puts the last backup back." = "Son yedeği geri koyar.";
+"Removes the driver from /Library; backups stay." = "Sürücüyü /Library'den siler; yedekler kalır.";
+"Downloads are checked against the release's published hashes." = "İndirilen dosyalar, sürümle yayımlanan özetlerle karşılaştırılır.";
+"Optional: Minecraft and other LWJGL 3 Java games through Mesa's Zink, straight to Vulkan." = "İsteğe bağlı: Minecraft ve diğer LWJGL 3 Java oyunları Mesa'nın Zink'iyle doğrudan Vulkan üzerinden çizer.";
+"Safari on the GPU needs a second copy of the Metal driver on the system volume." = "Safari'nin GPU'yu kullanması için Metal sürücüsünün sistem diskinde ikinci bir kopyası gerekir.";
+"A macOS update replaces the system volume, and this copy with it." = "macOS güncellemesi sistem diskini, onunla birlikte bu kopyayı da değiştirir.";
+"Keeps the GPU clock up while an app's GPU work runs." = "Bir uygulamanın GPU işi sürerken GPU saat hızını yüksek tutar.";
+"After each login, a dialog only when something needs attention." = "Her girişten sonra, yalnızca ilgilenilmesi gereken bir şey varsa bir pencere.";
+"Stages 2 and 4 of the install guide, on your OpenCore EFI." = "Kurulum rehberinin 2. ve 4. aşamaları, OpenCore EFI'niz üzerinde.";
+"OpenCore did not record which EFI it booted from: choose it by its disk." = "OpenCore hangi EFI'den açıldığını kaydetmemiş: Diskine bakarak seçin.";
+"SIP, the AMFI boot-arg and the GPU quirks, as stage 2 sets them." = "SIP, AMFI boot-arg'ı ve GPU quirk'leri, 2. aşamanın ayarladığı gibi.";
+"Only for the system-volume copy of the Metal driver (Driver page)." = "Yalnızca Metal sürücüsünün sistem diski kopyası için (Sürücü sayfası).";
+"Optional: sharp \"looks like\" sizes in System Settings > Displays, at the full refresh rate." = "İsteğe bağlı: Sistem Ayarları > Ekranlar'da tam yenileme hızında, keskin \"gibi görünür\" boyutlar.";
+"It takes effect after a restart." = "Yeniden başlattıktan sonra geçerli olur.";
+"For Adaptive-Sync monitors: no tearing or stutter below the maximum rate." = "Adaptive-Sync monitörler için: En yüksek hızın altında yırtılma ve takılma olmaz.";
+"About 25 seconds. Close games and other GPU-heavy apps first." = "Yaklaşık 25 saniye. Önce oyunları ve GPU'yu yoğun kullanan diğer uygulamaları kapatın.";
+"Changes and uploads nothing; private details are removed. About a minute." = "Hiçbir şeyi değiştirmez ve yüklemez; kişisel bilgiler çıkarılır. Yaklaşık bir dakika sürer.";
+
+/* Look and feel: the steps of an install */
+"Administrator password" = "Yönetici parolası";
+"Check the system and the package" = "Sistemi ve paketi denetle";
+"Rebuild the Auxiliary Kernel Collection (a few minutes)" = "Auxiliary Kernel Collection'ı yeniden oluştur (birkaç dakika)";
+"Back up what it replaces" = "Değişecek dosyaları yedekle";
+"Copy the kexts into /Library/Extensions" = "Kext'leri /Library/Extensions'a kopyala";
+"Copy the Metal driver into /Library/GPUBundles" = "Metal sürücüsünü /Library/GPUBundles'a kopyala";
+"Put back the files that differ" = "Uyuşmayan dosyaları yeniden kopyala";
+"Restore the last backup" = "Son yedeği geri koy";
+"Remove the driver's files" = "Sürücünün dosyalarını sil";
+"Close" = "Kapat";
+"Nothing yet." = "Henüz bir şey yok.";
+"Full log" = "Günlüğün tamamı";
+
+/* Look and feel: the Monitor page's charts */
+"No readings yet" = "Henüz ölçüm yok";
+"The last five minutes" = "Son beş dakika";
+"Rises with motion on screen, a few when nothing moves." = "Ekranda hareket olunca yükselir, hiçbir şey kıpırdamazken birkaça düşer.";
+
+/* Look and feel: the setup assistant */
+"EFI kext" = "EFI kext'i";
+"Test" = "Test";
+"Ready" = "Hazır";
+"HiDPI sizes and Variable refresh" = "HiDPI boyutları ve Değişken yenileme";
+"Display page" = "Ekran sayfası";
+"Safari on the GPU" = "Safari GPU'da";
+"Driver page. Needs Apple Secure Boot off first." = "Sürücü sayfası. Önce Apple Güvenli Önyükleme kapatılmalı.";
+"Minecraft and other LWJGL games through Zink" = "Minecraft ve diğer LWJGL oyunları Zink ile";
+"OpenGL page" = "OpenGL sayfası";
+"GPU clock and temperature in the menu bar" = "Menü çubuğunda GPU saat hızı ve sıcaklığı";
+"Monitor page" = "İzleme sayfası";
+
+/* Look and feel: the About window */
+"About IntelXe Manager" = "IntelXe Manager Hakkında";
+"Version %@" = "Sürüm %@";
+"Installs and manages the IntelXe driver for the Intel Arc B580 on macOS." = "macOS'te Intel Arc B580 için IntelXe sürücüsünü kurar ve yönetir.";
+"github.com/%@" = "github.com/%@";
+"License" = "Lisans";
+"This app is under the MIT License. Parts of the driver are under PolyForm Noncommercial 1.0.0 and LGPL-3.0-or-later: the repository and the release packages are for noncommercial use." = "Bu uygulama MIT Lisansı altındadır. Sürücünün bazı parçaları PolyForm Noncommercial 1.0.0 ve LGPL-3.0-or-later lisanslıdır: Depo ve sürüm paketleri ticari olmayan kullanım içindir.";
+"Credits" = "Emeği geçenler";
+"The Metal plugin, the AIR to SPIR-V translator and the accelerator kexts this stack is built on." = "Bu yapının üzerine kurulduğu Metal eklentisi, AIR'den SPIR-V'ye çevirici ve hızlandırıcı kext'leri.";
+"The translator nullmoth's is based on." = "nullmoth'un çeviricisinin dayandığı çevirici.";
+"The kernel driver follows them." = "Çekirdek sürücüsü bunları izler.";
+"ANV, the Vulkan driver." = "Vulkan sürücüsü ANV.";
+"The Xe2 VDEnc work." = "Xe2 VDEnc çalışması.";
+"The Vulkan video code the VideoToolbox codecs use." = "VideoToolbox kodeklerinin kullandığı Vulkan video kodu.";
+"Intel, Arc, Apple, macOS and Metal are trademarks of their owners." = "Intel, Arc, Apple, macOS ve Metal, sahiplerinin ticari markalarıdır.";
