@@ -2772,10 +2772,17 @@ static NSArray *nvmtl_vertex_attributes_for(NVMTLFunction *fn) {
 - (NSUInteger)threadgroupMemoryDataSize { return 0; }
 - (NSString *)description { return [NSString stringWithFormat:@"<arg %@ type %lu index %lu size %lu members %lu>", _name, (unsigned long)_type, (unsigned long)_index, (unsigned long)_bufSize, (unsigned long)_bufStruct->_members.count]; }
 @end
+// NVMTLArgument implements every getter of both binding protocols
 @interface NVMTLBufferArgument : NVMTLArgument <MTLBufferBinding> @end
-@implementation NVMTLBufferArgument @end
+@implementation NVMTLBufferArgument
+@dynamic name, type, access, index, used, argument;
+@dynamic bufferAlignment, bufferDataSize, bufferDataType, bufferStructType, bufferPointerType;
+@end
 @interface NVMTLTextureArgument : NVMTLArgument <MTLTextureBinding> @end
-@implementation NVMTLTextureArgument @end
+@implementation NVMTLTextureArgument
+@dynamic name, type, access, index, used, argument;
+@dynamic textureType, textureDataType, depthTexture, arrayLength;
+@end
 @interface NVMTLStageInArgument : NVMTLBufferArgument @end
 @implementation NVMTLStageInArgument
 - (BOOL)isArgument { return NO; }

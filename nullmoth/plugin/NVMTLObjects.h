@@ -164,6 +164,11 @@ extern id gNVMTLMainDevice;
   NSMutableArray *_signals;
   NSMutableArray *_waits;
 }
+- (void)nvmtlReleaseCapacity;
+- (void)nvmtlRecordEncodingError:(NSError *)error;
+@end
+// implemented in NVMTLEventSync.m
+@interface NVMTLCommandBuffer (EventSubmission)
 - (void)nvmtlReserveQueue;
 - (void)nvmtlReleaseReservation;
 - (void)nvmtlRecordWait:(id)event value:(uint64_t)value;
@@ -172,8 +177,6 @@ extern id gNVMTLMainDevice;
 - (BOOL)nvmtlAdvancePart;
 - (BOOL)nvmtlSubmitAhead;
 - (BOOL)nvmtlSubmitAheadV2;
-- (void)nvmtlReleaseCapacity;
-- (void)nvmtlRecordEncodingError:(NSError *)error;
 - (void)nvmtlFinishCallbacks;
 @end
 @interface NVMTLDepthStencilState : NSObject <MTLDepthStencilState> { @public int _write; int _compare;
