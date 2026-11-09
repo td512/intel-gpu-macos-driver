@@ -513,7 +513,7 @@ struct Banner<Actions: View>: View {
     }
 }
 
-/// One figure on the Overview page: a title, a value, a line under it and an optional action.
+/// One figure on the Overview page: a title, a value, a line under it and an optional action, on a card tinted by its state.
 struct OverviewCard<Action: View>: View {
     let title: LocalizedStringKey
     let symbol: String
@@ -522,30 +522,124 @@ struct OverviewCard<Action: View>: View {
     let detail: String
     @ViewBuilder var action: Action
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 6) {
-                Label(title, systemImage: symbol).font(.subheadline).foregroundStyle(tint)
-                Text(value).font(.title3.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                action
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).foregroundStyle(tint).frame(width: 18)
+                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+            Text(value).font(.title3.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            action
+        }
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+        .tintedCard(tint)
+        .animation(.easeInOut(duration: 0.35), value: value)
+        .animation(.easeInOut(duration: 0.35), value: tint)
+    }
+}
+
+/// Where the driver stands, for the Overview page's header.
+enum OverviewState: Equatable {
+    case working, update, problem, notInstalled
+    var color: Color {
+        switch self { case .working: return .green; case .update: return .orange; case .problem: return .red; case .notInstalled: return neutralTint }
+    }
+}
+
+extension Manager {
+    var driverInstalled: Bool { facts.installedVersion != nil || facts.driverFilesPresent }
+    var overviewState: OverviewState {
+        if !driverInstalled { return .notInstalled }
+        if !health.isEmpty || testResults.contains(where: { $0.state == .bad }) || !facts.kextLoaded || facts.bootGuardOff { return .problem }
+        return updateAvailable ? .update : .working
+    }
+}
+
+/// The top of the Overview page: the card, one line on its state, a coloured badge and the action that matters now.
+struct StatusHeader: View {
+    @EnvironmentObject var manager: Manager
+    var body: some View {
+        let state = manager.overviewState, f = manager.facts
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "cpu.fill")
+                .font(.system(size: 30, weight: .medium))
+                .foregroundStyle(state.color)
+                .frame(width: 58, height: 58)
+                .background(state.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(f.hasCard ? "Intel Arc B580" : f.metalDevice.isEmpty ? String(localized: "No Arc B580 found") : f.metalDevice)
+                    .font(.title2.weight(.semibold)).lineLimit(1)
+                Text(line(state)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(line(state))
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 8) {
+                StatusBadge(text: badge(state), color: state.color)
+                if state == .update {
+                    Button("Update on the Driver page") { manager.requestedSection = .driver }.buttonStyle(.borderedProminent)
+                } else if state == .problem && manager.health.isEmpty && !f.kextLoaded {
+                    Button("Open the EFI page") { manager.requestedSection = .efi }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .animation(.easeInOut(duration: 0.35), value: state)
+    }
+
+    func badge(_ state: OverviewState) -> String {
+        switch state {
+        case .working: return String(localized: "Driver working · \(manager.facts.installedVersion ?? "?")")
+        case .update: return String(localized: "Update available")
+        case .problem: return String(localized: "Problem")
+        case .notInstalled: return String(localized: "Not installed")
         }
     }
+
+    func line(_ state: OverviewState) -> String {
+        let f = manager.facts
+        switch state {
+        case .notInstalled:
+            return String(localized: "The driver is not installed on this Mac.")
+        case .problem:
+            if let issue = manager.health.first { return issue.text }
+            let bad = manager.testResults.filter { $0.state == .bad }.count
+            if bad > 0 { return String(localized: "\(bad) test(s) failed: see the Tests page.") }
+            return String(localized: "IntelXe.kext is not loaded: it comes from your EFI.")
+        case .update:
+            let latest = manager.release?.version?.description ?? "?"
+            if let installed = f.installedVersion { return String(localized: "Release \(latest) is out; this Mac has \(installed).") }
+            return String(localized: "Release \(latest) is out.")
+        case .working:
+            return f.metalDevice.isEmpty ? String(localized: "Installed and loaded.") : String(localized: "Metal runs on \(f.metalDevice).")
+        }
+    }
+}
+
+final class OptionalFlag: ObservableObject {
+    @Published var value: Bool?
 }
 
 struct SystemView: View {
     @EnvironmentObject var manager: Manager
     @StateObject var live = MonitorModel()
+    /// This Mac: open by itself while a requirement is not met, until the user opens or closes it
+    @StateObject var thisMacOpen = OptionalFlag()
     var body: some View {
+        let met = manager.facts.checks.allSatisfy { $0.state != .bad }
         Form {
+            SwiftUI.Section {
+                StatusHeader()
+            }
             Section2(title: "At a glance", symbol: "square.grid.2x2") {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    OverviewCard(title: "Driver", symbol: "shippingbox", tint: manager.updateAvailable ? .orange : .accentColor,
+                    OverviewCard(title: "Driver", symbol: "shippingbox", tint: driverTint,
                                  value: installedText, detail: String(localized: "Latest release: \(releaseText)")) {
-                        if manager.updateAvailable { Button("Update on the Driver page") { manager.requestedSection = .driver }.controlSize(.small) }
+                        // the header carries the update button when the update is what matters now
+                        if manager.updateAvailable && manager.overviewState != .update {
+                            Button("Update on the Driver page") { manager.requestedSection = .driver }.controlSize(.small)
+                        }
                     }
-                    OverviewCard(title: "GPU", symbol: "cpu", tint: .accentColor,
+                    OverviewCard(title: "GPU", symbol: "cpu", tint: manager.facts.kextLoaded ? .green : neutralTint,
                                  value: live.now.actMHz.map { $0 == 0 ? String(localized: "Idle") : "\($0) MHz" } ?? (manager.facts.metalDevice.isEmpty ? String(localized: "No Metal device") : manager.facts.metalDevice),
                                  detail: [live.now.packageC.map { String(localized: "GPU \($0) °C") }, live.now.fps.map { String(format: "%.0f ", $0) + String(localized: "frames/s") }].compactMap { $0 }.joined(separator: " · ")) {
                         EmptyView()
@@ -557,7 +651,7 @@ struct SystemView: View {
                         EmptyView()
                     }
                     let bad = manager.testResults.filter { $0.state == .bad }.count, warn = manager.testResults.filter { $0.state == .warning }.count
-                    OverviewCard(title: "Last test", symbol: "checkmark.seal", tint: manager.testResults.isEmpty ? .secondary : bad > 0 ? .red : warn > 0 ? .orange : .green,
+                    OverviewCard(title: "Last test", symbol: "checkmark.seal", tint: manager.testResults.isEmpty ? neutralTint : bad > 0 ? .red : warn > 0 ? .orange : .green,
                                  value: manager.testResults.isEmpty ? String(localized: "Not run yet") : bad > 0 ? String(localized: "\(bad) failed") : warn > 0 ? String(localized: "\(warn) below expected") : String(localized: "All passed"),
                                  detail: manager.testResults.isEmpty ? String(localized: "About 25 seconds, on the Tests page.") : String(localized: "\(manager.testResults.count) checks this session.")) {
                         Button(manager.testResults.isEmpty ? "Run the GPU test" : "Open the Tests page") { manager.requestedSection = .tests }.controlSize(.small)
@@ -568,17 +662,25 @@ struct SystemView: View {
                 HStack {
                     Text("Step by step from a fresh macOS install to a working driver.").font(.callout).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Open the setup assistant") { manager.showSetup = true }
+                    if manager.overviewState == .notInstalled {
+                        Button("Open the setup assistant") { manager.showSetup = true }.buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Open the setup assistant") { manager.showSetup = true }
+                    }
                 }
             }
             Section2(title: "This Mac", symbol: "desktopcomputer") {
-                DisclosureGroup(manager.facts.checks.allSatisfy { $0.state != .bad } ? String(localized: "Requirements met") : String(localized: "Some requirements are not met")) {
+                DisclosureGroup(isExpanded: Binding(get: { thisMacOpen.value ?? !met }, set: { thisMacOpen.value = $0 })) {
                     ForEach(manager.facts.checks) { check in
                         CheckRow(check: check)
                     }
                     if manager.facts.bootGuardOff {
                         Button("Clear the boot guard") { manager.clearBootGuard() }
                     }
+                } label: {
+                    Label(met ? String(localized: "Requirements met") : String(localized: "Some requirements are not met"),
+                          systemImage: met ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .foregroundStyle(met ? Color.green : Color.red)
                 }
             }
         }
@@ -591,6 +693,12 @@ struct SystemView: View {
                     .disabled(manager.probing)
             }
         }
+    }
+
+    var driverTint: Color {
+        if !manager.driverInstalled { return neutralTint }
+        if !manager.facts.kextLoaded { return .red }
+        return manager.updateAvailable ? .orange : .green
     }
 
     var installedText: String {

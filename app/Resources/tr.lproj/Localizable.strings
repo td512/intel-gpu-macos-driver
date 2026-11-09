@@ -530,3 +530,14 @@
 
 /* Look and feel: shared pieces */
 "More information" = "Ayrıntılar";
+
+/* Look and feel: the Overview page's header */
+"Driver working · %@" = "Sürücü çalışıyor · %@";
+"Update available" = "Güncelleme var";
+"The driver is not installed on this Mac." = "Sürücü bu Mac'te kurulu değil.";
+"%lld test(s) failed: see the Tests page." = "%lld test başarısız: Testler sayfasına bakın.";
+"IntelXe.kext is not loaded: it comes from your EFI." = "IntelXe.kext yüklü değil: Bu kext EFI'nizden gelir.";
+"Release %@ is out; this Mac has %@." = "%1$@ sürümü çıktı; bu Mac'te %2$@ var.";
+"Release %@ is out." = "%@ sürümü çıktı.";
+"Installed and loaded." = "Kurulu ve yüklü.";
+"Metal runs on %@." = "Metal, %@ üzerinde çalışıyor.";

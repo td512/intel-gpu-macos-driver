@@ -41,10 +41,18 @@ func renderSnapshots(into folder: String) {
     }
     setupDone.facts.installedVersion = "0.1.4"; setupDone.facts.kextLoaded = true
     setupDone.testResults = [TestResult(title: "Metal", value: "ok", state: .good)]
+    // the Overview page on a working B580 machine, and on one with a newer release out
+    let working = Manager(), outdated = Manager()
+    for m in [working, outdated] {
+        m.facts = setupDone.facts; m.facts.driverFilesPresent = true; m.facts.metalDevice = "Intel Arc B580"; m.facts.cardName = "Intel Arc B580 (8086:e20b)"
+        m.testResults = setupDone.testResults
+    }
+    outdated.release = try? JSONDecoder().decode(Release.self, from: Data(#"{"tag_name":"v0.1.5","html_url":"https://example.invalid/r","body":"","prerelease":false,"assets":[]}"#.utf8))
     print("setup steps: driver page \(setupDriver.setupStep.number), last page \(setupDone.setupStep.number)")
     let pages: [(String, AnyView, CGFloat)] = [
         ("setup-driver", AnyView(SetupView(close: {}).environmentObject(setupDriver).background(Color(nsColor: .windowBackgroundColor))), 520), ("setup-done", AnyView(SetupView(close: {}).environmentObject(setupDone).background(Color(nsColor: .windowBackgroundColor))), 520),
-        ("system", AnyView(SystemView().environmentObject(manager)), 640), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
+        ("system", AnyView(SystemView().environmentObject(manager)), 640), ("system-working", AnyView(SystemView().environmentObject(working)), 640),
+        ("system-update", AnyView(SystemView().environmentObject(outdated)), 640), ("driver", AnyView(DriverView().environmentObject(manager)), 640),
         ("efi", AnyView(EFIView().environmentObject(manager)), 1500), ("efi-choose", AnyView(EFIView().environmentObject(choosing)), 640),
         ("zink", AnyView(ZinkView().environmentObject(manager)), 640),
         ("display-off", AnyView(DisplayView().environmentObject(hidpiOff)), 480), ("display-pending", AnyView(DisplayView().environmentObject(hidpiPending)), 480), ("banners", AnyView(Banners().environmentObject(choosing).background(Color(nsColor: .windowBackgroundColor))), 120),

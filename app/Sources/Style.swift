@@ -84,9 +84,10 @@ struct StatusBadge: View {
             Text(text).font(.callout.weight(.semibold)).lineLimit(1)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(color.opacity(0.16), in: Capsule())
-        .overlay(Capsule().strokeBorder(color.opacity(0.35)))
         .foregroundStyle(color)
+        .background {
+            Capsule(style: .continuous).fill(color.opacity(0.16))
+        }
     }
 }
 
