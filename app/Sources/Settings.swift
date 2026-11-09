@@ -6,8 +6,10 @@ import ServiceManagement
 import SwiftUI
 
 /// NVRAM value of a key, nil when unset (or "ok", which the kexts read as unset).
-/// The Metal driver reads it at start: present = no GuC low-latency hint for any process (nvmtl_guc_hint_env).
-let noLowLatencyFlag = "/Library/GPUBundles/NVMTLDriver.no-low-latency"
+/// The Metal driver reads it at start: present = the GuC low-latency hint for apps (nvmtl_guc_hint_env); off by default
+/// since 0.1.4. The flag of 0.1.4's first builds (NVMTLDriver.no-low-latency, present = off) is removed on any change.
+let lowLatencyFlag = "/Library/GPUBundles/NVMTLDriver.low-latency"
+let oldNoLowLatencyFlag = "/Library/GPUBundles/NVMTLDriver.no-low-latency"
 
 func nvramValue(_ key: String) -> String? {
     guard let out = commandOutput("/usr/sbin/nvram", [key]), let tab = out.firstIndex(of: "\t") else { return nil }
@@ -23,7 +25,7 @@ struct DriverSettings: Equatable {
     var lfc = true           // intelxefb-vrr-lfc
     var vrrFloor = 0         // intelxefb-vrr-floor (Hz, 0 = the panel's)
     var gpuTiming = false    // /tmp/nvmtl-gputime (test builds of the Metal driver)
-    var fastResponse = true  // the GuC low-latency hint for apps; off = /Library/GPUBundles/NVMTLDriver.no-low-latency
+    var fastResponse = false  // the GuC low-latency hint for apps; on = /Library/GPUBundles/NVMTLDriver.low-latency
 
     static func read() -> DriverSettings {
         var s = DriverSettings()
@@ -35,7 +37,7 @@ struct DriverSettings: Equatable {
         s.lfc = (nvramValue("intelxefb-vrr-lfc") ?? "1") != "0"
         s.vrrFloor = Int(nvramValue("intelxefb-vrr-floor") ?? "") ?? 0
         s.gpuTiming = FileManager.default.fileExists(atPath: "/tmp/nvmtl-gputime")
-        s.fastResponse = !FileManager.default.fileExists(atPath: noLowLatencyFlag)
+        s.fastResponse = FileManager.default.fileExists(atPath: lowLatencyFlag)
         return s
     }
 
@@ -50,7 +52,8 @@ struct DriverSettings: Equatable {
             "/usr/sbin/sysctl -q debug.intelxefb_hwcursor=\(hwCursor ? 1 : 0) debug.intelxefb_dpms=\(dpms ? 1 : 0) debug.intelxefb_vrr_lfc=\(lfc ? 1 : 0) debug.intelxefb_vrr_floor_hz=\(vrrFloor) || true",
         ]
         c.append(gpuTiming ? "/usr/bin/touch /tmp/nvmtl-gputime && /bin/chmod 644 /tmp/nvmtl-gputime" : "/bin/rm -f /tmp/nvmtl-gputime")
-        c.append(fastResponse ? "/bin/rm -f \(shellQuoted(noLowLatencyFlag))" : "/usr/bin/touch \(shellQuoted(noLowLatencyFlag)) && /bin/chmod 644 \(shellQuoted(noLowLatencyFlag))")
+        c.append("/bin/rm -f \(shellQuoted(oldNoLowLatencyFlag))")
+        c.append(fastResponse ? "/usr/bin/touch \(shellQuoted(lowLatencyFlag)) && /bin/chmod 644 \(shellQuoted(lowLatencyFlag))" : "/bin/rm -f \(shellQuoted(lowLatencyFlag))")
         return c.joined(separator: " && ")
     }
 }
@@ -92,7 +95,7 @@ struct SettingsView: View {
                 }
                 Text("Applied at the next start.").font(.caption).foregroundStyle(.secondary)
                 CaptionedToggle(title: "Fast GPU response for apps", caption: "Keeps the GPU clock up while an app's GPU work runs.",
-                                detail: "Keeps the GPU clock up while an app's GPU work runs, instead of letting short bursts run at the lowest clock: games, Metal and OpenCL apps and benchmarks respond faster (Geekbench 4-6 percent higher). The desktop itself is not affected; an idle GPU sleeps either way. Applies to apps started afterwards.", isOn: $st.edit.fastResponse)
+                                detail: "Keeps the GPU clock up while an app's GPU work runs, instead of letting short bursts run at the lowest clock: games, Metal and OpenCL apps and benchmarks respond faster (Geekbench 4-6 percent higher). The desktop itself is not affected; an idle GPU sleeps either way. Applies to apps started afterwards. Off by default: in tests the first heavy run after a long idle was sometimes followed by a GPU fault with it on.", isOn: $st.edit.fastResponse)
             }
             Section2(title: "Diagnostics", symbol: "stethoscope") {
                 CaptionedToggle(title: "GPU timing in the driver's log", caption: "For performance reports; test builds of the Metal driver only.", isOn: $st.edit.gpuTiming)

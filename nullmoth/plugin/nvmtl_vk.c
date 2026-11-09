@@ -772,9 +772,11 @@ static void nvmtl_vkmsg_arm(void)
    SLPC treats the queue's work as compute and keeps the GT clock up while it runs). Without it, SLPC sees short,
    spaced-out submissions as low load and leaves the GT at its 1200 MHz floor: one tiny dispatch's round trip 94 us
    instead of 56 us, Geekbench 7 Metal 92.7k -> 96.1k and OpenCL 86.1k -> 91.1k (B580, 2026-11-09). When idle the GT is in
-   RC6 either way. On for every process but WindowServer and the system's own interface, which run whenever anything on
-   screen moves; /Library/GPUBundles/NVMTLDriver.no-low-latency (IntelXe Manager's switch) turns it off everywhere,
-   NVMTL_GUC_LOW_LATENCY=0/1 decides for one process, and a force_guc_low_latency a process was started with stands. */
+   RC6 either way. OFF by default since 9 Nov: the first heavy run after a long idle (Geekbench OpenCL after 40 min and
+   more) was followed by a GuC MEMORY_CAT_ERROR and a GT reset in 3 of 6 runs with it, 0 of 4 without; the cause is open.
+   /Library/GPUBundles/NVMTLDriver.low-latency (IntelXe Manager's switch) turns it on for every process but WindowServer
+   and the system's own interface, which run whenever anything on screen moves; NVMTL_GUC_LOW_LATENCY=0/1 decides for
+   one process, and a force_guc_low_latency a process was started with stands. */
 static void nvmtl_guc_hint_env(void)
 {
     static const char *const ui[] = { "WindowServer", "loginwindow", "Dock", "com.apple.dock.extra", "SystemUIServer",
@@ -783,10 +785,10 @@ static void nvmtl_guc_hint_env(void)
     int system_ui = 0;
     for (size_t i = 0; me && i < sizeof ui / sizeof *ui; i++) system_ui |= !strcmp(me, ui[i]);
     if (o && *o) { on = *o != '0'; why = "NVMTL_GUC_LOW_LATENCY"; }
-    else if (access("/Library/GPUBundles/NVMTLDriver.no-low-latency", F_OK) == 0) { on = 0; why = "turned off (NVMTLDriver.no-low-latency)"; }
     else if (system_ui) { on = 0; why = "the system's interface"; }
+    else if (access("/Library/GPUBundles/NVMTLDriver.low-latency", F_OK) == 0) { on = 1; why = "turned on (NVMTLDriver.low-latency)"; }
     else if (getenv("force_guc_low_latency") && *getenv("force_guc_low_latency")) return;   // set by whoever started it
-    else { on = 1; why = "default"; }
+    else { on = 0; why = "default"; }
     setenv("force_guc_low_latency", on ? "true" : "false", 1);
     nvlog("vk: GuC low-latency hint %s for %s (%s)", on ? "on" : "off", me ? me : "?", why);
 }
