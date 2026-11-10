@@ -169,6 +169,7 @@ typedef struct { void *cb; void *fb; void *pool; void *dset[2]; void *depth_view
                  /* the encoder's depth bounds (setDepthTestMinBound:maxBound:), re-emitted when a pipeline that has them as
                     dynamic state is bound, since binding a pipeline without them leaves that state undefined */
                  uint8_t db_on; float db_lo, db_hi;
+                 int dead; /* made after the device was lost: records nothing, submits as "device removed" (nvmtl_vk_cmd_begin) */
                } nvk_cmdbuf;
 #define NVMTL_VBC_NOSTRIDE (~0ull)
 int  nvmtl_vk_init(void);
@@ -283,6 +284,8 @@ uint64_t nvmtl_vk_recommended_working_set(void);   /* 931d015: the working set c
 uint64_t nvmtl_vk_vram_bytes(void);
 void     nvmtl_vk_mem_split(uint64_t *vram, uint64_t *sys);
 int  nvmtl_vk_image_create_ms(uint32_t w, uint32_t h, uint32_t vkfmt, uint32_t bpp, uint32_t samples, nvk_image *out);
+uint64_t nvmtl_vk_timestamp_frequency(void);
+int  nvmtl_vk_sample_rate_shading(void);   /* nm29: the device has sampleRateShading (pull-model interpolation) */   /* nm29: ticks per second of resolved timestamps (0: no timestamps) */
 int  nvmtl_vk_image_create_ms_full(uint32_t w, uint32_t h, uint32_t vkfmt, uint32_t bpp, uint32_t samples, uint32_t mtl_type, uint32_t layers, nvk_image *out);
 int  nvmtl_vk_depth_create_ms(uint32_t w, uint32_t h, uint32_t vkfmt, uint32_t aspect, uint32_t samples, nvk_image *out);
 int  nvmtl_vk_pipeline_create_vin_ms(const void *vs, size_t vn, const void *fs, size_t fn, uint32_t vkfmt, uint32_t depthfmt, const void *blend, const void *vin, uint32_t samples, void *out);

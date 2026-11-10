@@ -21,6 +21,9 @@
 #include "nvmtl_plock.h"
 #include "nvmtl_tex_upload.h"
 #include "nvmtl_cmd_refusal.h"
+#include "nvmtl_loss.h"
+#include "nvmtl_counter_heap.h"
+#include "nvmtl_copy_compat.h"
 #include "nvmtl_sampler_state.h"
 static int g_sampler_anisotropy, g_sampler_mirror_clamp;
 static int g_scalar_layout;
@@ -133,7 +136,13 @@ static char g_name[256];
 static VkPhysicalDeviceLimits g_lim;
 static uint32_t g_sm_count;
 static _Atomic int g_state;
+static int g_sample_rate_shading;   /* the sampleRateShading feature, enabled when present */
+int nvmtl_vk_sample_rate_shading(void) { return g_sample_rate_shading; }
 #include "nvmtl_recover.h"   /* GPU reset recovery: a banned queue replaced on the same device */
+/* device-loss bookkeeping (nvmtl_vk_note_loss) */
+static _Atomic int g_lost_after_up;
+static _Atomic uint64_t g_up_ns;
+static const char *g_last_submit_who;
 static _Atomic long g_slow_submit_ms;
 static _Atomic uint64_t g_submit_wait_ns, g_submit_waits;
 void nvmtl_vk_submit_wait_stats(uint64_t *total_ns, uint64_t *waits)
@@ -1195,6 +1204,7 @@ static int nvmtl_vk_initialize(void)
     if (!supported.shaderInt64) { nvlog("vk: 64-bit shader addresses unavailable"); return -1; }
     VkPhysicalDeviceFeatures enabled = {0}; enabled.shaderInt64 = VK_TRUE;
     enabled.sampleRateShading = supported.sampleRateShading;
+    g_sample_rate_shading = supported.sampleRateShading == VK_TRUE;   /* nm29: -supportsPullModelInterpolation */
     enabled.occlusionQueryPrecise = supported.occlusionQueryPrecise;
     g_occlusion_precise = supported.occlusionQueryPrecise == VK_TRUE;
     enabled.samplerAnisotropy = supported.samplerAnisotropy;
@@ -1339,6 +1349,7 @@ static int nvmtl_vk_initialize(void)
     nvlog("vk: apps-dyn dynamic vertex strides (vkCmdBindVertexBuffers2): %s", pvkCmdBindVertexBuffers2 ? "yes" : "NO — MTLBufferLayoutStrideDynamic pipelines are refused");
     pvkGetDeviceQueue(g_dev, g_qfam, 0, &g_queue);
 
+    atomic_store(&g_up_ns, clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW));
     g_state = 1;
     nvlog("vk: GPU reset recovery %s", !nvmtl_recover_on() ? "OFF (NVMTL_GPU_RECOVERY=0) - a lost device disables the backend"
           : panv_recover ? "ON - a banned queue is replaced on the same device (nvmtl_anv_device_recover_v1)"
@@ -1349,6 +1360,45 @@ static int nvmtl_vk_initialize(void)
 }
 static pthread_once_t g_vk_once = PTHREAD_ONCE_INIT;
 static void nvmtl_vk_initialize_once(void) { (void)nvmtl_vk_initialize(); }
+/* 1 once the backend is down in this process: a failed submit or fence wait disabled it, or it never started. */
+int nvmtl_vk_backend_lost(void) { return atomic_load(&g_state) == -1; }   /* (upstream: nvmtl_vk_lost; that name is our recovery path's) */
+/* The device was up and then lost, as opposed to never starting. After a loss the Vulkan queue is dead for the rest of the
+   process, but the caller still gets command buffers: they record nothing and complete with a "device removed" error,
+   as Metal reports a removed GPU, instead of nil (WindowServer asserts on nil and the session goes). */
+static char g_dead_cb_token;
+static void nvmtl_noop_cmd(void) {}
+/* Recording calls made on a dead command buffer, and on one that was being recorded when the loss was noticed, do
+   nothing: a void function taking any arguments is the same machine code as this stub on x86-64. */
+static void nvmtl_vk_stub_recording(void)
+{
+#define STUB_CMD(f) if (!strncmp(#f, "vkCmd", 5)) p##f = (PFN_##f)nvmtl_noop_cmd;
+    DEVICE_FNS(STUB_CMD)
+#undef STUB_CMD
+    if (pvkCmdSetLineWidth) pvkCmdSetLineWidth = (PFN_vkCmdSetLineWidth)nvmtl_noop_cmd;
+    if (pvkCmdBindVertexBuffers2) pvkCmdBindVertexBuffers2 = (PFN_vkCmdBindVertexBuffers2)nvmtl_noop_cmd;
+    if (pvkCmdSetSampleLocationsEXT) pvkCmdSetSampleLocationsEXT = (PFN_vkCmdSetSampleLocationsEXT)nvmtl_noop_cmd;
+    if (pvkCmdSetPolygonModeEXT) pvkCmdSetPolygonModeEXT = (PFN_vkCmdSetPolygonModeEXT)nvmtl_noop_cmd;
+    if (pvkCmdSetProvokingVertexModeEXT) pvkCmdSetProvokingVertexModeEXT = (PFN_vkCmdSetProvokingVertexModeEXT)nvmtl_noop_cmd;
+    if (pvkCmdSetDepthClipEnableEXT) pvkCmdSetDepthClipEnableEXT = (PFN_vkCmdSetDepthClipEnableEXT)nvmtl_noop_cmd;
+    if (pvkCmdBuildAccelerationStructuresKHR) pvkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)nvmtl_noop_cmd;
+    if (pvkCmdCopyAccelerationStructureKHR) pvkCmdCopyAccelerationStructureKHR = (PFN_vkCmdCopyAccelerationStructureKHR)nvmtl_noop_cmd;
+    /* IntelXe: the command entry points this copy loads outside DEVICE_FNS */
+    if (pvkCmdPipelineBarrier2_) pvkCmdPipelineBarrier2_ = (PFN_vkCmdPipelineBarrier2)nvmtl_noop_cmd;
+    if (pvkCmdWriteBufferMarker2AMD) pvkCmdWriteBufferMarker2AMD = (PFN_vkCmdWriteBufferMarker2AMD)nvmtl_noop_cmd;
+    if (pvkCmdBindVertexBuffers3KHR) pvkCmdBindVertexBuffers3KHR = (PFN_vkCmdBindVertexBuffers3KHR)nvmtl_noop_cmd;
+    if (pvkCmdWriteAccelerationStructuresPropertiesKHR) pvkCmdWriteAccelerationStructuresPropertiesKHR = (PFN_vkCmdWriteAccelerationStructuresPropertiesKHR)nvmtl_noop_cmd;
+}
+/* Called once, by whichever thread first sees the device go: names the cause in the log and turns recording into no-ops. */
+static void nvmtl_vk_note_loss(const char *where, int vkresult, long waited_ms)
+{
+    if (atomic_exchange(&g_lost_after_up, 1)) return;
+    const uint64_t now = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW), up = atomic_load(&g_up_ns);
+    char cause[512];
+    nvmtl_loss_cause(cause, sizeof cause, where, vkresult, waited_ms, g_last_submit_who, up ? (long)((now - up) / 1000000000ull) : -1, getprogname());
+    nvlog("vk: %s", cause);
+    nvlog("vk: every command buffer made in %s from now on records nothing and completes with a device-removed error; objects made before the loss stay inert", getprogname());
+    nvmtl_vk_stub_recording();
+}
 int nvmtl_vk_init(void) {
     pthread_once(&g_vk_once, nvmtl_vk_initialize_once);
     return g_state == 1 ? 0 : -1;
@@ -7083,7 +7133,14 @@ static int nvmtl_cmd_refused(nvmtl_refusal why, int vkresult)
 int nvmtl_vk_cmd_begin(nvk_queue *q, nvk_cmdbuf *out)
 {
     (void)q;
-    if (nvmtl_vk_init()) return nvmtl_cmd_refused(NVMTL_REFUSE_BACKEND_DOWN, 0);
+    if (nvmtl_vk_init()) {
+        if (!atomic_load(&g_lost_after_up)) return nvmtl_cmd_refused(NVMTL_REFUSE_BACKEND_DOWN, 0);
+        memset(out, 0, sizeof *out); out->dead = 1; out->cb = &g_dead_cb_token;   // a token, never dereferenced
+        static _Atomic unsigned long dead_made;
+        const unsigned long n = atomic_fetch_add(&dead_made, 1) + 1;
+        if (n < 4 || n % 1000 == 0) nvlog("vk: command buffer #%lu made after the device was lost in %s: it records nothing and completes with a device-removed error", n, getprogname());
+        return 0;
+    }
     const uint64_t b0 = nvmtl_perf_now();
     memset(out, 0, sizeof *out);
     VkCommandPool pool = nvmtl_keep_pool_pop();
@@ -8338,8 +8395,10 @@ int nvmtl_vk_submit_partial_on(void)
 int nvmtl_vk_submit_begin_at(nvk_cmdbuf *c, nvmtl_inflight *f, const char *who)
 {
     nvmtl_subwho_note(who, 0);
+    g_last_submit_who = who;
     memset(f, 0, sizeof *f); f->c = c;
     uint64_t *const pt = f->pt;
+    if (c && c->dead) return -3;   // made after the loss: nothing was recorded, nothing is in flight
     if (g_state != 1 || !c || !c->cb) return -2;
     if (c->counter_error || nvmtl_counter_flush(c)) { nvmtl_cmd_retire(c); return -1; }
     // Draws or dispatches that could not be recorded (no descriptor set, an unsupported dispatch): the recording is not
@@ -8433,6 +8492,7 @@ int nvmtl_vk_submit_begin_at(nvk_cmdbuf *c, nvmtl_inflight *f, const char *who)
         }
         g_state = -1;
         nvlog("vk: queue submit -> %d; disabling backend and retaining uncertain in-flight resources", result);
+        nvmtl_vk_note_loss("submit", (int)result, 0);
         return -2;
     }
     f->fence = fence;
@@ -8491,6 +8551,7 @@ int nvmtl_vk_submit_finish(nvmtl_inflight *f)
             if (r != -2) return r;
         }
         g_state = -1;
+        nvmtl_vk_note_loss("fence", (int)wr, waited_ms);
         nvlog("vk: fence wait -> %d after %ld ms (budget %ld ms); the device is lost, disabling backend without retiring in-flight resources", wr, waited_ms, budget_ms);
         return -2;
     }
@@ -10532,6 +10593,10 @@ static void nvmtl_ts_decide(void)
           pvkGetCalibratedTimestampsEXT ? "calibrated device clock present" : "no calibrated device clock (waited-for reference writes)",
           why ? "NOT offered" : "offered");
 }
+/* nm29 (nullmoth f8c5bfb): -queryTimestampFrequency, the unit of resolved timestamps (Metal 4 counter heaps resolve through
+   the counter sample buffers above). This copy resolves every sample to nanoseconds on the host's clock (see the sample
+   buffer's conversion), not to device ticks, so the frequency is 1 GHz whenever timestamps are offered; 0 when not. */
+uint64_t nvmtl_vk_timestamp_frequency(void) { return nvmtl_vk_ts_supported() ? 1000000000ull : 0; }
 int nvmtl_vk_ts_supported(void)
 {
     pthread_once(&g_ts_once, nvmtl_ts_decide);
@@ -11444,12 +11509,31 @@ int nvmtl_vk_cmd_copy_image_sub3(nvk_cmdbuf *c, nvk_image *src, uint32_t sl, uin
 {
     if (!depth) depth = 1;
     const int s3 = src && src->mtl_type == 7, d3 = dst && dst->mtl_type == 7;
-    if (!c || !src || !dst || !w || !h || src->fmt != dst->fmt
+    /* Two formats join when vkCmdCopyImage accepts them (nvmtl_copy_compat.h): the same texel size, or the same BC class.
+     * WAS: an identical VkFormat only, so a Metal copy between an sRGB texture and its linear twin, a channel-order twin, or
+     * a view in another format of the same size was dropped and its destination kept the bytes it held before.
+     * NVMTL_COPY_EXACT_FORMAT=1 restores the exact-match refusal. */
+    static int exact = -1;
+    if (exact < 0) { const char *e = getenv("NVMTL_COPY_EXACT_FORMAT"); exact = e && e[0] == '1';
+                     nvlog("copy_image_sub: formats join when %s (NVMTL_COPY_EXACT_FORMAT=%s)", exact ? "identical" : "size-compatible, as vkCmdCopyImage allows", e ? e : "unset"); }
+    const int fmt_ok = src && dst && (exact ? src->fmt == dst->fmt : nvmtl_copy_formats_ok(src->fmt, dst->fmt));
+    if (!c || !src || !dst || !w || !h || !fmt_ok
         || (src->samples ? src->samples : 1) != (dst->samples ? dst->samples : 1)
         || ss >= (src->layers ? src->layers : 1) || ds >= (dst->layers ? dst->layers : 1)
         || sl >= (src->mips ? src->mips : 1) || dl >= (dst->mips ? dst->mips : 1)) {
-        nvlog("copy_image_sub: incompatible format/sample count or invalid subresource");
+        static _Atomic unsigned long long refused;
+        const unsigned long long k = atomic_fetch_add(&refused, 1) + 1;
+        if (!src || !dst) nvlog("copy_image_sub: REFUSED - %s image is missing (%llu refused so far)", src ? "destination" : "source", k);
+        else nvlog("copy_image_sub: REFUSED (%llu so far) - format %u -> %u%s, samples %u -> %u, layer %u of %u -> %u of %u, level %u of %u -> %u of %u, "
+                   "%ux%u (src %ux%u type %u, dst %ux%u type %u)", k, src->fmt, dst->fmt, fmt_ok ? "" : " (not size-compatible)",
+                   src->samples, dst->samples, ss, src->layers, ds, dst->layers, sl, src->mips, dl, dst->mips, w, h,
+                   src->w, src->h, src->mtl_type, dst->w, dst->h, dst->mtl_type);
         return -1;
+    }
+    if (src->fmt != dst->fmt) {
+        static _Atomic unsigned long long joined;
+        const unsigned long long k = atomic_fetch_add(&joined, 1) + 1;
+        if (!(k & (k - 1))) nvlog("copy_image_sub: %llu copy(ies) between size-compatible formats so far (latest %u -> %u, %ux%u)", k, src->fmt, dst->fmt, w, h);
     }
     const uint32_t sw = nvmtl_lvl(src->w, sl), sh = nvmtl_lvl(src->h, sl);
     const uint32_t dw = nvmtl_lvl(dst->w, dl), dh = nvmtl_lvl(dst->h, dl);

@@ -30,11 +30,23 @@
 #define NVMTL_RELEASE 0
 #endif
 #if NVMTL_RELEASE
+#include <fcntl.h>
 static inline int nvmtl_rel_devpath(const char *p) {
     return p && (!strncmp(p, "/tmp/nvmtl-", 11) || !strncmp(p, "/private/tmp/nvmtl-", 19));
 }
 static inline int nvmtl_rel_access(const char *p, int m) { return nvmtl_rel_devpath(p) ? -1 : access(p, m); }
-static inline FILE *nvmtl_rel_fopen(const char *p, const char *m) { return nvmtl_rel_devpath(p) ? NULL : fopen(p, m); }
+// Files a release plugin writes (a log a process opted into, a report) are created without following a link: the default
+// log is a fixed name in a folder every user can write, where a link planted by someone else would send this process's
+// writes into any file its user can write. Reads are unchanged.
+static inline FILE *nvmtl_rel_fopen(const char *p, const char *m) {
+    if (nvmtl_rel_devpath(p)) return NULL;
+    if (m[0] != 'a' && m[0] != 'w') return fopen(p, m);
+    const int fd = open(p, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC | (m[0] == 'a' ? O_APPEND : O_TRUNC), 0644);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, m[0] == 'a' ? "a" : "w");
+    if (!f) close(fd);
+    return f;
+}
 // Function-like on purpose: an object-like `#define access` also renamed every Objective-C `-access` method in this
 // one-TU plugin, so release builds answered -[MTLBinding access] with nothing (selector nvmtl_rel_access in the
 // shipped binary). Apple's OpenCL then read every image as read-only and refused write-only images (-38).
@@ -1000,6 +1012,10 @@ static const nvmtl_pcie_place *nvmtl_pcie_place_of(mach_port_t accel) {
     });
     return &p;
 }
+static BOOL nvmtl_m4_enabled(void);   // NVMTLMetal4.m (nm29), later in this translation unit
+void nvmtl_m4_note_buffer(id buf, uint64_t addr, uint64_t length);
+int nvmtl_m4_note_current(_Atomic uint64_t note[3], uint64_t addr, uint64_t length);
+void nvmtl_m4_note_buffer_cached(id buf, uint64_t addr, uint64_t length, _Atomic uint64_t note[3]);
 
 @implementation NVMTLDevice
 + (void)load {
@@ -1148,13 +1164,32 @@ static NSString *nvmtl_device_marketing_name(void) {
 
 static void nvmtl_zero_new_buffer(NVMTLBuffer *b, NSUInteger len);
 static __thread int gZeroSkip;
+// NVMTL_MANAGED_SYSMEM=1: a Managed buffer lives in mapped system memory (no VRAM copy + shadow pair). This was a bare
+// getenv() on every call, so any value - "0" included - switched it on, nothing said whether it had, and a release
+// plugin forgets the variable unless the process also sets NVMTL_PROCESS_ENV=1 (or the conf file sets it), which made a
+// run with it look identical to a run without it. Now read once, only "1" enables it, and it says so: once when read,
+// and once when the first Managed buffer is actually placed by it (an app that makes no Managed buffers is unaffected).
+static int nvmtl_managed_sysmem(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("NVMTL_MANAGED_SYSMEM");
+        on = e && e[0] == '1';
+        if (e || on) nvlog("buffers: Managed buffers %s (NVMTL_MANAGED_SYSMEM=%s)", on ? "go to mapped system memory" : "keep VRAM + shadow", e ? e : "unset");
+    }
+    return on;
+}
 - (id<MTLBuffer>)newBufferWithLength:(NSUInteger)len options:(MTLResourceOptions)opt {
     if (nvmtl_vk_init()) return nil;
     if (nvmtl_alloc_blocked()) return nil;
     NVMTLBuffer *b = [NVMTLBuffer new];
     b->_storage = (MTLStorageMode)((opt >> MTLResourceStorageModeShift) & 0xF);
     b->_ropt = opt & ((MTLResourceOptions)0xF | ((MTLResourceOptions)0x3 << MTLResourceHazardTrackingModeShift));
-    int hv = (b->_storage == MTLStorageModeShared) || (b->_storage == MTLStorageModeManaged && getenv("NVMTL_MANAGED_SYSMEM"));
+    int hv = (b->_storage == MTLStorageModeShared) || (b->_storage == MTLStorageModeManaged && nvmtl_managed_sysmem());
+    if (b->_storage == MTLStorageModeManaged && hv) {
+        static _Atomic int said;
+        if (!atomic_exchange(&said, 1)) nvlog("buffers: first Managed buffer (%lu bytes) placed in system memory by NVMTL_MANAGED_SYSMEM=1", (unsigned long)len);
+    }
     if (nvmtl_vk_buffer_create(len, (hv && b->_storage == MTLStorageModeShared) ? 2 : hv, &b->_b)) {
         if (hv) { nvmtl_alloc_failed("newBufferWithLength"); nvlog("newBufferWithLength: FAILED"); return nil; }
         nvlog("newBufferWithLength:%lu private: VRAM refused - placing it in system memory", (unsigned long)len);
@@ -2280,6 +2315,11 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
     }
     NSError *le = nil; id<MTLFunction> kfn = nvmtl_link_kernel(d, &le);
     if (!kfn) { if (err) *err = le; if (r) *r = nil; return nil; }
+    if (d.stageInputDescriptor && [(id)kfn isKindOfClass:[NVMTLFunction class]]) {
+        NSError *se = nil; NVMTLFunction *sf = nvmtl_kernel_with_stage_in((NVMTLFunction *)kfn, d.stageInputDescriptor, &se);
+        if (!sf) { if (err) *err = se; if (r) *r = nil; return nil; }
+        kfn = sf;
+    }
     NSString *tgWhy = nvmtl_tg_mismatch(kfn, d.maxTotalThreadsPerThreadgroup, "compute pipeline");
     if (tgWhy) { if (r) *r = nil; return nvmtl_fail(err, tgWhy); }
     id<MTLComputePipelineState> ps = [self newComputePipelineStateWithFunction:kfn error:err];
@@ -2324,6 +2364,11 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
 }
 - (BOOL)areBarycentricCoordsSupported { return YES; }
 - (BOOL)supportsPrimitiveMotionBlur { return NO; }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
+- (NSUInteger)sizeOfCounterHeapEntry:(MTL4CounterHeapType)type { return (NSUInteger)nvmtl_heap_entry_size((int)type); }   // macOS 26; the build targets 15
+#pragma clang diagnostic pop
+- (uint64_t)queryTimestampFrequency { return nvmtl_vk_timestamp_frequency(); }   // nm29 (nullmoth f8c5bfb)
 - (NSMutableDictionary *)copyIOSurfaceSharedTextureProperties:(MTLTextureDescriptor *)d {
     const char *why = NULL; uint32_t vkf = 0, bpp = 0; int a8 = 0; MTLPixelFormat f = d ? d.pixelFormat : MTLPixelFormatInvalid;
     if (!d) why = "no descriptor";
@@ -2583,6 +2628,9 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
         case MTLGPUFamilyMac2: case MTLGPUFamilyCommon1: case MTLGPUFamilyCommon2: case MTLGPUFamilyCommon3: return YES;
         case 2001 : return YES;
         case 5001 : return YES;
+        // MTLGPUFamilyMetal4: the Metal 4 command model of NVMTLMetal4.m (nullmoth 2.9) over the Metal 3 objects; off
+        // unless NVMTL_METAL4=1 (not yet run on the B580)
+        case 5002 : return nvmtl_m4_enabled() ? YES : NO;
         default: return NO;
     }
 }
@@ -2714,12 +2762,14 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
     }
     return v ? YES : NO;
 }
-// calculate_clamped_lod and calculate_unclamped_lod: the translator lowers them for a non-array 2D texture only
-// (passes/air_calls/dispatch_texture.rs refuses array, cube and 3D textures, and pixel-coordinate samplers), so YES
-// would let a shader that uses them on another texture type fail to build. NO, as _MTLDevice answered before.
-- (BOOL)supportsQueryTextureLOD { return NO; }
-// interpolant<T, P> (interpolate_at_center/centroid/sample/offset): the translator has no lowering for it.
-- (BOOL)supportsPullModelInterpolation { return NO; }
+// nm29 (nullmoth e012ec7/873b3df, nvmtl_caps_query.h): decided from the Vulkan device.
+// calculate_clamped_lod / calculate_unclamped_lod: OpImageQueryLod, core Vulkan with no feature bit; the translator lowers
+// it for 2D, 2D array, 3D, cube and cube array textures, colour and depth (passes/air_calls/dispatch_texture.rs), so the
+// answer is "the device is up". (Upstream answers YES while lowering the 2D form only.)
+- (BOOL)supportsQueryTextureLOD { return nvmtl_cap_query_texture_lod(nvmtl_vk_init() == 0, 1); }
+// interpolant<T, P> (interpolate_at_center/centroid/sample/offset): GLSL.std.450 InterpolateAt* need the
+// InterpolationFunction capability, which needs sampleRateShading.
+- (BOOL)supportsPullModelInterpolation { return nvmtl_vk_init() == 0 && nvmtl_cap_pull_model_interpolation(nvmtl_vk_sample_rate_shading()); }
 // Placement sparse resources (macOS 26.4): not built here, as no sparse resource is (sparseBufferTier and
 // sparseTextureTier None, no resourceStateCommandEncoder).
 - (BOOL)supportsPlacementSparse { return NO; }
@@ -2832,6 +2882,7 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
 #import "NVMTLGL.m"
 #import "NVMTLGLVBlank.m"
 #import "NVMTLEmbedded.m"
+#import "NVMTLMetal4.m"
 #import "NVMTLVendorCompiler.m"
 #include "nvmtl_vk.c"
 #import "NVMTLSass.m"
