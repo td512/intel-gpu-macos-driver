@@ -310,7 +310,7 @@ int IntelXe::sensorsString(char *buf, size_t len)
 		// scaled by 2^-scl_shift_energy J.
 		uint64_t v = 0, ns = 0, uj[XE_ENERGY_CHANNELS] = {};
 		uint32_t mw[XE_ENERGY_CHANNELS] = {}, rejected = 0;
-		bool power = false;
+		bool power = false, pkgPower = false;
 		IOLockLock(gPmtLock);
 		const uint32_t guid = rd(PUNIT_TELEMETRY_GUID);
 		const int err = pmtTelemRead(guid, BMG_ENERGY_STATUS_PMT_OFFSET, &v);
@@ -322,6 +322,7 @@ int IntelXe::sensorsString(char *buf, size_t len)
 			energy.update(v, ns, 500000000ull);
 			for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) uj[c] = energy.uj(c), mw[c] = energy.mw[c];
 			power = energy.havePower;
+			pkgPower = energy.pkgValid;
 			rejected = energy.rejected;
 		}
 		IOLockUnlock(gPmtLock);
@@ -332,11 +333,15 @@ int IntelXe::sensorsString(char *buf, size_t len)
 				uj[XE_ENERGY_CARD] / 1000000, uj[XE_ENERGY_CARD] % 1000000 / 1000, uj[XE_ENERGY_PKG] / 1000000,
 				uj[XE_ENERGY_PKG] % 1000000 / 1000);
 			if (n < len && power)
-				n += (size_t)snprintf(buf + n, len - n, ", card power %u.%02u W, package power %u.%02u W",
-					mw[XE_ENERGY_CARD] / 1000, mw[XE_ENERGY_CARD] % 1000 / 10, mw[XE_ENERGY_PKG] / 1000,
+				n += (size_t)snprintf(buf + n, len - n, ", card power %u.%02u W", mw[XE_ENERGY_CARD] / 1000,
+					mw[XE_ENERGY_CARD] % 1000 / 10);
+			else if (n < len)
+				n += (size_t)snprintf(buf + n, len - n, ", card power n/a");
+			if (n < len && pkgPower)
+				n += (size_t)snprintf(buf + n, len - n, ", package power %u.%02u W", mw[XE_ENERGY_PKG] / 1000,
 					mw[XE_ENERGY_PKG] % 1000 / 10);
 			else if (n < len)
-				n += (size_t)snprintf(buf + n, len - n, ", card power n/a, package power n/a");
+				n += (size_t)snprintf(buf + n, len - n, ", package power n/a");
 			if (n < len) n += (size_t)snprintf(buf + n, len - n, ", power windows rejected %u", rejected);
 		}
 	}
