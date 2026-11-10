@@ -26,6 +26,9 @@ MACOS_MAJOR=@MAJOR@   # the macOS this package is built for (NMXAccel differs: 2
 BK="/Library/Application Support/intel-gpu-macos-driver"
 KEXTS=(IntelXeFB NMXAccel NMXAGDC)
 OLD_KEXTS=(B580FB)   # the same kexts under their earlier names: removed by --apply, restored by --undo
+# the cards this package supports: "PCI device id (vendor 8086), name[, untested]"; the same list as data/platforms.json
+# "supported" (tools/parity/devices.py checks every copy in the repository)
+CARDS=("e20b B580" "e20c B570 untested")
 GB=/Library/GPUBundles
 SSV=/System/Library/Extensions/NVMTLDriver.bundle   # system-volume/ssv-install.sh's copy
 USELIB=$GB/NVMTLDriver.use-library                  # NMXAccel: use the /Library copy even when $SSV exists
@@ -60,10 +63,14 @@ check() {
         *) bad "no AMFI boot-arg (amfi_get_out_of_my_way=0x1): WindowServer would refuse the unsigned Metal driver";; esac
     local old; old=$(printf '%s\n' $ba | grep -E '^-?b580' | tr '\n' ' ' || true)   # intelxe-rename: keep
     [ -n "$old" ] && warn "boot-args with their earlier names: ${old}- they still work in this release; rename them (README-INSTALL.md, Upgrading)"
-    local pci loaded; pci=$(ioreg -r -c IOPCIDevice -l 2>/dev/null || true)
-    if [[ "$pci" == *'"device-id" = <0be20000>'* ]]; then ok "Arc B580 (8086:e20b) on the PCI bus"
-    elif [[ "$pci" == *'"device-id" = <0ce20000>'* ]]; then ok "Arc B570 (8086:e20c) on the PCI bus (supported; not yet tested by the project)"
-    else bad "no Arc B580/B570 (8086:e20b/e20c) found"; fi
+    local pci loaded c id name untested seen="" ids="" names=""; pci=$(ioreg -r -c IOPCIDevice -l 2>/dev/null || true)
+    for c in "${CARDS[@]}"; do   # the first card found, in list order; ioreg shows the id little-endian: e20b = <0be20000>
+        read -r id name untested <<< "$c"
+        ids+=${ids:+/}$id; names+=${names:+/}$name
+        [ -z "$seen" ] && [[ "$pci" == *"\"device-id\" = <${id:2:2}${id:0:2}0000>"* ]] || continue
+        seen=1; ok "Arc $name (8086:$id) on the PCI bus${untested:+ (supported; not yet tested by the project)}"
+    done
+    [ -n "$seen" ] || bad "no Arc $names (8086:$ids) found"
     loaded=$(kmutil showloaded 2>/dev/null || true)
     if [[ "$loaded" == *"io.github.yusufklncc.IntelXe ("* ]]; then
         ok "IntelXe.kext is loaded (from OpenCore)"

@@ -27,6 +27,10 @@ func commandOutput(_ path: String, _ arguments: [String], seconds: TimeInterval 
     return String(data: data, encoding: .utf8)
 }
 
+/// The cards the driver supports: PCI device id (vendor 8086) and name. The same list as data/platforms.json "supported"
+/// (tools/parity/devices.py checks every copy in the repository). The B570 is the same BMG-G21 with fewer Xe cores (#2).
+let supportedCards: [(id: String, name: String)] = [("e20b", "Intel Arc B580"), ("e20c", "Intel Arc B570")]
+
 struct Check: Identifiable, Hashable {
     enum State { case good, warning, bad, neutral }
     let id: String
@@ -64,10 +68,11 @@ struct SystemFacts {
         facts.architecture = commandOutput("/usr/bin/uname", ["-m"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let pci = commandOutput("/usr/sbin/ioreg", ["-r", "-c", "IOPCIDevice", "-l"]) ?? ""
-        // the Arc B580 (8086:e20b) and the B570 (8086:e20c, the same BMG-G21 with fewer Xe cores; from #2)
+        // the first supported card on the bus, in list order (ioreg shows the device id little-endian: e20b = <0be20000>)
         let intel = pci.contains("\"vendor-id\" = <86800000>")
-        if intel && pci.contains("\"device-id\" = <0be20000>") { facts.cardName = "Intel Arc B580 (8086:e20b)" }
-        else if intel && pci.contains("\"device-id\" = <0ce20000>") { facts.cardName = "Intel Arc B570 (8086:e20c)" }
+        if intel, let card = supportedCards.first(where: { pci.contains("\"device-id\" = <\($0.id.suffix(2))\($0.id.prefix(2))0000>") }) {
+            facts.cardName = "\(card.name) (8086:\(card.id))"
+        }
         facts.hasCard = !facts.cardName.isEmpty
 
         let loaded = commandOutput("/usr/bin/kmutil", ["showloaded", "--list-only"], seconds: 30) ?? ""

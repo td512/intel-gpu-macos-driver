@@ -24,6 +24,25 @@
    "tr": "Intel bu platformda sunmuyor"
   }
  },
+ "supported": {
+  "about": "The PCI devices (vendor 8086) this driver attaches to: the one list that every copy in the repository is checked against (tools/parity/devices.py; docs/design/DESIGN-platforms.md section 4). family: the kernel descriptor (kernel/IntelXe/xe_platform.cpp) that covers them, kernel_ids its id array. name: the card as messages name it; model: IntelXe.kext's 'model' property for it (the Metal device and the codecs take their names from it). tested: run on hardware by the project.",
+  "family": "BMG-G21",
+  "kernel_ids": "kIdsBMGG21",
+  "devices": [
+   {
+    "id": "e20b",
+    "name": "B580",
+    "model": "Intel Arc B580 Graphics",
+    "tested": true
+   },
+   {
+    "id": "e20c",
+    "name": "B570",
+    "model": "Intel Arc B570 Graphics",
+    "tested": false
+   }
+  ]
+ },
  "platforms": [
   {
    "id": "b580",
