@@ -344,13 +344,21 @@ fn any_prefix(name: &str, prefixes: &[&str]) -> bool {
 pub(crate) fn is_texture_atomic(name: &str) -> bool {
     name.starts_with("air.atomic_") && name.contains("_explicit_texture_")
 }
+/// `air.calculate_{clamped,unclamped}_lod_{texture,depth}_{2d,2d_array,3d,cube,cube_array}`: whether the clamped LOD is
+/// asked for, and the texture's shape token (`2d`, `2d_array`, `3d`, `cube`, `cube_array`).
+pub(crate) fn calculate_lod_shape(name: &str) -> Option<(bool, &str)> {
+    let (clamped, rest) = if let Some(rest) = name.strip_prefix("air.calculate_clamped_lod_") {
+        (true, rest)
+    } else {
+        (false, name.strip_prefix("air.calculate_unclamped_lod_")?)
+    };
+    let shape = rest.strip_prefix("texture_").or_else(|| rest.strip_prefix("depth_"))?;
+    matches!(shape, "2d" | "2d_array" | "3d" | "cube" | "cube_array").then_some((clamped, shape))
+}
 pub(crate) fn air_image_intrinsic(name: &str) -> bool {
     is_image_sample_count_query(name)
         || is_texture_atomic(name)
-        || matches!(
-            name,
-            "air.calculate_unclamped_lod_texture_2d" | "air.calculate_clamped_lod_texture_2d"
-        )
+        || calculate_lod_shape(name).is_some()
         || any_prefix(
             name,
             &[
@@ -549,6 +557,10 @@ pub fn air_intrinsic_disposition(name: &str) -> Option<AirIntrinsicDisposition> 
                 "air.load.implicit_imageblock.",
                 "air.store.implicit_imageblock.",
                 "air.discard_fragment",
+                "air.interpolate_center_",
+                "air.interpolate_offset_",
+                "air.interpolate_sample_",
+                "air.interpolate_centroid_",
                 "air.simdgroup_matrix_8x8_load.",
                 "air.simdgroup_matrix_8x8_store.",
                 "air.simdgroup_matrix_8x8_init_diag.",

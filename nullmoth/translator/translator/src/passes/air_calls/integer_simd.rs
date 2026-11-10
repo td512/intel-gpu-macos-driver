@@ -1482,6 +1482,9 @@ pub(in crate::passes) fn lower_one(
     if let Some(global) = cl_size_query(name) {
         return lower_cl_size(ctx, name, global, res, rty, args);
     }
+    if name.starts_with("air.interpolate_") {
+        return lower_pull_interpolation(ctx, name, res, rty, args);
+    }
     if name == "air.get_sample_position.v2f32" {
         return lower_sample_position(ctx, res, rty, args);
     }
@@ -1515,11 +1518,9 @@ pub(in crate::passes) fn lower_one(
     if crate::air_intrinsics::is_texture_atomic(name) {
         return lower_atomic_texture(ctx, name, res, rty, args);
     }
-    if name == "air.calculate_unclamped_lod_texture_2d" {
-        return lower_calculate_lod_texture_2d(ctx, name, res, rty, args, 1);
-    }
-    if name == "air.calculate_clamped_lod_texture_2d" {
-        return lower_calculate_lod_texture_2d(ctx, name, res, rty, args, 0);
+    if let Some((clamped, _)) = crate::air_intrinsics::calculate_lod_shape(name) {
+        // OpImageQueryLod: x is the level the sample would read (clamped), y the computed level (unclamped)
+        return lower_calculate_lod(ctx, name, res, rty, args, if clamped { 0 } else { 1 });
     }
     if name.starts_with("air.write_imageblock_slice_to_texture") {
         return lower_imageblock_slice_write(ctx, name, args, v4);
