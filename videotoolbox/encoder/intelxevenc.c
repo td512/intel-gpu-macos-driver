@@ -995,7 +995,7 @@ __attribute__((visibility("default"))) int IntelXeVEnc_Register(void) {
 	static int count = -1; static dispatch_once_t once;
 	dispatch_once(&once, ^{
 		count = 0;
-		const char *e = getenv("INTELXEVENC_CODECS");   // e.g. "hevc,h264"; default: HEVC and H.264 (AV1 once ANV has it on Xe2)
+		const char *e = getenv("INTELXEVENC_CODECS");   // e.g. "hevc,h264"; default: HEVC, H.264 and AV1
 		struct { FourCharCode t; const char *name, *id, *codec; OSStatus (*fac)(FourCharCode, CFAllocatorRef, VTVideoEncoderRef *); } enc[] = {
 			{ 'hvc1', "hevc", "io.github.yusufklncc.intelxe.videoencoder.hevc", "HEVC", IntelXeHEVC_CreateInstance },
 			{ 'avc1', "h264", "io.github.yusufklncc.intelxe.videoencoder.h264", "H.264", IntelXeH264_CreateInstance },
@@ -1004,7 +1004,7 @@ __attribute__((visibility("default"))) int IntelXeVEnc_Register(void) {
 		char gpu[128];
 		gpu_name(gpu, sizeof gpu);
 		for (size_t i = 0; i < sizeof enc / sizeof *enc; i++) {
-			int on = e ? strstr(e, enc[i].name) != NULL : enc[i].t != 'av01';
+			int on = e ? strstr(e, enc[i].name) != NULL : 1;
 			if (!on) continue;
 			char name[160];
 			snprintf(name, sizeof name, "%s %s", gpu, enc[i].codec);   // "Intel Arc B580 HEVC"
