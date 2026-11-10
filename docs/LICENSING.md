@@ -40,6 +40,7 @@ The `SPDX-License-Identifier` header at the top of each file names its licence. 
 | `hpmstat` | our code (MIT) | Keep the MIT notice. |
 | `IntelXe Manager.app`, `libcglzink.dylib` and `libcglzink-boot.dylib` (optional, Zink package) | our code (MIT) | Keep the MIT notice. |
 | `NMXAccel.kext`, `NMXAGDC.kext`, `NVMTLDriver` (plugin) | nullmoth code (PolyForm NC) | as above |
+| `nvmtl-air-dis` (in the plugin bundle, since the nullmoth 2.9 merge) | nullmoth code (`nullmoth/plugin/air_dis.c`, PolyForm NC), built here; it loads the bundle's `air-runtime/libLLVM.dylib` at run time | as above. It replaces the Metal toolchain's `air-opt`, which the plugin used to look for in `/Library/GPUBundles/nvmtl` and which this project never shipped. |
 | `libnvmtl_translate.dylib` | translator (LGPL-3.0-or-later) | Provide the source of the translator (including our changes) to anyone who gets the binary, and allow relinking. It is a separate dylib loaded by the plugin, which satisfies that. |
 | `air-runtime` (libLLVM, libzstd) | fetched from nullmoth's release package, not built here | LLVM is Apache-2.0 with LLVM exceptions; Zstandard is BSD-3-Clause. Their licence texts ship in the bundle's `Resources/air-runtime`. |
 | `libvulkan_intel.dylib` (Mesa ANV) | Mesa (MIT) | Keep Mesa's notices. Some code compiled into it has other licences: Berkeley **SoftFloat** (BSD-3-Clause, `src/util/softfloat.*`), **BSL-1.0** (`src/c11/impl/threads_posix.c`), **BLAKE3** (CC0-1.0 or Apache-2.0, `src/util/blake3/`), and the Khronos Vulkan headers (Apache-2.0 or MIT). Ship their notices with the binary. |
@@ -56,7 +57,8 @@ The `SPDX-License-Identifier` header at the top of each file names its licence. 
 - **Vulkan-Loader / Vulkan-Tools** (`vulkan-sdk-1.4.363.0`, Apache-2.0): optional, for ordinary Vulkan apps (`user/vulkan-loader/`).
 - **Rust toolchain and crates:** for the translator. The crates' licences are listed in its `Cargo.lock` dependency graph (MIT/Apache-2.0 in the main).
 - **linux-firmware:** `bmg_guc_70.bin`, `bmg_huc.bin` (`LICENSE.xe`).
-- **nullmoth 2.1.0 release package:** only the air-runtime (LLVM/zstd) is taken from it.
+- **nullmoth 2.1.0 release package:** only the air-runtime (LLVM/zstd) is taken from it. The decoder program the plugin runs
+  beside it (`nvmtl-air-dis`) is built from this repository's source.
 
 ## Not part of this repository
 

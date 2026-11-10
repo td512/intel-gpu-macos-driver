@@ -27,6 +27,7 @@ Linux xe / i915 (MIT, Copyright Intel Corporation)
 
 nullmoth (PolyForm Noncommercial 1.0.0)
   nullmoth/ (plugin, kexts)    https://github.com/nullmoth/nvidia-macos-driver, modified; see nullmoth/CHANGES.md
+                               (merged up to upstream 2.9; nullmoth/NOTICE is upstream's at the copy's base)
   kernel/IntelXeFB/IntelXeFB.cpp
                                derived from nullmoth's NMIntelFB and NVRMFB
   Required Notice: Copyright (c) 2026 NullMoth Systems (https://nullmothsystems.com)
