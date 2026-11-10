@@ -232,18 +232,44 @@ static NSString *nvmtl_user_cache_dir(BOOL own) {
     NSString *d = @(ucd);
     return own ? [d stringByAppendingPathComponent:@(getprogname())] : d;
 }
-void nvmtl_cache_store_refused(const char *what) {
-    const int g = ++gCacheGen;
-    nvlog("cache: a %s store was refused - choosing the cache folders again (generation %d)", what, g);
+// prod9f: a folder that refused a store is not chosen again in this process. Safari's GPU process logged 57 refusals in
+// 50 minutes: every refusal chose the folders again and got the same one back (the system folder is taken on access(),
+// which the sandbox does not answer), so it never kept a cache and translated every page's shaders again. A refused
+// folder goes into gRefusedDirs and the choosers skip it; when every candidate has refused, stores stop for the process
+// (reads go on from the folder already chosen).
+static NSMutableSet<NSString *> *gRefusedDirs;    // under gCacheDirLock
+static _Atomic int gAirStoresOff, gSpvStoresOff;
+static BOOL nvmtl_dir_refused(NSString *d) { return d.length && [gRefusedDirs containsObject:d]; }   // lock held
+static inline BOOL nvmtl_air_stores_on(void) { return !atomic_load_explicit(&gAirStoresOff, memory_order_relaxed); }
+static inline BOOL nvmtl_spv_stores_on(void) { return !atomic_load_explicit(&gSpvStoresOff, memory_order_relaxed); }
+static void nvmtl_cache_store_refused(const char *what, NSString *path) {
+    NSString *dir = path.stringByDeletingLastPathComponent;
+    if (!dir.length) return;
+    os_unfair_lock_lock(&gCacheDirLock);
+    BOOL fresh = NO;
+    if (![gRefusedDirs containsObject:dir]) {   // stores still in flight in a refused folder do not choose again
+        if (!gRefusedDirs) gRefusedDirs = [NSMutableSet new];
+        [gRefusedDirs addObject:dir]; fresh = YES;
+    }
+    const int g = fresh ? ++gCacheGen : gCacheGen;
+    os_unfair_lock_unlock(&gCacheDirLock);
+    static _Atomic unsigned long n;
+    const unsigned long k = atomic_fetch_add(&n, 1) + 1;
+    if (fresh || k <= 3 || !(k & (k - 1)))   // a new folder always; repeats in one the first few, then powers of two
+        nvlog("cache: a %s store was refused in %s (%lu so far)%s (generation %d)", what, dir.UTF8String, k,
+              fresh ? " - choosing the cache folders again without it" : "", g);
 }
 static NSString *nvmtl_aircache_dir(void) {
     os_unfair_lock_lock(&gCacheDirLock);
     const int gen = gCacheGen;
     if (gAirDir && gAirGen == gen) { NSString *d = gAirDir; os_unfair_lock_unlock(&gCacheDirLock); return d; }
     NSString *prev = gAirDir, *dir = nil;
+    BOOL off = NO;
     const char *e = getenv("NVMTL_AIRCACHE");
-    if (e) dir = @(e);
-    else if (access(NVMTL_AIRCACHE_DIR, W_OK) == 0) dir = @NVMTL_AIRCACHE_DIR;
+    if (e) { dir = @(e); off = nvmtl_dir_refused(dir); }
+    // the system folder is taken on access() the first time (no file I/O); after a refusal it must pass the probe
+    else if (!nvmtl_dir_refused(@NVMTL_AIRCACHE_DIR) &&
+             (gen == 0 ? access(NVMTL_AIRCACHE_DIR, W_OK) == 0 : nvmtl_dir_writable(@NVMTL_AIRCACHE_DIR))) dir = @NVMTL_AIRCACHE_DIR;
     else {
         NSArray *c = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
         NSString *ucd = nvmtl_user_cache_dir(NO), *own = nvmtl_user_cache_dir(YES);
@@ -252,12 +278,17 @@ static NSString *nvmtl_aircache_dir(void) {
             ucd ? [ucd stringByAppendingPathComponent:@"nvmtl/aircache"] : @"",
             own ? [own stringByAppendingPathComponent:@"nvmtl/aircache"] : @"",
             [NSTemporaryDirectory() stringByAppendingPathComponent:@"nvmtl/aircache"]];
-        for (NSString *d in cand) if (d.length && nvmtl_dir_writable(d)) { dir = d; break; }
-        if (!dir) dir = cand.lastObject;
+        for (NSString *d in cand) if (d.length && !nvmtl_dir_refused(d) && nvmtl_dir_writable(d)) { dir = d; break; }
+        if (!dir) {
+            off = nvmtl_dir_refused(cand.lastObject);   // the fallback has refused too: no folder left to store in
+            dir = off ? (prev ?: cand.lastObject) : cand.lastObject;
+        }
     }
     gAirDir = dir; gAirGen = gen;
+    const BOOL wasOff = atomic_exchange(&gAirStoresOff, off);
     os_unfair_lock_unlock(&gCacheDirLock);
-    if (prev && ![prev isEqualToString:dir]) nvlog("aircache: %s refused a store - caching in %s", prev.UTF8String, dir.UTF8String);
+    if (off && !wasOff) nvlog("aircache: every cache folder refused a store - AIR text is not stored in this process (reads go on from %s)", dir.UTF8String);
+    else if (prev && ![prev isEqualToString:dir]) nvlog("aircache: %s refused a store - caching in %s", prev.UTF8String, dir.UTF8String);
     return dir;
 }
 static _Atomic unsigned long gSpvHit, gSpvMiss, gSpvStored;
@@ -384,10 +415,21 @@ static BOOL nvmtl_dir_writable(NSString *d) {
     if (!d || ![[NSFileManager defaultManager] createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil]) return NO;
     // prod9e: the probe is written as the stores are (data, atomically): an empty file needs only file-write-create,
     // and Safari's GPU process sandbox (macOS 26) let that through where every real store was refused
-    NSString *probe = [d stringByAppendingPathComponent:[NSString stringWithFormat:@".probe-%d.spv", getpid()]];
+    // prod9f: and as the record stores are (a uniquely named temporary file, written, then renamed beside it): the
+    // atomic write alone still passed in Safari's GPU process while the stores kept being refused
+    static _Atomic unsigned probeSeq;
+    const unsigned seq = atomic_fetch_add(&probeSeq, 1);
+    NSString *probe = [d stringByAppendingPathComponent:[NSString stringWithFormat:@".probe-%d-%u.spv", getpid(), seq]];
+    NSString *tmp = [probe stringByAppendingFormat:@".%d.tmp", getpid()];
     static const char kProbe[] = "nvmtl cache probe";
-    const BOOL ok = [[NSData dataWithBytes:kProbe length:sizeof kProbe] writeToFile:probe options:NSDataWritingAtomic error:nil];
-    if (ok) unlink(probe.fileSystemRepresentation);
+    NSData *bytes = [NSData dataWithBytes:kProbe length:sizeof kProbe];
+    BOOL ok = [bytes writeToFile:tmp options:NSDataWritingWithoutOverwriting error:nil];
+    if (ok) {
+        ok = rename(tmp.fileSystemRepresentation, probe.fileSystemRepresentation) == 0;
+        if (!ok) unlink(tmp.fileSystemRepresentation);
+    }
+    if (ok) ok = [bytes writeToFile:probe options:NSDataWritingAtomic error:nil];   // replaces it, as a cache store does
+    unlink(probe.fileSystemRepresentation);
     return ok;
 }
 // A cache entry's name carries the build of the translator that made it, so after a driver update none of the older
@@ -445,12 +487,16 @@ static NSString *nvmtl_spvcache_dir(void) {
     // both folders above refused it, so it translated every CoreAnimation shader again on each boot (N-89, Tahoe).
     NSString *ownBase = nvmtl_user_cache_dir(YES);
     NSString *own = ownBase ? [ownBase stringByAppendingPathComponent:@"nvmtl/spvcache"] : nil;
-    if (nvmtl_dir_writable(beside)) dir = beside;
-    else if (nvmtl_dir_writable(own)) dir = own;
-    else if (nvmtl_dir_writable(tmp)) dir = tmp;
+    BOOL off = NO;
+    if (!nvmtl_dir_refused(beside) && nvmtl_dir_writable(beside)) dir = beside;
+    else if (!nvmtl_dir_refused(own) && nvmtl_dir_writable(own)) dir = own;
+    else if (!nvmtl_dir_refused(tmp) && nvmtl_dir_writable(tmp)) dir = tmp;
+    else if (prev) { dir = prev; off = nvmtl_dir_refused(prev); }   // every folder refused: read on, store nothing
     gSpvDir = dir; gSpvGen = gen;
+    const BOOL wasOff = atomic_exchange(&gSpvStoresOff, off);
     os_unfair_lock_unlock(&gCacheDirLock);
-    if (dir && ![dir isEqualToString:beside]) nvlog("spvcache: %s is not writable here - caching in %s", beside.UTF8String, dir.UTF8String);
+    if (off) { if (!wasOff) nvlog("spvcache: every cache folder refused a store - translated shaders are not stored in this process (reads go on from %s)", dir.UTF8String); }
+    else if (dir && ![dir isEqualToString:beside]) nvlog("spvcache: %s is not writable here - caching in %s", beside.UTF8String, dir.UTF8String);
     else if (!dir) nvlog("spvcache: no writable folder in this process (%s, %s) - translated shaders are not cached", beside.UTF8String, tmp.UTF8String);
     (void)prev;
     return dir;
@@ -752,7 +798,8 @@ static NSString *nvmtl_air_to_text(NSData *air) {
     if (nvmtl_hitch_ms()) nvmtl_hitch_add_ns(NVH_SPVMISS, 0);
     NSString *memoryIR = nvmtl_air_in_memory(air);
     if (memoryIR.length) {
-        if ([memoryIR writeToFile:cache atomically:YES encoding:NSUTF8StringEncoding error:nil]) gAirStored++; else nvmtl_cache_store_refused("aircache");
+        if (!nvmtl_air_stores_on()) {}
+        else if ([memoryIR writeToFile:cache atomically:YES encoding:NSUTF8StringEncoding error:nil]) gAirStored++; else nvmtl_cache_store_refused("aircache", cache);
         return nvmtl_air_text_made(memoryIR);
     }
 
@@ -765,11 +812,11 @@ static NSString *nvmtl_air_to_text(NSData *air) {
     }
     NSString *ll = [NSString stringWithContentsOfFile:outp encoding:NSUTF8StringEncoding error:nil];
     unlink(inp.UTF8String); unlink(outp.UTF8String);
-    if (ll.length) {
+    if (ll.length && nvmtl_air_stores_on()) {
         NSError *mkerr = nil;
         [[NSFileManager defaultManager] createDirectoryAtPath:nvmtl_aircache_dir()
                                   withIntermediateDirectories:YES attributes:nil error:&mkerr];
-        if ([ll writeToFile:cache atomically:YES encoding:NSUTF8StringEncoding error:nil]) gAirStored++; else nvmtl_cache_store_refused("aircache");
+        if ([ll writeToFile:cache atomically:YES encoding:NSUTF8StringEncoding error:nil]) gAirStored++; else nvmtl_cache_store_refused("aircache", cache);
     }
     return nvmtl_air_text_made(ll);
 }
@@ -1034,11 +1081,12 @@ NSData *nvmtl_compile_library_entry(NSData *air, NSString *ll, NSString *stage, 
             }
             spvData = [NSData dataWithBytes:spv length:spvn];
             { NSError *werr = nil;
-              if (spvp && [spvData writeToFile:spvp options:NSDataWritingAtomic error:&werr]) {
+              if (spvp && !nvmtl_spv_stores_on()) {}
+              else if (spvp && [spvData writeToFile:spvp options:NSDataWritingAtomic error:&werr]) {
                   gSpvStored++;
                   atomic_fetch_add_explicit(&gSpvAdded, (unsigned long long)spvData.length, memory_order_relaxed);
               } else if (spvp) {
-                  nvmtl_cache_store_refused("spvcache"); nvlog("spvcache: STORE FAILED %s (%zu bytes): %s", spvp.lastPathComponent.UTF8String,
+                  nvmtl_cache_store_refused("spvcache", spvp); nvlog("spvcache: STORE FAILED %s (%zu bytes): %s", spvp.lastPathComponent.UTF8String,
                         (size_t)spvData.length, werr.localizedDescription.UTF8String ?: "?");
               } }
         }
@@ -1212,14 +1260,14 @@ static NSDictionary *nvmtl_index_metallib_disk(NSData *lib, NSData *key, NSDicti
     NSMutableArray *rec = [NSMutableArray new]; NSDictionary *st = nil, *ai = nil;
     NSDictionary *fns = nvmtl_index_metallib_uncached(lib, &st, &ai, rec);
     if (stageOut) *stageOut = st; if (airOut) *airOut = ai;
-    if (fns && st && ai && p && rec.count) {
+    if (fns && st && ai && p && rec.count && nvmtl_air_stores_on()) {
         NSArray *ext = nvmtl_externs_of_airs(ai) ?: @[];
         NSData *out = [NSPropertyListSerialization dataWithPropertyList:@{@"v": @1, @"length": @(lib.length), @"blobs": rec, @"externs": ext}
                                                                  format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
         NSString *tmp = [p stringByAppendingFormat:@".%d.tmp", getpid()];
         if (out && [out writeToFile:tmp atomically:NO] && rename(tmp.fileSystemRepresentation, p.fileSystemRepresentation) == 0)
             nvlog("library index: disk record stored (%lu blobs, %lu externs) %s", (unsigned long)rec.count, (unsigned long)ext.count, p.lastPathComponent.UTF8String);
-        else { unlink(tmp.fileSystemRepresentation); nvmtl_cache_store_refused("library index"); nvlog("library index: could not store the disk record %s", p.lastPathComponent.UTF8String); }
+        else { unlink(tmp.fileSystemRepresentation); nvmtl_cache_store_refused("library index", p); nvlog("library index: could not store the disk record %s", p.lastPathComponent.UTF8String); }
     }
     return fns;
 }
@@ -1282,12 +1330,13 @@ NSData *nvmtl_libkey_for_file(NSString *path, NSData *lib, const struct stat *be
     r.dev = (uint64_t)now.st_dev; r.ino = (uint64_t)now.st_ino; r.size = (uint64_t)now.st_size;
     r.mts = now.st_mtimespec.tv_sec; r.mtn = now.st_mtimespec.tv_nsec; r.cts = now.st_ctimespec.tv_sec; r.ctn = now.st_ctimespec.tv_nsec;
     memcpy(r.edge, edge, sizeof edge); memcpy(r.key, key.bytes, sizeof r.key);
+    if (!nvmtl_air_stores_on()) return key;
     [[NSFileManager defaultManager] createDirectoryAtPath:nvmtl_aircache_dir() withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *tmp = [rp stringByAppendingFormat:@".%d.tmp", getpid()];
     if ([[NSData dataWithBytes:&r length:sizeof r] writeToFile:tmp atomically:NO] && rename(tmp.fileSystemRepresentation, rp.fileSystemRepresentation) == 0) {
         const unsigned long st = atomic_fetch_add(&gLkStored, 1) + 1;
         if (!(st & (st - 1))) nvlog("library key memo: stored %lu (%lu B %s)", st, (unsigned long)lib.length, path.lastPathComponent.UTF8String);
-    } else { unlink(tmp.fileSystemRepresentation); nvmtl_cache_store_refused("library key memo"); nvlog("library key memo: could not store %s", name); }
+    } else { unlink(tmp.fileSystemRepresentation); nvmtl_cache_store_refused("library key memo", rp); nvlog("library key memo: could not store %s", name); }
     return key;
 }
 NSDictionary<NSString *, NSData *> *nvmtl_translate_metallib_k(NSData *lib, NSData *knownKey, NSDictionary **stageOut, NSDictionary **airOut);
