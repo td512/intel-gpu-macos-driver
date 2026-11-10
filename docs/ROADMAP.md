@@ -65,7 +65,7 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   NO (no lowering), the sparse tiers None, and a pipeline's reflection nil (no `MTL4Compiler`).
 
 ### GPU-encoded indirect command buffers
-- **Done (10 Nov, branch gpu-icb, untested on the B580):** shaders that encode draws into an `MTLIndirectCommandBuffer`
+- **Done (10 Nov, merged; 6/6 on the B580):** shaders that encode draws into an `MTLIndirectCommandBuffer`
   (`render_command::draw_primitives`, `draw_indexed_primitives` with uint16 and uint32 indices, `reset`) translate and
   run. WebKit's WebGPU index-validation helpers `vsICB` / `vsUshortICB` (render bundles, `drawIndexed`) were refused as
   an unrecognised AIR family; they now translate and pass spirv-val. Design (`plugin/nvmtl_icb_layout.h`,
@@ -85,8 +85,13 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
     the execute (render-encoder memory barrier or encoder boundary), as Metal requires; both are already
     `ALL_COMMANDS`/`MEMORY_WRITE -> MEMORY_READ` and cover the indirect-argument read.
   - Test: `user/tests/metal/mtl_gpu_icb.m` (a kernel encodes a draw, two indexed draws whose first index comes from
-    the index pointer, and a reset; a rasterizer-less vertex shader empties a CPU draw as `vsICB` does). Passes on the
-    Apple GPU with `--any`; not yet run on the B580.
+    the index pointer, and a reset; a rasterizer-less vertex shader empties a CPU draw as `vsICB` does; the index
+    pointers are loaded from memory, as `vsICB` loads them). 6/6 on the B580 and on the Apple GPU (`--any`); in
+    `tools/regress` as the `gpu_icb` stage. The first B580 run refused both GPU-encoded indexed draws: the emitter
+    lowers a `ptrtoint` without an address payload to 0. The lowering's own `ptrtoint`s (`%nvicbN.addr`) now take a
+    loaded pointer's device address plus its offset, an entry buffer parameter's address, and `p + k` as the address
+    of `p` plus k elements; other shaders' `ptrtoint`s are unchanged. The entry-parameter form is untested on the GPU.
+  - Not measured: an indexed slot of a GPU-encodable ICB issues two indirect draws (one with zero counts).
 - **Limits (core Vulkan takes neither an index buffer address nor a topology from GPU memory).** A GPU-written indexed
   draw must point into the index buffer the CPU encoded in that slot (same index type, inside the buffer, aligned):
   the first index is computed from the pointer. A GPU-written draw must use the topology the execute chose (the
