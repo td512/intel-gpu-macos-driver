@@ -19,7 +19,7 @@ pub use embedded::{
 pub(crate) use function_constants::function_constants_without_a_supplied_value;
 pub use function_constants::{parse_function_constants, FunctionConstant};
 use globals::{location_index_with_static, static_init_int_global_values};
-pub(crate) use globals::{static_init_foldable_global_values, StaticIntValue};
+pub(crate) use globals::{fold_static_init_struct_fields, static_init_foldable_global_values, StaticIntValue};
 pub use globals::with_function_constants_unknown;
 pub(crate) use globals::fc_values_unknown as function_constants_are_unknown;
 pub use intersections::{
@@ -89,6 +89,8 @@ pub enum VaryingSampling {
 pub struct VaryingInterpolation {
     pub flat: bool,
     pub no_perspective: bool,
+    /// The shader names the input as an `interpolant<T>` and asks for the value at an offset, a sample or the centroid.
+    pub pull: bool,
     pub sampling: VaryingSampling,
 }
 
@@ -98,6 +100,7 @@ impl VaryingInterpolation {
         Self {
             flat: has("flat"),
             no_perspective: has("no_perspective"),
+            pull: has("interpolation_function"),
             sampling: if has("centroid") {
                 VaryingSampling::Centroid
             } else if has("sample") {

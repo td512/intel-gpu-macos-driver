@@ -222,8 +222,8 @@ pub(in crate::native::emitter) fn is_air_texture_operation(callee: &str) -> bool
         || callee.starts_with("air.get_num_mip_levels_texture")
         || callee.starts_with("air.get_num_mip_levels_depth")
         || crate::air_intrinsics::is_image_sample_count_query(callee)
-        || callee.starts_with("air.calculate_unclamped_lod_texture")
-        || callee.starts_with("air.calculate_clamped_lod_texture")
+        || callee.starts_with("air.calculate_unclamped_lod_")
+        || callee.starts_with("air.calculate_clamped_lod_")
         || callee.starts_with("air.is_null_texture")
         || callee.starts_with("air.fence_texture")
 }

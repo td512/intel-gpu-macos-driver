@@ -9,6 +9,8 @@
 #import <Metal/Metal.h>
 #import <IOSurface/IOSurface.h>
 #include "nvmtl_vk.h"
+#include "nvmtl_counter_heap.h"   /* nm29: Metal 4 counter heaps (NVMTLMetal4.m) */
+#include "nvmtl_caps_query.h"     /* nm29: capability answers from the Vulkan bits */
 #include "nvmtl_cmd_refusal.h"
 
 static inline NSMutableData *nvmtl_fc_storage(NSUInteger count) {
@@ -96,6 +98,7 @@ NVMTLArgument *nvmtl_argument_for_buffer(NVMTLFunction *fn, NSUInteger index);
 id nvmtl_render_reflection(MTLRenderPipelineDescriptor *d);
 id nvmtl_compute_reflection(id<MTLFunction> fn);
 id<MTLFunction> nvmtl_link_kernel(MTLComputePipelineDescriptor *d, NSError **err);
+NVMTLFunction *nvmtl_kernel_with_stage_in(NVMTLFunction *fn, MTLStageInputOutputDescriptor *sd, NSError **err);
 id<MTLFunction> nvmtl_link_stage(id<MTLFunction> k, MTLLinkedFunctions *lf, NSArray *dylibs, NSError **err);
 void nvmtl_render_keep_linked(id ps, id<MTLFunction> vf, id<MTLFunction> ff);
 void nvmtl_note_compile_dylibs(id lib, NSArray *libraries);
@@ -377,7 +380,14 @@ BOOL nvmtl_air_grid_only(NVMTLFunction *fn);
 typedef struct { nvk_image img; uint32_t key[12]; NSUInteger off, len; } nvmtl_park_t;
 @interface NVMTLTexture () { @public BOOL _subPlaced, _parkable; uint32_t _pkey[12]; NSUInteger _pkLen; } @end
 @interface NVMTLHeap () { @public nvmtl_park_t *_pk; uint32_t _npk; } @end
+// Lazy backing: _lzc = slot size (0 = the heap owns one _hm of its full size). _lzo[slot] = 1 + index into _lzm/_lzb (0 = no
+// memory yet); one backing may cover several slots (a resource larger than a slot gets one backing for all of them).
+@interface NVMTLHeap () { @public size_t _lzc; uint32_t _lzn, _lzcap, _lzslots; nvk_heap *_lzm; size_t *_lzb; uint16_t *_lzo;
+                         os_unfair_lock _lzl; } @end
 @interface NVMTLBuffer () { @public nvmtl_park_t *_bpk; uint32_t _nbpk; os_unfair_lock _bpl; } @end
+// What this buffer last put in the Metal 4 address table: base, end, and the table epoch at the time. -gpuAddress
+// skips the table (one global lock) while all three still hold - see nvmtl_m4_note_current.
+@interface NVMTLBuffer () { @public _Atomic uint64_t _m4note[3]; } @end
 @interface NVMTLTexture () { @public BOOL _bparkable; } @end
 static void nvmtl_heap_park(NVMTLHeap *h, nvk_image *img, const uint32_t *key, NSUInteger off, NSUInteger len);
 void nvmtl_heap_back(NVMTLHeap *h, NSUInteger size, int shared);

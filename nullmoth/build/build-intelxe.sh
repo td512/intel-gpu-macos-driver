@@ -9,12 +9,13 @@
 #
 # Products ($OUT, default <repo>/build/nullmoth):
 #   NVMTLDriver.bundle/   -> /Library/GPUBundles/NVMTLDriver.bundle   (Metal driver plugin)
-#     Contents/MacOS/NVMTLDriver, libnvmtl_translate.dylib (AIR -> SPIR-V), air-runtime/libLLVM.dylib + libzstd.1.dylib
+#     Contents/MacOS/NVMTLDriver, libnvmtl_translate.dylib (AIR -> SPIR-V), nvmtl-air-dis (out-of-process AIR decoder),
+#     air-runtime/libLLVM.dylib + libzstd.1.dylib
 #   NMXAccel.kext/        -> /Library/Extensions/NMXAccel.kext         (IOGraphicsAccelerator2 for 8086:e20b)
 #   NMXAGDC.kext/         -> /Library/Extensions/NMXAGDC.kext          (AppleGraphicsDeviceControl listing IntelXeFB)
 #   nvmtl/                -> /Library/GPUBundles/nvmtl/                (intel_icd.json + ANV, only if ANV_DYLIB is set)
 #   nvmtl-allow.txt       -> /Library/GPUBundles/nvmtl-allow.txt
-#   mtl_smoke, xlate_check, mtl_cube_read, mtl_props, mtl_f32filter, mtl_timestamps   tests (user/tests/metal)
+#   mtl_smoke, xlate_check, mtl_cube_read, mtl_props, mtl_f32filter, mtl_timestamps, mtl_gpu_icb, mtl_lod_pull   tests (user/tests/metal)
 #
 # Nothing here installs or loads anything. Inputs (environment):
 #   MACKERNELSDK   MacKernelSDK checkout (default <repo>/external/MacKernelSDK)
@@ -66,6 +67,11 @@ if want plugin; then
     -framework Foundation -framework Metal -framework IOSurface -framework IOKit -framework CoreFoundation 2>"$OUT/plugin.err" \
     || { grep -A2 ': error:' "$OUT/plugin.err" | head -30; exit 1; }
 
+  # 2b. nvmtl-air-dis (plugin/air_dis.c, nullmoth 2.9): the out-of-process AIR decoder the plugin runs beside itself when the
+  #     in-process reader cannot take a library; it loads the same air-runtime/libLLVM.dylib
+  xcrun --sdk "$SDK" clang -isysroot "$SDK" -arch x86_64 -mmacosx-version-min=15.0 -O2 -Wall -Wextra -Werror \
+    -o "$OUT/nvmtl-air-dis" "$NM/plugin/air_dis.c" 2>"$OUT/air-dis.err" || { cat "$OUT/air-dis.err"; exit 1; }
+
   # 3. air-runtime (the in-process AIR bitcode reader the plugin dlopens from Contents/MacOS/air-runtime)
   echo "== air-runtime"
   AR=$OUT/air-runtime
@@ -101,7 +107,8 @@ if want plugin; then
 </plist>
 EOF
   sed -i '' "s/@IXVER@/$IXVER/g" "$B/Info.plist"
-  cp "$OUT/NVMTLDriver" "$B/MacOS/"; cp "$XL" "$B/MacOS/"; cp -R "$AR" "$B/MacOS/air-runtime"
+  cp "$OUT/NVMTLDriver" "$B/MacOS/"; cp "$XL" "$B/MacOS/"; cp "$OUT/nvmtl-air-dis" "$B/MacOS/"; cp -R "$AR" "$B/MacOS/air-runtime"
+  codesign -f -s - "$B/MacOS/nvmtl-air-dis"
   cp -R "$OUT/air-runtime-licenses" "$B/Resources/air-runtime"
   codesign -f -s - "$B/MacOS/libnvmtl_translate.dylib"
   codesign -f -s - "$OUT/NVMTLDriver.bundle"
@@ -161,7 +168,7 @@ fi
 
 if want tests || [ "$WHAT" = all ]; then
   echo "== tests"
-  for t in mtl_smoke xlate_check mtl_cube_read mtl_props mtl_f32filter mtl_timestamps mtl_gpu_icb; do
+  for t in mtl_smoke xlate_check mtl_cube_read mtl_props mtl_f32filter mtl_timestamps mtl_gpu_icb mtl_lod_pull; do
     xcrun --sdk "$SDK" clang -isysroot "$SDK" -arch x86_64 -mmacosx-version-min=15.0 -fobjc-arc -O1 -g -Wall \
       -Werror=unguarded-availability-new -o "$OUT/$t" "$REPO/user/tests/metal/$t.m" -framework Foundation -framework Metal -framework IOKit
   done

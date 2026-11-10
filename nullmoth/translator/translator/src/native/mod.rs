@@ -12,6 +12,7 @@ mod emit_tiers;
 mod imageblock;
 mod inline;
 mod inline_sampler;
+mod sampler_table;
 pub(crate) mod ir;
 mod lex;
 mod module_reuse;
@@ -69,6 +70,11 @@ fn lower_air_text_uncached(san_ll: &str) -> std::borrow::Cow<'_, str> {
     // rtopt4: curves, user IDs and primitive data through the acceleration structure header (rt_runtime)
     if let Some(rt) = crate::rt_runtime::rewrite_text(san_ll) {
         return std::borrow::Cow::Owned(lower_air_text_owned(rt));
+    }
+    // nm29 (839327f): program-scope sampler tables become constexpr samplers chosen by index; a module without one is
+    // not copied
+    if let std::borrow::Cow::Owned(lowered) = sampler_table::lower_global_sampler_tables(san_ll) {
+        return std::borrow::Cow::Owned(lower_air_text_owned(lowered));
     }
     // then (nm266, before every other text step): older toolchains write a constexpr sampler as an integer in the call, which reflection and the sampler pass
     // only know in the metadata form
@@ -148,6 +154,11 @@ fn lower_air_text_rest(san_ll: &str) -> std::borrow::Cow<'_, str> {
 pub(crate) fn lower_air_text_owned(san_ll: String) -> String {
     let san_ll = crate::rt_runtime::rewrite_text(&san_ll).unwrap_or(san_ll);
     let san_ll = render_command::lower_render_commands_owned(san_ll);
+    // nm29 (839327f): program-scope sampler tables become constexpr samplers chosen by index
+    let san_ll = match sampler_table::lower_global_sampler_tables(&san_ll) {
+        std::borrow::Cow::Borrowed(_) => san_ll,
+        std::borrow::Cow::Owned(lowered) => lowered,
+    };
     let san_ll = match inline_sampler::lower_inline_sampler_constants(&san_ll) {
         std::borrow::Cow::Borrowed(_) => san_ll,
         std::borrow::Cow::Owned(lowered) => lowered,

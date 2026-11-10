@@ -179,3 +179,77 @@ pub(in crate::passes) fn lower_sample_position(
         ),
     ])
 }
+
+/// `air.interpolate_{center,offset,sample,centroid}_{perspective,no_perspective}.<type>(interpolant, ...)`: the value of
+/// a fragment input at the pixel centre, at a pixel offset, at a sample index, or at the centroid. The interpolant is
+/// the Input variable itself (see stage_input); its perspective setting is the decoration on that variable. A half
+/// interpolant travels as 32-bit float, as every half varying does (byte_varying_interface_type), so it is interpolated
+/// at 32 bits and converted. The centre is an offset of (0, 0) in SPIR-V's terms; Metal's offsets count from the pixel's
+/// upper-left corner, so 0.5 is taken off each.
+pub(in crate::passes) fn lower_pull_interpolation(
+    ctx: &mut Ctx,
+    name: &str,
+    res: Option<Word>,
+    rty: Option<Word>,
+    args: &[Word],
+) -> Result<Vec<Instruction>, String> {
+    let (Some(res), Some(rty)) = (res, rty) else {
+        return Err(format!("{name} has no result"));
+    };
+    let (op, expected_args) = if name.starts_with("air.interpolate_offset_") {
+        (GLSLstd450::InterpolateAtOffset, 2)
+    } else if name.starts_with("air.interpolate_center_") {
+        (GLSLstd450::InterpolateAtOffset, 1)
+    } else if name.starts_with("air.interpolate_sample_") {
+        (GLSLstd450::InterpolateAtSample, 2)
+    } else if name.starts_with("air.interpolate_centroid_") {
+        (GLSLstd450::InterpolateAtCentroid, 1)
+    } else {
+        return Err(format!("{name}: not a pull-model interpolation"));
+    };
+    if args.len() != expected_args {
+        return Err(format!("{name} expects {expected_args} operand(s), got {}", args.len()));
+    }
+    let half = name.ends_with("f16");
+    let lanes = name
+        .rsplit('.')
+        .next()
+        .and_then(|t| t.strip_prefix('v'))
+        .and_then(|t| t.split('f').next())
+        .and_then(|n| n.parse::<u32>().ok())
+        .unwrap_or(1);
+    let value_ty = if !half {
+        rty
+    } else if lanes == 1 {
+        ctx.ty_float()
+    } else {
+        ctx.ty_vecf(lanes)
+    };
+    let ext = ctx.glsl();
+    let mut out = Vec::new();
+    let mut operands = vec![Operand::IdRef(ext), Operand::LiteralExtInstInteger(op as u32), Operand::IdRef(args[0])];
+    if name.starts_with("air.interpolate_offset_") {
+        // Metal's offset is from the pixel's upper-left corner ([0, 1), the centre is (0.5, 0.5)); InterpolateAtOffset's
+        // is from the centre. (Upstream passed it through: every offset read half a pixel up and to the left.)
+        let vec2 = ctx.ty_vecf(2);
+        let point_five = ctx.const_float(0.5);
+        let halves = ctx.const_composite(vec2, vec![point_five, point_five]);
+        let centred = ctx.module.fresh_id();
+        out.push(Instruction::new(Op::FSub, Some(vec2), Some(centred), vec![Operand::IdRef(args[1]), Operand::IdRef(halves)]));
+        operands.push(Operand::IdRef(centred));
+    } else if let Some(&extra) = args.get(1) {
+        operands.push(Operand::IdRef(extra));
+    } else if name.starts_with("air.interpolate_center_") {
+        let zero = ctx.const_float(0.0);
+        let vec2 = ctx.ty_vecf(2);
+        operands.push(Operand::IdRef(ctx.const_composite(vec2, vec![zero, zero])));
+    }
+    if !half {
+        out.push(Instruction::new(Op::ExtInst, Some(rty), Some(res), operands));
+        return Ok(out);
+    }
+    let wide = ctx.module.fresh_id();
+    out.push(Instruction::new(Op::ExtInst, Some(value_ty), Some(wide), operands));
+    out.push(Instruction::new(Op::FConvert, Some(rty), Some(res), vec![Operand::IdRef(wide)]));
+    Ok(out)
+}

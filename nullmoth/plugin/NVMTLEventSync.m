@@ -1289,6 +1289,13 @@ static void nvmtl_v2_ahead(void) { nvmtl_combine(&gV2Ahead, nvmtl_v2_ahead_pass,
             for (NVMTLBuffer *buffer in nvmtl_submission_copies(part->resources, YES)) nvmtl_buffer_sync_out(buffer);
         }
         if (!published) {
+            // nm29 (nullmoth f9fe87b) -3: the command buffer was made after the GPU was lost. Metal reports a removed GPU
+            // as DeviceRemoved (11).
+            if (result == -3) {
+                [self nvmtlFinishExecution:[NSError errorWithDomain:MTLCommandBufferErrorDomain code:11
+                    userInfo:@{NSLocalizedDescriptionKey:@"The GPU was lost; this command buffer was not executed"}]];
+                return YES;
+            }
             [self nvmtlFinishExecution:nvmtl_part_error(result, result ? @"GPU event segment submission failed" : @"Could not publish event segment writes")];
             return YES;
         }
