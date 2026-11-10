@@ -53,6 +53,17 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   compute-runtime items left in `docs/parity/` went from 35 to 24. Host tests in `kernel/IntelXe/tests/uapi_test.cpp`,
   the GPU test in `user/tests/kernel/ufence.c`. A Level Zero / oneAPI runtime on macOS is still to come.
 
+### Metal API coverage
+- **Done (10 Nov):** the 31 protocol properties the compiler found unimplemented in the plugin are answered from real
+  data (12 of them by Metal's own device class, now declared); an application that asked `supportsPlacementSparse`
+  crashed with an unrecognized selector and now gets NO (checked on the B580 with `mtl_props`; `mtl_f32filter` passes
+  for `supports32BitFloatFiltering`).
+- **Done (10 Nov):** texel reads of sampled cube and cube-array textures keep the cube view their heap slot holds and
+  read the right level through the synthesized read sampler, which the plugin now binds (`mtl_cube_read`: every case
+  passes on the B580; before, every texel was wrong and cube arrays did not translate).
+- Open: `supportsQueryTextureLOD` is NO (the translator lowers non-array 2D only), `supportsPullModelInterpolation`
+  NO (no lowering), the sparse tiers None, and a pipeline's reflection nil (no `MTL4Compiler`).
+
 ### Descriptor model
 - Stage 1 (front end without per-draw atomics or retain/release, address table, bind cache): done. Stage 2, the descriptor-buffer model, is in the plugin behind `NVMTL_DESC_MODEL=buffer` and off by default until it has been soaked (`docs/design/DESCRIPTOR-MODEL.md`).
 - Pools: done (see the BAR window). A full pool set now waits for in-flight work and then fails the command buffer with a Metal error, never silently.
@@ -76,6 +87,12 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 
 ### Browsers
 - **Done (2026-10-30):** Chrome/Electron in their GPU sandbox; Safari WebGL through the optional system-volume plugin copy.
+- **Done (10 Nov, translator):** Safari WebGPU's argument-buffer textures, which WebKit reads as 64-bit resource IDs:
+  the webgpu-samples deferredRendering sample failed with "Fragment function failed creation" and its G-buffer reads
+  were zero; all 88 WebGPU libraries Safari compiled on the B580 now translate (one failed). Textures merged by a phi or
+  select read the chosen heap slot (no captured shader has the pattern; untested on the device).
+- **Next:** re-run the WebGPU samples in Safari on the B580 with the new plugin; samplers merged by a phi (argument-buffer
+  samplers are off by default).
 - Open: the system-volume install breaks the sealed snapshot (as OpenCore Legacy Patcher's root patches do); a macOS update removes it (`ssv-install.sh --check`).
 
 ### Hybrid Intel CPUs (HybridPM)
@@ -88,10 +105,13 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Next:** run the Windows EFI tool's HybridPM step on Windows (checked on macOS against `efi.sh` only).
 
 ### Idle power (PCIe ASPM)
-- Measured on 10 Nov 2026 with the PMT power readings in `debug.intelxe.sensors`: idle card power 36.2 W (package
-  19.6 W), light load 40.4 W. Intel's documentation for Arc B-series ties low idle power to PCIe ASPM L1 on the card's
+- **Done (10 Nov):** card and package energy and average power in `debug.intelxe.sensors`, from the BMG PMT telemetry
+  as Linux `xe_hwmon` reads it (host test `pmt_test`). Power limits are left out until the kext has a pcode mailbox
+  helper.
+- Measured on 10 Nov 2026 through the same PMT registers (read-only reads): idle card power 36.2 W (package
+  19.6 W), light load 40.4 W (package 23.3 W). Intel's documentation for Arc B-series ties low idle power to PCIe ASPM L1 on the card's
   path (root port, the card's own switch, the GPU); Windows with ASPM idles far lower.
-- **Experimental, untested on hardware (since 10 Nov in this tree):** `debug.intelxe.aspm` reports every link between
+- **Experimental, untested on hardware (since 10 Nov in this tree, in the 0.1.4 kext):** `debug.intelxe.aspm` reports every link between
   the GPU and its root port (Link Capabilities/Control/Status, Device Capabilities, L1 PM Substates) and whether L1
   passes Linux's checks; `debug.intelxe.aspm_l1=1` turns L1 on through `IOPCIDevice::setASPMState` where every check
   passes, `0` turns ASPM off, `-1` (default) leaves the firmware's settings. Nothing changes unless it is written.
@@ -152,7 +172,9 @@ The kext is organized around the graphics IP version (Xe2 / graphics 20.01, medi
 | Arc Pro B70 | larger Battlemage configuration | device ID, topology; possibly display/PHY tables |
 
 Since the platform descriptors (`kernel/IntelXe/xe_platform.cpp`, 10 Nov), every BMG-G21 card shares the supported
-entry: the B50 and B60 need only their `IOPCIMatch` ID and a `model` name, then a test. BMG-G31 (e220-e223) has its own
+entry: the B50 and B60 need only their entry in `data/platforms.json` `"supported"` (`tools/parity/devices.py` then
+names every copy of the list to change: the `IOPCIMatch` IDs, `install.sh`, `efi.sh`, the app, the Windows EFI tool)
+and a `model` name, then a test. BMG-G31 (e220-e223) has its own
 entry, refused until it is tested; xe's G21-only SLPC minimum (Wa_14022085890) must become conditional first
 ([DESIGN-platforms.md](design/DESIGN-platforms.md)).
 

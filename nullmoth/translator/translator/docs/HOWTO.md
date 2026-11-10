@@ -238,8 +238,10 @@ footprint soundness gate. Treat `access: null` conservatively as read-write.
   `reflect_sanitized_specialized`; reflecting the default AIR can omit a resource selected by a
   non-default value. A consumer that BINDS the specialized module should take its reflection from
   `translate_sanitized_native_specialized_reflected_with_options` instead: `reflect_sanitized*`
-  constructs no module, so the image type behind a texture binding stays at the AIR type name, and a
-  `texturecube` that is only ever texel-read is bound as a 2D array image. Exact predicates also remove false-gated resources from the specialized
+  reflects the AIR, so the image type behind a texture binding stays at the AIR type name. It emits
+  the module only when the AIR may need a synthesized read sampler (a cube texel read,
+  `air.get_read_sampler`, a LOD query), and then only to report that sampler and the null textures
+  at the bindings the module declares. Exact predicates also remove false-gated resources from the specialized
   interface, so consumers bind the selected contract rather than the unspecialized union. A
   generated fullscreen companion must use `translate_passthrough_specialized` with the same
   payloads so its vertex outputs match the selected fragment inputs.

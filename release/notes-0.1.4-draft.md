@@ -1,7 +1,10 @@
 <!-- DRAFT for 0.1.4 (9 Nov 2026, brought up to date with main on 10 Nov). Check before publishing: the package list
 against package.sh's output, the upgrade steps against release/README-INSTALL.md's "Upgrading" section, that the B570
 lines still say "untested", that the packaged IntelXe.kext is built from main after 10 Nov (platform layer, user
-fences) and ran on the B580, and the Windows EFI tool's HybridPM / SSDT-ARCOFF lines once it has run on Windows. -->
+fences) and ran on the B580, and the Windows EFI tool's HybridPM / SSDT-ARCOFF lines once it has run on Windows. Also
+(merges of 10 Nov after 03:00): that the packaged kext and plugin contain them (release.sh refuses packages older than
+the last commit to their sources), the power fields of debug.intelxe.sensors read from the packaged kext, the WebGPU
+deferredRendering sample re-run in Safari with the packaged plugin, and that the ASPM lines still say "untested". -->
 The faster-compute release: Metal and OpenCL work goes through the driver with less locking per command buffer, and a
 translator fix doubles a matrix kernel's speed. Also: the **Arc B570**, a contributed device ID (untested by us),
 **HybridPM** for 12th-14th gen hybrid Intel CPUs, and a redesigned **IntelXe Manager** with a setup assistant from a
@@ -28,6 +31,15 @@ fresh macOS install to a verified driver.
 - **Direct submission (opt-in, off by default).** While an application's queue submits often, it keeps a slot armed
   on its ring and the GPU starts the next job without a round trip through the GuC: a tiny job's exec -> signal 46-52 -> 15-17 us,
   Geekbench 7 Metal 97.2k and OpenCL 92.9k. Turn it on until the next restart with `sudo sysctl debug.intelxe.direct=1`.
+- **Card and package power.** `sysctl debug.intelxe.sensors` now ends with the card's and the package's energy (J) and
+  average power (W), read from the card's PMT telemetry the way Linux `xe_hwmon` reads it. On the test machine the
+  registers gave 36.2 W for the card and 19.6 W for the package at idle, 40.4 W and 23.3 W under light load (read-only
+  register reads, 10 November). The text before the new fields is unchanged. Power limits are not shown yet.
+- **PCIe ASPM report and an L1 switch (experimental, not yet run on a B580).** `sysctl debug.intelxe.aspm` shows the
+  power-saving state (ASPM) of every PCIe link between the GPU and the CPU's root port, and whether L1 passes Linux's
+  checks. `sudo sysctl debug.intelxe.aspm_l1=1` turns L1 on for those links only if every link passes, `0` turns ASPM
+  off, `-1` (the default) leaves them as the firmware set them. Nothing changes unless you write it, and a change lasts
+  until the next restart. It is meant to lower the idle power above; whether it does is not measured yet.
 - **IntelXe Manager, redesigned:** an Overview page with a status header and the one action that matters now; a
   **setup assistant** (prepare OpenCore, with Safari's settings in the same step if you want them; the driver; the EFI
   kext; a GPU test; done), which lists the EFI partitions to choose from when OpenCore recorded none and sets up Safari
@@ -86,7 +98,8 @@ November); compare the columns of one table, not numbers from different days.
 
 - **Arc B570 (8086:E20C).** The kexts, `install.sh`, the app, `efi.sh` and the Windows EFI tool accept it, and About
   This Mac names it. It is the B580's chip (BMG-G21) with fewer Xe-cores, which the driver reads from the fuses. **We
-  have no B570 and have not run it.** If you have one, please try it and open an issue with the diagnostics report
+  have no B570 and have not run it.** The app's GPU test measures it against Intel's specification (11.52 TFLOP/s,
+  380 GB/s), not against figures from a card. If you have one, please try it and open an issue with the diagnostics report
   (`tools/report/collect-macos.sh`), whether it works or not. Thanks to `@1964356263` for the device ID (PR #2).
 - **HybridPM.kext for hybrid Intel CPUs (12th-14th gen, Alder Lake / Raptor Lake with E-cores).** macOS's CPU power
   management caps the P-cores of these CPUs and can hold busy cores at 800 MHz; the GPU driver does a lot of CPU work
@@ -117,7 +130,8 @@ Checksums: `intel-gpu-macos-driver-0.1.4.sha256`. Install guide: `README-INSTALL
    video codecs are those of 0.1.3.
 2. **Replace `IntelXe.kext` in the EFI** before you restart (the app's EFI page, `sudo ./efi.sh --apply` on macOS,
    `IntelXe-EFI.ps1` on Windows, or by hand; its `config.plist` entry stays as it is). It brings the B570's ID, the GPU
-   clock and temperature readings, the settings the app's Power page writes and direct submission.
+   clock, temperature and power readings, the settings the app's Power page writes, direct submission and the
+   experimental ASPM switch.
 3. **Hybrid Intel CPU (12th-14th gen with E-cores)?** The app's EFI page, `efi.sh` and `IntelXe-EFI.ps1` add
    `HybridPM.kext` in step 2, with its `Kernel > Add` entry **below `Lilu.kext`**. `IntelXe-EFI.ps1` goes by the CPU of
    the PC it runs on: run it on the PC that boots the EFI. HybridPM needs Lilu, which this release does not include:
@@ -143,6 +157,22 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
 - Run as root, the macOS report collected no `config.plist` from an EFI partition that OpenCore had left marked dirty at
   boot (macOS mounts such a partition read-write only, so the read-only mount failed); it now mounts it read-only with
   `mount_msdos` and unmounts it afterwards.
+- An application that asked the Metal device for `supportsPlacementSparse` crashed (an unrecognized selector, an
+  uncaught exception); it now gets NO. The device also answers the other properties the Metal driver had left out:
+  `location` is Slot (was Unspecified), `maxTransferRate` comes from the root port's link (15753846152 B/s for the test
+  machine's Gen4 x8 link; was 0), `supports32BitFloatFiltering` and `supports32BitMSAA` are YES as the Vulkan driver
+  reports them, and `maxArgumentBufferSamplerCount` is the sampler heap's 2047. Checked on the B580 on 10 November, the
+  new Metal driver loaded for the test process only; `mtl_f32filter` confirms the 32-bit float filtering (PASS).
+- Texel reads (`read()`) of cube textures that a shader also samples returned wrong data: every texel was wrong (faces
+  1-5 read 0, face 0 read face 4), cube arrays did not translate, and mip levels 1 and 2 read level 0. `mtl_cube_read`
+  now passes every case on the B580 (float, integer and cube-array textures at levels 0-2, and a read-write cube; 10
+  November, the new Metal driver loaded for the test process only).
+- Safari's WebGPU: the deferredRendering sample failed with "Fragment function failed creation", and its G-buffer reads
+  returned zero. WebKit's shader compiler reads a texture from an argument buffer as a 64-bit resource ID, which the
+  translator did not take as a texture. All 88 WebGPU shader libraries that Safari compiled on the B580 now translate
+  (one failed before); this was checked by translating those libraries, not yet by running the sample in Safari. A
+  texture chosen by a branch or a select now reads the chosen texture (before, another bound texture or zero); none of
+  the captured shaders does this, so that part is untested on the device.
 
 ### For developers
 
@@ -163,8 +193,10 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   `xe_bo.c` checks it. Mesa's Vulkan driver does not use user fences, so Metal, Vulkan and OpenGL are unaffected. The
   uAPI parity table (`docs/parity/`) now counts 99 of 182 xe uAPI items and 13 of 16 ioctls (was 77 and 11); the
   compute-runtime items left went from 35 to 24.
-- `debug.intelxe.jobtime` (off by default): each job's stages in GPU timestamps. `debug.intelxe.sensors`: the GT clock
-  and the package and VRAM temperatures, readable by anyone.
+- `debug.intelxe.jobtime` (off by default): each job's stages in GPU timestamps. `debug.intelxe.sensors`: the GT clock,
+  the package and VRAM temperatures and (see Highlights) the card and package energy and power, readable by anyone.
+  `debug.intelxe.aspm` / `debug.intelxe.aspm_l1`: see Highlights; `kernel/README.md` has the checks and the order in
+  which links are changed.
 - The translator emits a relaxed threadgroup atomic (add, min, max, and, or, xor) as relaxed, so Mesa no longer
   fences shared local memory around each one (clbench `hist256`'s loop now matches IGC's code).
 - Tests: `mtl_order_stress` (command buffer ordering across queues and threads), `direct_lat`, `mtl_lat split`,
@@ -172,9 +204,28 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   for the platform table (`kernel/IntelXe/tests/platform_test.cpp`) and the uAPI argument checks
   (`kernel/IntelXe/tests/uapi_test.cpp`). The translator's unit and integration tests pass (one fix: a typed
   pointer with a malformed address space is refused instead of read as generic), and `xlate_check` translates an
-  entry the way `newFunctionWithName:` does.
+  entry the way `newFunctionWithName:` does. New on 10 November: `mtl_cube_read` (every texel of every face, slice and
+  level of cube textures), `mtl_props` (the device properties the Metal driver answers) and `mtl_f32filter` (linear
+  filtering of 32-bit float textures), built by `nullmoth/build/build-intelxe.sh tests`; host tests `pmt_test` (the
+  energy path: offsets, units, counter wraps, average power) and `aspm_test` (46 checks of the ASPM rules, the order of
+  changes and the report).
+- **One supported-device list:** `data/platforms.json` `"supported"` holds the cards the driver attaches to (B580,
+  B570), and `tools/parity/devices.py` fails when any copy differs (the kexts' matches, `install.sh`, `efi.sh`, the app,
+  the Windows EFI tool, the platform test, clbench); `release/release.sh` and `release/test-efi-flow.sh` run it. The
+  app's GPU test takes its expected figures from that list by PCI device ID (another GPU gets no verdict, where any
+  name with "Arc" used to get the B580's figures); the Power page's default range is built from the clock range the
+  kernel reports ("Default (1200-2850 MHz)" on the B580). `clbench` and `cl_lat` choose the OpenCL GPU by vendor ID,
+  and the encoder test path names its encoders after the card's model. `docs/design/DESIGN-platforms.md` section 4
+  lists what a new family needs outside the kernel. `zink-gl/src/mesa-zink.diff`, the source record of the Zink
+  binaries, now holds only what a Zink-only build compiles (it still carried ANV changes from before the IntelXe rename).
+- Tools: `vcbench` crashed when run inside an HEVC set (it looked for an H.264 description); fixed, and `VCB_DUMP=<dir>`
+  writes each picture for comparison. On the B580 (10 November) H.264 2K, HEVC 2K and HEVC 4K hardware pictures equal
+  Apple's software decoder's for every frame; H.264 4K (a full-range stream) equals it in the decoder's own format,
+  while asked for video range the hardware converts and Apple's software H.264 decoder does not. `dmode W H [Hz]`
+  switches the display mode for good (it switched back when the process ended) and can pick the refresh rate.
 - `release/release.sh` checks a release before it is published (version, tag, packages and their checksums, the
-  versions inside, the notes, the identity scan) and publishes it only with `--publish`.
+  versions inside, the notes, the identity scan) and publishes it only with `--publish`. It refuses packages built
+  before the last commit to what goes into them (code, scripts, templates, the packager).
 
 ### Known issues
 
@@ -191,6 +242,8 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   against `efi.sh`, byte for byte, but have not run on Windows yet, and the tool has not yet prepared an EFI that a PC
   then booted. Read each plan before you confirm it.
 - **The B570 is untested**, as above.
+- **PCIe ASPM (`debug.intelxe.aspm_l1`) has not run on a B580 yet.** Leave it at its default unless you are testing
+  it; the report (`debug.intelxe.aspm`) only reads.
 - **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental: no IOSurface drawing (browsers) or CGL
   pbuffers yet.
 <!-- decision pending: ship the global switch in 0.1.4? -->

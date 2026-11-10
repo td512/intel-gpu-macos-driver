@@ -2,7 +2,10 @@
 çıktısıyla, yükseltme adımlarını release/README-INSTALL.tr.md'nin "Yükseltme" bölümüyle karşılaştırın; B570 satırları
 hâlâ "test edilmedi" demeli; paketteki IntelXe.kext 10 Kasım sonrası main'den derlenmiş (platform katmanı, kullanıcı
 çitleri) ve B580'de çalışmış olmalı; Windows EFI aracı Windows'ta çalıştıktan sonra HybridPM / SSDT-ARCOFF satırlarına
-bakın. -->
+bakın. Ayrıca (10 Kasım 03:00 sonrası birleştirmeler): paketteki kext ve eklenti bunları içermeli (release.sh, kaynakları
+son değiştiğinden önce derlenmiş paketleri reddediyor); debug.intelxe.sensors'un güç alanları paketteki kext'ten
+okunmalı; WebGPU deferredRendering örneği paketteki eklentiyle Safari'de yeniden çalıştırılmalı; ASPM satırları hâlâ
+"test edilmedi" demeli. -->
 Hesaplamayı hızlandıran sürüm: Metal ve OpenCL işleri sürücüden komut arabelleği başına daha az kilitle geçiyor ve bir
 çevirici düzeltmesi bir matris çekirdeğinin hızını ikiye katlıyor. Ayrıca: katkıyla gelen bir aygıt kimliğiyle **Arc
 B570** (bizim tarafımızda test edilmedi), 12-14. nesil hibrit Intel işlemciler için **HybridPM** ve yeni macOS
@@ -33,6 +36,16 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
   kurulu bir yuva tutuyor ve GPU sıradaki işi GuC'ye gidip gelmeden başlatıyor: küçük bir işin exec -> sinyal süresi
   46-52 -> 15-17 µs, Geekbench 7 Metal 97,2k, OpenCL 92,9k. Bir sonraki yeniden başlatmaya kadar açmak için:
   `sudo sysctl debug.intelxe.direct=1`.
+- **Kart ve paket gücü.** `sysctl debug.intelxe.sensors` artık kartın ve paketin enerjisiyle (J) ortalama gücünü (W)
+  de veriyor; kartın PMT telemetrisinden, Linux `xe_hwmon`'un okuduğu gibi okunuyor. Test makinesinde yazmaçlar boşta
+  kart için 36,2 W, paket için 19,6 W; hafif yükte 40,4 W ve 23,3 W verdi (salt okunur yazmaç okumaları, 10 Kasım).
+  Yeni alanlardan önceki metin değişmedi. Güç sınırları henüz gösterilmiyor.
+- **PCIe ASPM raporu ve bir L1 anahtarı (deneysel, henüz bir B580'de çalışmadı).** `sysctl debug.intelxe.aspm`, GPU
+  ile işlemcinin kök portu arasındaki her PCIe bağlantısının güç tasarrufu durumunu (ASPM) ve L1'in Linux'un
+  denetimlerinden geçip geçmediğini gösteriyor. `sudo sysctl debug.intelxe.aspm_l1=1` L1'i bu bağlantılarda yalnız
+  hepsi denetimlerden geçerse açıyor, `0` ASPM'i kapatıyor, `-1` (varsayılan) bağlantıları donanım yazılımının
+  bıraktığı gibi bırakıyor. Siz yazmadıkça hiçbir şey değişmiyor; bir değişiklik bir sonraki yeniden başlatmaya kadar
+  sürüyor. Amacı yukarıdaki boşta gücü düşürmek; düşürüp düşürmediği henüz ölçülmedi.
 - **Yeniden tasarlanan IntelXe Manager:** durum başlığı ve o an önemli olan tek eylemiyle bir Genel bakış sayfası;
   bir **kurulum yardımcısı** (OpenCore'u hazırlama, isterseniz Safari'nin ayarlarıyla aynı adımda; sürücü; EFI kext'i;
   GPU testi; bitti); OpenCore bir önyükleme yolu kaydetmemişse EFI bölümlerini seçmek için listeliyor, Safari'yi GPU'da
@@ -93,7 +106,8 @@ veriyordu); farklı günlerin sayılarını değil, bir tablonun sütunlarını 
 
 - **Arc B570 (8086:E20C).** Kext'ler, `install.sh`, uygulama, `efi.sh` ve Windows EFI aracı onu kabul ediyor; Bu Mac
   Hakkında onu adıyla gösteriyor. B580'in yongası (BMG-G21), daha az Xe çekirdeğiyle; sürücü bunu sigortalardan
-  (fuse) okuyor. **Bizde B570 yok, onda çalıştırmadık.** Elinizde varsa lütfen deneyin ve çalışsa da çalışmasa da tanı
+  (fuse) okuyor. **Bizde B570 yok, onda çalıştırmadık.** Uygulamanın GPU testi onu bir karttan ölçülmüş değerlere
+  değil, Intel'in belirtimine (11,52 TFLOP/s, 380 GB/s) göre değerlendiriyor. Elinizde varsa lütfen deneyin ve çalışsa da çalışmasa da tanı
   raporuyla (`tools/report/collect-macos.sh`) bir sorun açın. Aygıt kimliği için `@1964356263`'e teşekkürler (PR #2).
 - **Hibrit Intel işlemciler için HybridPM.kext (12-14. nesil, E çekirdekli Alder Lake / Raptor Lake).** macOS'un
   işlemci güç yönetimi bu işlemcilerin P çekirdeklerini sınırlıyor ve tam yüklü çekirdekleri 800 MHz'de tutabiliyor;
@@ -125,8 +139,8 @@ ve [depoda](https://github.com/yusufklncc/intel-gpu-macos-driver/blob/v0.1.4/rel
    0.1.3'ünkiler.
 2. Yeniden başlatmadan önce **EFI'deki `IntelXe.kext`'i değiştirin** (uygulamanın EFI sayfası, macOS'ta
    `sudo ./efi.sh --apply`, Windows'ta `IntelXe-EFI.ps1` ya da elle; `config.plist` girdisi olduğu gibi kalır). B570'in
-   kimliğini, GPU saati ve sıcaklık okumalarını, uygulamanın Güç sayfasının yazdığı ayarları ve doğrudan gönderimi
-   getiriyor.
+   kimliğini, GPU saati, sıcaklık ve güç okumalarını, uygulamanın Güç sayfasının yazdığı ayarları, doğrudan gönderimi ve
+   deneysel ASPM anahtarını getiriyor.
 3. **Hibrit Intel işlemci mi (E çekirdekli 12-14. nesil)?** Uygulamanın EFI sayfası, `efi.sh` ve `IntelXe-EFI.ps1`,
    2. adımda `HybridPM.kext`'i ekliyor; `Kernel > Add` girdisi **`Lilu.kext`'in altına** giriyor. `IntelXe-EFI.ps1`
    çalıştığı bilgisayarın işlemcisine bakıyor: onu EFI'yi açacak bilgisayarda çalıştırın. HybridPM Lilu gerektirir, bu
@@ -152,6 +166,22 @@ neden kapalı olduğu Bilinen sorunlar'da.
 - Root olarak çalışan macOS raporu, OpenCore'un açılışta kirli (dirty) olarak bıraktığı bir EFI bölümünden
   `config.plist` toplamıyordu (macOS böyle bir bölümü yalnız okuma-yazma bağlıyor, salt okunur bağlama başarısız
   oluyordu); artık onu `mount_msdos` ile salt okunur bağlıyor ve sonra ayırıyor.
+- Metal aygıtına `supportsPlacementSparse` soran bir uygulama çöküyordu (tanınmayan seçici, yakalanmamış istisna);
+  artık NO yanıtını alıyor. Aygıt, Metal sürücüsünün boş bıraktığı diğer özellikleri de yanıtlıyor: `location` Slot
+  (önce Unspecified), `maxTransferRate` kök portun bağlantısından (test makinesinin Gen4 x8 bağlantısı için
+  15753846152 B/s; önce 0), `supports32BitFloatFiltering` ve `supports32BitMSAA` Vulkan sürücüsünün bildirdiği gibi
+  YES, `maxArgumentBufferSamplerCount` örnekleyici yığınının 2047'si. 10 Kasım'da B580'de, yeni Metal sürücüsü yalnız
+  test süreci için yüklenerek denetlendi; `mtl_f32filter` 32 bit float süzmeyi doğruluyor (PASS).
+- Bir gölgelendiricinin örneklediği küp dokularından texel okumaları (`read()`) yanlış veri döndürüyordu: her texel
+  yanlıştı (1-5. yüzler 0, 0. yüz 4. yüzü okuyordu), küp dizileri çevrilmiyordu, 1. ve 2. mip düzeyleri 0. düzeyi
+  okuyordu. `mtl_cube_read` artık B580'de her durumda geçiyor (float, tamsayı ve küp dizisi dokuları, 0-2. düzeyler ve
+  bir okuma-yazma küpü; 10 Kasım, yeni Metal sürücüsü yalnız test süreci için yüklenerek).
+- Safari'nin WebGPU'su: deferredRendering örneği "Fragment function failed creation" hatası veriyordu, G-buffer
+  okumaları da sıfır dönüyordu. WebKit'in gölgelendirici derleyicisi argüman arabelleğindeki bir dokuyu 64 bit kaynak
+  kimliği olarak okuyor; çevirici bunu doku olarak almıyordu. Safari'nin B580'de derlediği 88 WebGPU gölgelendirici
+  kütüphanesinin hepsi artık çevriliyor (önce biri başarısızdı); bu, o kütüphaneler çevrilerek denetlendi, örnek henüz
+  Safari'de çalıştırılarak değil. Bir dal ya da select ile seçilen doku artık seçilen dokuyu okuyor (önce bağlı başka bir
+  dokuyu ya da sıfır); yakalanan gölgelendiricilerin hiçbiri bunu yapmadığı için bu kısım aygıtta test edilmedi.
 
 ### Geliştiriciler için
 
@@ -173,7 +203,9 @@ neden kapalı olduğu Bilinen sorunlar'da.
   etkilenmiyor. uAPI eşdeğerlik tablosu (`docs/parity/`) artık 182 xe uAPI ögesinin 99'unu ve 16 ioctl'in 13'ünü
   sayıyor (önce 77 ve 11); compute runtime için kalan ögeler 35'ten 24'e indi.
 - `debug.intelxe.jobtime` (varsayılan kapalı): her işin aşamaları GPU zaman damgalarıyla. `debug.intelxe.sensors`:
-  GT saati, paket ve VRAM sıcaklıkları, herkes okuyabilir.
+  GT saati, paket ve VRAM sıcaklıkları ve (bkz. Öne çıkanlar) kart ve paket enerjisi ve gücü, herkes okuyabilir.
+  `debug.intelxe.aspm` / `debug.intelxe.aspm_l1`: bkz. Öne çıkanlar; denetimler ve bağlantıların hangi sırayla
+  değiştirildiği `kernel/README.md`'de.
 - Çevirici, gevşek (relaxed) bir threadgroup atomiğini (add, min, max, and, or, xor) gevşek olarak yazıyor; Mesa artık
   her birinin çevresinde paylaşılan yerel belleği çitlemiyor (clbench `hist256` döngüsü artık IGC'ninkiyle aynı).
 - Testler: `mtl_order_stress` (kuyruklar ve iş parçacıkları arasında komut arabelleği sırası), `direct_lat`,
@@ -181,9 +213,30 @@ neden kapalı olduğu Bilinen sorunlar'da.
   çitleri); platform tablosu (`kernel/IntelXe/tests/platform_test.cpp`) ve uAPI argüman denetimleri
   (`kernel/IntelXe/tests/uapi_test.cpp`) için GPU'suz ana makine testleri. Çeviricinin birim ve tümleşik testleri
   geçiyor (bir düzeltme: adres uzayı bozuk bir tipli işaretçi genel diye okunmuyor, reddediliyor); `xlate_check` bir
-  girdiyi `newFunctionWithName:`'in yaptığı gibi çeviriyor.
+  girdiyi `newFunctionWithName:`'in yaptığı gibi çeviriyor. 10 Kasım'da yeni: `mtl_cube_read` (küp dokularının her
+  yüzünün, diliminin ve düzeyinin her texeli), `mtl_props` (Metal sürücüsünün yanıtladığı aygıt özellikleri) ve
+  `mtl_f32filter` (32 bit float dokuların doğrusal süzülmesi), `nullmoth/build/build-intelxe.sh tests` ile derleniyor;
+  ana makine testleri `pmt_test` (enerji yolu: konumlar, birimler, sayaç taşmaları, ortalama güç) ve `aspm_test` (ASPM
+  kuralları, değişikliklerin sırası ve rapor için 46 denetim).
+- **Tek bir desteklenen aygıt listesi:** `data/platforms.json` `"supported"` sürücünün bağlandığı kartları (B580, B570)
+  tutuyor; `tools/parity/devices.py` herhangi bir kopya farklıysa hata veriyor (kext eşleşmeleri, `install.sh`,
+  `efi.sh`, uygulama, Windows EFI aracı, platform testi, clbench); `release/release.sh` ve `release/test-efi-flow.sh`
+  onu çalıştırıyor. Uygulamanın GPU testi beklediği değerleri bu listeden PCI aygıt kimliğiyle alıyor (başka bir GPU
+  değerlendirme almıyor; önce adında "Arc" geçen her GPU B580'in değerlerini alıyordu); Güç sayfasının varsayılan
+  aralığı çekirdeğin bildirdiği saat aralığından oluşuyor (B580'de "Default (1200-2850 MHz)"). `clbench` ve `cl_lat`
+  OpenCL GPU'sunu üretici kimliğiyle seçiyor, kodlayıcı test yolu kodlayıcılarını kartın modeliyle adlandırıyor. Yeni bir
+  ailenin çekirdek dışında nelere ihtiyacı olduğu: `docs/design/DESIGN-platforms.md` 4. bölüm. Zink ikili dosyalarının
+  kaynak kaydı `zink-gl/src/mesa-zink.diff` artık yalnız Zink'e özel bir derlemenin derlediklerini tutuyor (IntelXe
+  adlandırmasından önceki ANV değişikliklerini hâlâ taşıyordu).
+- Araçlar: `vcbench` bir HEVC kümesinin içinde çalıştırılınca çöküyordu (H.264 tanımını arıyordu); düzeltildi,
+  `VCB_DUMP=<dizin>` karşılaştırma için her resmi yazıyor. B580'de (10 Kasım) H.264 2K, HEVC 2K ve HEVC 4K donanım
+  resimleri her karede Apple'ın yazılım çözücüsününkiyle aynı; H.264 4K (tam aralıklı bir akış) çözücünün kendi
+  biçiminde aynı, video aralığı istendiğinde ise donanım dönüştürüyor, Apple'ın yazılım H.264 çözücüsü dönüştürmüyor.
+  `dmode W H [Hz]` ekran kipini kalıcı olarak değiştiriyor (süreç bitince geri dönüyordu) ve yenileme hızını
+  seçebiliyor.
 - `release/release.sh` bir sürümü yayımlanmadan önce denetliyor (sürüm, etiket, paketler ve sağlama toplamları,
-  içlerindeki sürümler, notlar, kimlik taraması) ve yalnız `--publish` ile yayımlıyor.
+  içlerindeki sürümler, notlar, kimlik taraması) ve yalnız `--publish` ile yayımlıyor. İçine girenlerin (kod, betikler,
+  şablonlar, paketleyici) son değişikliğinden önce derlenmiş paketleri reddediyor.
 
 ### Bilinen sorunlar
 
@@ -200,6 +253,8 @@ neden kapalı olduğu Bilinen sorunlar'da.
   karşı bayt bayt denendi ama henüz Windows'ta çalışmadı; araç henüz ardından bir bilgisayarın açıldığı bir EFI de
   hazırlamadı. Her planı onaylamadan önce okuyun.
 - **B570 test edilmedi**, yukarıdaki gibi.
+- **PCIe ASPM (`debug.intelxe.aspm_l1`) henüz bir B580'de çalışmadı.** Test etmiyorsanız varsayılanında bırakın;
+  rapor (`debug.intelxe.aspm`) yalnız okuyor.
 - **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel: IOSurface'e çizim (tarayıcılar) ve CGL
   pbuffer'ları henüz desteklenmiyor.
 <!-- decision pending: ship the global switch in 0.1.4? -->
