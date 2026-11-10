@@ -25,6 +25,14 @@ enum XePlatform : uint8_t {
 	XE_PANTHERLAKE,
 };
 
+// Where the GPU's energy counters are (Linux xe_hwmon.c xe_hwmon_energy_get, :500-539). Only BMG is implemented here;
+// the register path the other dGPUs take (REG_PKG_ENERGY_STATUS: PCU_CR_PACKAGE_ENERGY_STATUS, PVC/CRI registers, unit
+// from PKG_POWER_SKU_UNIT) would be a second value.
+enum XeEnergySource : uint8_t {
+	XE_ENERGY_NONE = 0,   // not read (debug.intelxe.sensors prints no energy)
+	XE_ENERGY_PMT,        // XE_BATTLEMAGE: the PUNIT PMT telemetry word (xe_pmt.h), card and package
+};
+
 // xe_hw_engine_types.h enum xe_hw_engine_id: bit positions of XePlatformDesc::engineMask
 enum : uint32_t {
 	XE_HW_ENGINE_RCS0 = 0,
@@ -54,6 +62,7 @@ struct XePlatformDesc {
 	bool isDgfx {false}, hasFlatCcs {false}, hasLlc {false}, hasDisplay {false}, hasSriov {false}, hasPxp {false};
 	bool hasCachedPt {false}, hasHeciGscfi {false}, hasHeciCscfi {false}, hasGscNvm {false}, hasFanControl {false};
 	bool hasMbxThermalInfo {false}, hasMbxPowerLimits {false}, needsScratch {false}, need64kVram {false};
+	bool hasSocRemapperTelem {false};   // has_soc_remapper_telem: the telemetry window's region set via SG_REMAP_INDEX1
 	// xe_graphics_desc of the graphics IP
 	bool hasUsm {false}, hasAsid {false}, hasAccessCounter {false}, hasAtomicPteBit {false}, hasRangeTlbInval {false};
 	bool has64bitTimestamp {false};
@@ -62,6 +71,8 @@ struct XePlatformDesc {
 	uint32_t wopcmBytes {0};     // xe_wopcm.c xe_wopcm_size
 	uint8_t patEntries {0};      // xe_pat.c xe_pat_init_early n_entries (valid pat_index values)
 	uint8_t mocsUcIndex {0};     // xe_mocs.c get_mocs_settings uc_index (GuC shim MOCS, MEM_SET MOCS)
+	XeEnergySource energySource {XE_ENERGY_NONE};   // xe_hwmon.c xe_hwmon_energy_get: platform == XE_BATTLEMAGE -> PMT
+	uint8_t energyShift {0};     // xe_hwmon scl_shift_energy: ENERGY_UNIT (14) on mailbox-power-limit platforms
 	// linux-firmware paths: xe_uc_fw.c XE_GUC/HUC/GSC_FIRMWARE_DEFS, i915 intel_dmc.c dmc_firmware_default. nullptr: Linux
 	// loads none for the platform. gucStem: the <stem> of <stem>_guc_70.bin (XeProbe's firmware directory names).
 	const char *gucFw {nullptr}, *gucStem {nullptr}, *hucFw {nullptr}, *gscFw {nullptr}, *dmcFw {nullptr};
