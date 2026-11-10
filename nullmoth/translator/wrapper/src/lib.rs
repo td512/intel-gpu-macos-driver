@@ -716,6 +716,31 @@ mod gl_translation_tests {
 }
 
 #[cfg(test)]
+mod reflect_entry_tests {
+    use super::*;
+
+    // nvmtl_reflect is what the plugin's nvmtl_reflect_air calls: the synthesized read sampler of a sampled-cube texel
+    // read must be in that JSON (kind, descriptor binding, static_sampler), not only in a translation's reflection.
+    #[test]
+    fn nvmtl_reflect_reports_the_synthesized_read_sampler_of_a_cube_texel_read() {
+        let ll = std::ffi::CString::new(include_str!("../../translator/tests/fixtures/texcube/rd_cube_read_lod.ll")).unwrap();
+        let stage = std::ffi::CString::new("kernel").unwrap();
+        let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
+        let mut err = [0 as c_char; 512];
+        assert_eq!(nvmtl_reflect(ll.as_ptr(), stage.as_ptr(), &mut out, &mut len, err.as_mut_ptr(), err.len()), 0);
+        let json: serde_json::Value = serde_json::from_slice(unsafe { std::slice::from_raw_parts(out, len) }).unwrap();
+        nvmtl_translate_free(out, len);
+        let start = json["descriptor_layout"]["samplers"]["start"].as_u64().unwrap();
+        let synthesized = json["bindings"].as_array().unwrap().iter()
+            .filter(|b| b["kind"] == "SynthesizedReadSampler").collect::<Vec<_>>();
+        assert_eq!(synthesized.len(), 1, "{json}");
+        let binding = synthesized[0]["descriptor"]["binding"].as_u64().unwrap();
+        assert!(binding >= start, "the plugin's slot is binding - samplers.start");
+        assert!(synthesized[0]["static_sampler"].is_object(), "the plugin needs the state to bind");
+    }
+}
+
+#[cfg(test)]
 mod storage_caps_tests {
     use super::*;
     use spirv_tools::val::Validator;
