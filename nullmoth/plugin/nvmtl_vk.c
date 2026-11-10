@@ -10323,6 +10323,15 @@ int nvmtl_vk_cmd_set_depth_clip(nvk_cmdbuf *c, int clip)
     return 0;
 }
 
+/* Metal GPU timestamps (MTLCommonCounterSetTimestamp, the WebGPU 'timestamp-query' of WebKit). A sample is a
+   VK_QUERY_TYPE_TIMESTAMP query of the recording's own pages (reset by its counter-reset command buffer, submitted
+   ahead of it), written bottom-of-pipe where Metal asks (stage boundaries of a pass, sampleCountersInBuffer:), and copied
+   as raw ticks into the sample buffer's host-visible values at the next flush point (a render pass end, a resolve, the
+   submit). Ticks become nanoseconds on the host's CLOCK_UPTIME_RAW scale - the scale -sampleTimestamps:gpuTimestamp:
+   answers in - when they are resolved: on the CPU (-resolveCounterRange:) or by nvmtl_ts_convert.comp in the resolve's
+   destination (-resolveCounters:inRange:destinationBuffer:destinationOffset:), both from one reference pair (a GPU tick
+   and the uptime it was read at, nvmtl_ts_ref) and the same fixed-point arithmetic, so the two agree to the nanosecond.
+   A sample never written stays MTLCounterErrorValue (~0). */
 #define NVMTL_COUNTER_PAGE 64u
 typedef struct nvmtl_counter_state { uint32_t count; nvk_buffer values; } nvmtl_counter_state;
 typedef struct nvmtl_counter_page { struct nvmtl_counter_page *next; VkQueryPool pool; uint32_t used; } nvmtl_counter_page;
@@ -10334,6 +10343,7 @@ typedef struct {
     size_t count, capacity;
     unsigned reset_ended;
 } nvmtl_counter_recording;
+typedef struct { uint64_t tick, ns, mask; uint32_t period_int, period_frac; } nvmtl_ts_ref;
 
 static int nvmtl_counter_fail(nvk_cmdbuf *c) { if (c) c->counter_error = 1; return -1; }
 static void nvmtl_counter_memory_barrier(nvk_cmdbuf *c)
@@ -10350,9 +10360,9 @@ static int nvmtl_counter_flush(nvk_cmdbuf *c)
     nvmtl_counter_recording *r = c->counter_recording;
     if (!r || !r->count) return 0;
     if (c->in_rp) return nvmtl_counter_fail(c);
-    for (size_t i = 0; i < r->count; ++i) {
+    nvmtl_counter_memory_barrier(c);
+    for (size_t i = 0; i < r->count; ++i) {   /* in recording order: an index sampled twice keeps the later sample */
         nvmtl_counter_write *w = &r->pending[i];
-        nvmtl_counter_memory_barrier(c);
         pvkCmdCopyQueryPoolResults(c->cb, w->pool, w->query, 1,
             (VkBuffer)w->state->values.buf, (VkDeviceSize)w->index * 8, 8,
             VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
@@ -10383,16 +10393,161 @@ static void nvmtl_counter_retire(nvk_cmdbuf *c)
     }
     free(r->pending); free(r); c->counter_recording = NULL;
 }
+
+/* ticks -> ns: |tick - ref| modulo timestampValidBits, signed (a sample may precede the reference), times the period as
+   period_int + period_frac / 2^32; the same arithmetic as nvmtl_ts_convert.comp */
+static uint64_t nvmtl_ts_ns(uint64_t v, const nvmtl_ts_ref *r)
+{
+    if (v == ~0ull) return v;
+    const uint64_t d = (v - r->tick) & r->mask;
+    const int before = (d & ((r->mask >> 1) + 1)) != 0;
+    const uint64_t mag = before ? ((~d + 1) & r->mask) : d;
+    const uint64_t hi = mag >> 32, lo = mag & 0xffffffffull;
+    const uint64_t ns = mag * r->period_int + hi * r->period_frac + ((lo * r->period_frac) >> 32);
+    return before ? r->ns - ns : r->ns + ns;
+}
+static pthread_mutex_t g_cal_lock = PTHREAD_MUTEX_INITIALIZER;
+static VkQueryPool g_cal_pool;
+static nvmtl_ts_ref g_cal_ref;
+static uint64_t g_cal_at;
+static int g_ts_said;
+/* The reference: the calibrated device clock (VK_EXT_calibrated_timestamps, nvmtl_vk_clock_refresh, renewed each
+   second) when it reads, else a timestamp written by a command buffer of its own that the CPU waits for, bracketed by
+   the host clock (tightest of 3, renewed each second). */
+static int nvmtl_ts_ref_get(nvmtl_ts_ref *out)
+{
+    if (!g_timestamp_bits || g_timestamp_bits > 64 || !isfinite(g_lim.timestampPeriod) || !(g_lim.timestampPeriod > 0)) return -1;
+    const uint64_t mask = g_timestamp_bits >= 64 ? ~0ull : (1ull << g_timestamp_bits) - 1;
+    const double period = g_lim.timestampPeriod;
+    const uint32_t pi = period >= 4294967295.0 ? 0xffffffffu : (uint32_t)period;
+    const double fr = (period - pi) * 4294967296.0;
+    const uint32_t pf = fr >= 4294967295.0 ? 0xffffffffu : (uint32_t)(fr + 0.5);
+    nvmtl_vk_clock_refresh();
+    const nvmtl_gpu_clock k = nvmtl_clock_snapshot();
+    if (k.valid) {
+        *out = (nvmtl_ts_ref){ k.gpu_tick & mask, k.uptime_ns, mask, pi, pf };
+        if (!__atomic_exchange_n(&g_ts_said, 1, __ATOMIC_RELAXED))
+            nvlog("counters: timestamps referenced to the calibrated device clock (+/- %llu ns)", (unsigned long long)k.uncertainty_ns);
+        return 0;
+    }
+    pthread_mutex_lock(&g_cal_lock);
+    const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    if (!g_cal_at || now - g_cal_at > 1000000000ull) {
+        if (!g_cal_pool && pvkCreateQueryPool) {
+            VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, NULL, 0,
+                VK_QUERY_TYPE_TIMESTAMP, 1, 0 };
+            VkQueryPool pool = VK_NULL_HANDLE;
+            if (pvkCreateQueryPool(g_dev, &qi, NULL, &pool) == VK_SUCCESS) g_cal_pool = pool;
+        }
+        uint64_t best = UINT64_MAX, tick = 0, mid = 0;
+        for (int k = 0; g_cal_pool && k < 3; k++) {
+            nvk_cmdbuf cb; if (nvmtl_vk_cmd_begin(NULL, &cb)) break;
+            pvkCmdResetQueryPool(cb.cb, g_cal_pool, 0, 1);
+            pvkCmdWriteTimestamp(cb.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_cal_pool, 0);
+            const uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+            const int rc = nvmtl_vk_submit_wait(&cb);
+            const uint64_t t1 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+            if (rc) break;
+            uint64_t result[2] = {0};
+            VkResult qr = pvkGetQueryPoolResults(g_dev, g_cal_pool, 0, 1,
+                sizeof result, result, 16, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+            if (qr != VK_SUCCESS || !result[1] || !result[0]) break;
+            if (t1 - t0 < best) { best = t1 - t0; tick = result[0] & mask; mid = t0 + (t1 - t0) / 2; }
+        }
+        if (best != UINT64_MAX) {
+            const nvmtl_ts_ref ref = { tick, mid, mask, pi, pf };
+            if (!g_cal_at) nvlog("counters: timestamps referenced to a waited-for timestamp write (no calibrated device clock), bracket %llu ns (tightest of 3)",
+                                 (unsigned long long)best);
+            else {
+                /* where the previous reference puts this tick, against where the host clock does: the drift */
+                const int64_t moved = (int64_t)(nvmtl_ts_ns(tick, &g_cal_ref) - mid);
+                if (llabs(moved) > 1000000) nvlog("counters: GPU clock RE-REFERENCED, it moved %lld ns against the host clock", (long long)moved);
+            }
+            g_cal_ref = ref; g_cal_at = now;
+        }
+    }
+    const int ok = g_cal_at != 0;
+    if (ok) *out = g_cal_ref;
+    pthread_mutex_unlock(&g_cal_lock);
+    return ok ? 0 : -1;
+}
+
+#include "nvmtl_ts_convert_spv.h"
+static pthread_mutex_t g_ts_convert_lock = PTHREAD_MUTEX_INITIALIZER;
+static VkPipeline g_ts_convert_pipeline;
+static VkPipelineLayout g_ts_convert_layout;
+static int g_ts_convert_failed;
+typedef struct { uint64_t dst, ref_tick, ref_ns, mask; uint32_t count, period_int, period_frac, pad; } nvmtl_ts_convert_args;
+static int nvmtl_ts_convert_init(void)
+{
+    int rc = -1;
+    pthread_mutex_lock(&g_ts_convert_lock);
+    if (g_ts_convert_pipeline) { rc = 0; goto done; }
+    if (g_ts_convert_failed) goto done;
+    VkShaderModule mod = VK_NULL_HANDLE;
+    VkShaderModuleCreateInfo sm = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, NULL, 0, sizeof nvmtl_ts_convert_spv, nvmtl_ts_convert_spv };
+    if (pvkCreateShaderModule(g_dev, &sm, NULL, &mod) != VK_SUCCESS) { g_ts_convert_failed = 1; goto done; }
+    VkPushConstantRange push = { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(nvmtl_ts_convert_args) };
+    VkPipelineLayoutCreateInfo li = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 0, NULL, 1, &push };
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    if (pvkCreatePipelineLayout(g_dev, &li, NULL, &layout) == VK_SUCCESS) {
+        VkPipelineShaderStageCreateInfo stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0,
+                                                 VK_SHADER_STAGE_COMPUTE_BIT, mod, "main", NULL };
+        VkComputePipelineCreateInfo pi = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, NULL, nvmtl_db_pipeline_flags(),
+                                          stage, layout, VK_NULL_HANDLE, -1 };
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        if (pvkCreateComputePipelines(g_dev, VK_NULL_HANDLE, 1, &pi, NULL, &pipeline) == VK_SUCCESS) {
+            g_ts_convert_layout = layout; g_ts_convert_pipeline = pipeline; rc = 0;
+        } else {
+            if (pipeline) pvkDestroyPipeline(g_dev, pipeline, NULL);
+            pvkDestroyPipelineLayout(g_dev, layout, NULL);
+        }
+    }
+    pvkDestroyShaderModule(g_dev, mod, NULL);
+    if (rc) { g_ts_convert_failed = 1; nvlog("vk: timestamp conversion pipeline FAILED"); }
+done:
+    pthread_mutex_unlock(&g_ts_convert_lock);
+    return rc;
+}
+
+/* Whether this device samples GPU timestamps: what -supportsCounterSampling: and -counterSets answer (WebKit offers
+   'timestamp-query' only with MTLCounterSamplingPointAtStageBoundary and a timestamp counter set). Decided once. */
+static pthread_once_t g_ts_once = PTHREAD_ONCE_INIT;
+static int g_ts_ok;
+static void nvmtl_ts_decide(void)
+{
+    const char *why = nvmtl_vk_init() ? "no Vulkan device"
+        : !g_timestamp_bits ? "the queue has no timestampValidBits"
+        : g_timestamp_bits > 64 ? "timestampValidBits above 64"
+        : !g_lim.timestampComputeAndGraphics ? "no timestampComputeAndGraphics"
+        : !isfinite(g_lim.timestampPeriod) || !(g_lim.timestampPeriod > 0) || g_lim.timestampPeriod >= 4294967295.0 ? "no usable timestampPeriod"
+        : !pvkCreateQueryPool || !pvkCmdWriteTimestamp || !pvkCmdResetQueryPool || !pvkCmdCopyQueryPoolResults || !pvkGetQueryPoolResults ? "query entry points missing"
+        : !pvkGetBufferDeviceAddress ? "no buffer device addresses"
+        : nvmtl_ts_convert_init() ? "the conversion pipeline could not be made" : NULL;
+    g_ts_ok = !why;
+    nvlog("counters: GPU timestamps %s%s - timestampValidBits %u, timestampPeriod %.6f ns, timestampComputeAndGraphics %u, %s; "
+          "sampling at stage boundaries (pass sampleBufferAttachments) and draw/dispatch/blit boundaries (sampleCountersInBuffer) %s",
+          why ? "OFF: " : "ON", why ? why : "", g_timestamp_bits, g_state == 1 ? g_lim.timestampPeriod : 0.0,
+          g_state == 1 ? g_lim.timestampComputeAndGraphics : 0u,
+          pvkGetCalibratedTimestampsEXT ? "calibrated device clock present" : "no calibrated device clock (waited-for reference writes)",
+          why ? "NOT offered" : "offered");
+}
+int nvmtl_vk_ts_supported(void)
+{
+    pthread_once(&g_ts_once, nvmtl_ts_decide);
+    return g_ts_ok;
+}
+
 void *nvmtl_vk_ts_pool_create(uint32_t count)
 {
-    if (!count || (size_t)count > SIZE_MAX / 8 || nvmtl_vk_init() || !g_timestamp_bits || !pvkCreateQueryPool || !pvkCmdWriteTimestamp || !pvkCmdResetQueryPool || !pvkCmdCopyQueryPoolResults) return NULL;
+    if (!count || (size_t)count > SIZE_MAX / 8 || !nvmtl_vk_ts_supported()) return NULL;
     nvmtl_counter_state *s = calloc(1, sizeof *s);
     if (!s) return NULL;
     s->count = count;
     if (nvmtl_vk_buffer_create((size_t)count * 8, 1, &s->values) || !s->values.map) {
         nvmtl_vk_buffer_destroy(&s->values); free(s); return NULL;
     }
-    memset(s->values.map, 0, (size_t)count * 8);
+    memset(s->values.map, 0xff, (size_t)count * 8);   /* MTLCounterErrorValue until sampled */
     return s;
 }
 void nvmtl_vk_ts_pool_destroy(void *pool)
@@ -10432,10 +10587,14 @@ int nvmtl_vk_cmd_ts_write(nvk_cmdbuf *c, void *pool, uint32_t idx, int barrier)
         pvkCmdResetQueryPool(r->reset.cb, p->pool, 0, NVMTL_COUNTER_PAGE);
     }
     uint32_t query = p->used++;
+    /* bottom of pipe: after all the work recorded before it (ANV: a PIPE_CONTROL post-sync timestamp write); top of
+       pipe (withBarrier:NO): when the command streamer reaches it (a register store). Allowed inside a render pass. */
     pvkCmdWriteTimestamp(c->cb, barrier ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         p->pool, query);
     r->pending[r->count++] = (nvmtl_counter_write){s, p->pool, query, idx};
-    return c->in_rp ? 0 : nvmtl_counter_flush(c);
+    /* copied into the sample buffer at the next flush point (a render pass end, a resolve, the submit), with the samples
+       before it: a copy here would stall the pipe at every pass boundary once more */
+    return 0;
 }
 int nvmtl_vk_cmd_ts_resolve(nvk_cmdbuf *c, void *pool, uint32_t first, uint32_t count, nvk_buffer *dst, size_t off)
 {
@@ -10443,9 +10602,20 @@ int nvmtl_vk_cmd_ts_resolve(nvk_cmdbuf *c, void *pool, uint32_t first, uint32_t 
     if (!c || !c->cb || !s || !count || first > s->count || count > s->count-first ||
         !dst || !dst->buf || (off & 7) || off > dst->size || (size_t)count*8 > dst->size-off || c->in_rp)
         return nvmtl_counter_fail(c);
+    nvmtl_ts_ref ref;
+    const uint64_t da = nvmtl_vk_buffer_address(dst);
+    if (!da || nvmtl_ts_convert_init() || nvmtl_ts_ref_get(&ref)) {
+        static int said; if (said++ < 4) nvlog("resolveCounters: %s - not resolved", !da ? "the destination has no device address"
+                                               : g_ts_convert_failed ? "no conversion pipeline" : "the GPU clock could not be referenced");
+        return nvmtl_counter_fail(c);
+    }
     if (nvmtl_counter_flush(c)) return -1;
-    nvmtl_counter_memory_barrier(c);
+    /* the raw ticks into Metal's destination (full barriers on both sides), then converted there in place */
     if (nvmtl_vk_cmd_copy_buffer(c, &s->values, (size_t)first*8, dst, off, (size_t)count*8)) return nvmtl_counter_fail(c);
+    const nvmtl_ts_convert_args a = { da + off, ref.tick, ref.ns, ref.mask, count, ref.period_int, ref.period_frac, 0 };
+    pvkCmdBindPipeline(c->cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_ts_convert_pipeline);
+    pvkCmdPushConstants(c->cb, g_ts_convert_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof a, &a);
+    pvkCmdDispatch(c->cb, (count + 63) / 64, 1, 1);
     nvmtl_vk_cmd_barrier(c);
     return 0;
 }
@@ -10453,52 +10623,31 @@ int nvmtl_vk_ts_read(void *pool, uint32_t first, uint32_t count, uint64_t *out)
 {
     nvmtl_counter_state *s = pool;
     if (!s || !out || !count || first > s->count || count > s->count-first || !s->values.map || g_state != 1) return -1;
+    nvmtl_ts_ref ref;
+    if (nvmtl_ts_ref_get(&ref)) return -1;
     memcpy(out, (const char *)s->values.map + (size_t)first*8, (size_t)count*8);
+    for (uint32_t i = 0; i < count; i++) out[i] = nvmtl_ts_ns(out[i], &ref);
     return 0;
 }
-static pthread_mutex_t g_cal_lock = PTHREAD_MUTEX_INITIALIZER;
-static VkQueryPool g_cal_pool;
-static int64_t g_cal_off;
-static uint64_t g_cal_at;
+/* -sampleTimestamps:gpuTimestamp: the host's CLOCK_UPTIME_RAW (mach_absolute_time on x86) and the GPU's clock on the
+   scale resolved samples use: the device clock read now through the reference, or (no calibrated device clock) the
+   reference extrapolated, which is the host time itself */
 int nvmtl_vk_gpu_timestamp(uint64_t *cpu_ns, uint64_t *gpu)
 {
-    pthread_mutex_lock(&g_cal_lock);
-    uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-    if (!g_cal_at || now - g_cal_at > 1000000000ull) {
-        if (!g_cal_pool && !nvmtl_vk_init() && g_timestamp_bits && pvkCreateQueryPool) {
-            VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, NULL, 0,
-                VK_QUERY_TYPE_TIMESTAMP, 1, 0 };
-            VkQueryPool pool = VK_NULL_HANDLE;
-            if (pvkCreateQueryPool(g_dev, &qi, NULL, &pool) == VK_SUCCESS) g_cal_pool = pool;
-        }
-        uint64_t best = UINT64_MAX; int64_t off = 0;
-        for (int k = 0; g_cal_pool && k < 3; k++) {
-            nvk_cmdbuf cb; if (nvmtl_vk_cmd_begin(NULL, &cb)) break;
-            pvkCmdResetQueryPool(cb.cb, g_cal_pool, 0, 1);
-            pvkCmdWriteTimestamp(cb.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_cal_pool, 0);
-            const uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-            const int rc = nvmtl_vk_submit_wait(&cb);
-            const uint64_t t1 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-            if (rc) break;
-            uint64_t result[2] = {0};
-            VkResult qr = pvkGetQueryPoolResults(g_dev, g_cal_pool, 0, 1,
-                sizeof result, result, 16, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
-            const uint64_t g = result[0];
-            if (qr != VK_SUCCESS || !result[1] || !g) break;
-            if (t1 - t0 < best) { best = t1 - t0; off = (int64_t)(g - (t0 + (t1 - t0) / 2)); }
-        }
-        if (best != UINT64_MAX) {
-            if (!g_cal_at || llabs(off - g_cal_off) > 1000000)
-                nvlog("counters: GPU clock %s - gpu - cpu = %lld ns, bracket %llu ns (tightest of 3)",
-                      g_cal_at ? "RE-CALIBRATED, offset moved" : "calibrated", (long long)off, (unsigned long long)best);
-            g_cal_off = off; g_cal_at = now;
-        }
-    }
-    const int ok = g_cal_at != 0;
-    now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    nvmtl_ts_ref ref;
+    const int ok = nvmtl_vk_ts_supported() && !nvmtl_ts_ref_get(&ref);
+    uint64_t now = 0, tick = 0; int fresh = 0;
+    if (ok && pvkGetCalibratedTimestampsEXT) {
+        VkCalibratedTimestampInfoEXT info = { VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, NULL, VK_TIME_DOMAIN_DEVICE_EXT };
+        uint64_t deviation = UINT64_MAX;
+        const uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        fresh = pvkGetCalibratedTimestampsEXT(g_dev, 1, &info, &tick, &deviation) == VK_SUCCESS;
+        const uint64_t t1 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        now = t0 + (t1 - t0) / 2;
+        if (fresh && (t1 - t0 > 2000000ull || deviation > 1000000ull)) fresh = 0;
+    } else now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
     if (cpu_ns) *cpu_ns = now;
-    if (gpu) *gpu = ok ? (uint64_t)((int64_t)now + g_cal_off) : 0;
-    pthread_mutex_unlock(&g_cal_lock);
+    if (gpu) *gpu = !ok ? 0 : fresh ? nvmtl_ts_ns(tick & ref.mask, &ref) : now;
     return ok ? 0 : -1;
 }
 

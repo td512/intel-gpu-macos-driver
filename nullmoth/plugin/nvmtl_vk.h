@@ -306,6 +306,7 @@ int  nvmtl_vk_cmd_ts_write(nvk_cmdbuf *c, void *pool, uint32_t idx, int barrier)
 int  nvmtl_vk_cmd_ts_resolve(nvk_cmdbuf *c, void *pool, uint32_t first, uint32_t count, nvk_buffer *dst, size_t off);
 int  nvmtl_vk_ts_read(void *pool, uint32_t first, uint32_t count, uint64_t *out);
 int  nvmtl_vk_gpu_timestamp(uint64_t *cpu_ns, uint64_t *gpu);
+int  nvmtl_vk_ts_supported(void);   /* GPU timestamps (Metal counter sampling) offered; decided once, logged */
 int  nvmtl_vk_cmd_begin_occlusion(nvk_cmdbuf *c, uint32_t idx);
 void nvmtl_vk_cmd_end_occlusion(nvk_cmdbuf *c, uint32_t idx);
 int  nvmtl_vk_cmd_copy_occlusion(nvk_cmdbuf *c, uint32_t first, uint32_t count, nvk_buffer *dst, size_t off);

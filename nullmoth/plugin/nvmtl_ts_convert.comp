@@ -1,0 +1,36 @@
+#version 460
+// Metal GPU timestamps: the raw Vulkan timestamp ticks a resolveCounters: copied into Metal's destination become
+// nanoseconds on the host's CLOCK_UPTIME_RAW scale (the scale -sampleTimestamps:gpuTimestamp: answers in), in place.
+// ns = ref_ns +/- |tick - ref_tick| (signed, modulo the queue's timestampValidBits) * period, with period split into
+// its integer nanoseconds and a 32-bit binary fraction. MTLCounterErrorValue (~0: a sample never written) is left as
+// it is. One invocation per sample (nvmtl_vk_cmd_ts_resolve).
+//   glslangValidator -V --target-env vulkan1.2 nvmtl_ts_convert.comp -o nvmtl_ts_convert.spv
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer Stamps { uint64_t t[]; };
+layout(push_constant) uniform Args {
+    uint64_t dst;        // the first resolved sample (8-aligned)
+    uint64_t ref_tick;   // a GPU tick ...
+    uint64_t ref_ns;     // ... and the host nanosecond it was read at
+    uint64_t mask;       // (1 << timestampValidBits) - 1
+    uint count;
+    uint period_int;     // timestampPeriod = period_int + period_frac / 2^32 ns per tick
+    uint period_frac;
+    uint pad;
+} a;
+
+void main()
+{
+    const uint i = gl_GlobalInvocationID.x;
+    if (i >= a.count) return;
+    Stamps s = Stamps(a.dst);
+    const uint64_t v = s.t[i];
+    if (v == ~0ul) return;
+    const uint64_t d = (v - a.ref_tick) & a.mask;
+    const bool before = (d & ((a.mask >> 1) + 1ul)) != 0ul;
+    const uint64_t mag = before ? ((~d + 1ul) & a.mask) : d;
+    const uint64_t hi = mag >> 32, lo = mag & 0xfffffffful;
+    const uint64_t ns = mag * uint64_t(a.period_int) + hi * uint64_t(a.period_frac) + ((lo * uint64_t(a.period_frac)) >> 32);
+    s.t[i] = before ? a.ref_ns - ns : a.ref_ns + ns;
+}

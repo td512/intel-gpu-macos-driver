@@ -3714,6 +3714,42 @@ static void nvmtl_sample_counter(NVMTLCommandBuffer *cb, id sb, NSUInteger i, id
     }
 }
 
+// Stage-boundary sampling: a pass descriptor's sampleBufferAttachments (up to 4 sample buffers). The start indices are
+// sampled when the encoder is made, before any of its commands; the end indices when it ends, after all of them (for
+// a render pass after the Vulkan render pass and its stores and resolves). Vertex and fragment stages are not separate
+// phases here: both starts are sampled at the start, both ends at the end. Bottom-of-pipe writes, so a pass's start is
+// when the work before it has finished. WebKit's WebGPU timestampWrites arrive this way.
+#define NVMTL_TS_ATTACHMENTS 4
+static NSArray *nvmtl_ts_pass_begin(NVMTLCommandBuffer *cb, id who, id attachments, BOOL render)
+{
+    NSMutableArray *ends = nil;
+    for (NSUInteger a = 0; attachments && a < NVMTL_TS_ATTACHMENTS; a++) {
+        id at = [attachments objectAtIndexedSubscript:a];
+        id sb = [at sampleBuffer];
+        if (!sb) continue;
+        NSUInteger s0, s1, e0, e1;
+        if (render) {
+            MTLRenderPassSampleBufferAttachmentDescriptor *r = at;
+            s0 = r.startOfVertexSampleIndex; s1 = r.startOfFragmentSampleIndex; e0 = r.endOfVertexSampleIndex; e1 = r.endOfFragmentSampleIndex;
+        } else {
+            s0 = [at startOfEncoderSampleIndex]; e0 = [at endOfEncoderSampleIndex]; s1 = e1 = MTLCounterDontSample;
+        }
+        if (s0 != MTLCounterDontSample) nvmtl_sample_counter(cb, sb, s0, who, YES);
+        if (s1 != MTLCounterDontSample && s1 != s0) nvmtl_sample_counter(cb, sb, s1, who, YES);
+        if (e0 != MTLCounterDontSample || e1 != MTLCounterDontSample) {
+            if (!ends) ends = [NSMutableArray new];
+            if (e0 != MTLCounterDontSample) { [ends addObject:sb]; [ends addObject:@(e0)]; }
+            if (e1 != MTLCounterDontSample && e1 != e0) { [ends addObject:sb]; [ends addObject:@(e1)]; }
+        }
+    }
+    return ends;
+}
+static void nvmtl_ts_pass_end(NVMTLCommandBuffer *cb, id who, NSArray *ends)
+{
+    for (NSUInteger i = 0; cb && i + 1 < ends.count; i += 2)
+        nvmtl_sample_counter(cb, ends[i], [ends[i + 1] unsignedIntegerValue], who, YES);
+}
+
 unsigned nvmtl_apps1_resolve_miss, nvmtl_apps1_resolve_extra, nvmtl_apps1_ds_resolve_miss;
 @interface NVMTLRenderCommandEncoder () { unsigned _groupDepth, _dumpDepth; NSString *_dumpName; BOOL _dumpPso; }
 - (void)nvmtlDumpBoundFragmentBuffers;
@@ -4375,6 +4411,10 @@ static BOOL nvmtl_bytes_ring_at(__unsafe_unretained NVMTLCommandBuffer *cb, NSUI
     [self nvmtlBeginVisibility];
 }
 - (void)endEncoding {
+    [self nvmtlEndPass];
+    if (_tsEnd) { nvmtl_ts_pass_end(_cb, self, _tsEnd); _tsEnd = nil; }
+}
+- (void)nvmtlEndPass {
     _cb->_nEnd++;
     if (_dumpPso) { _dumpPso = NO; [self nvmtlDumpBoundFragmentBuffers]; }
     [self nvmtlCloseVisibility];
@@ -5960,6 +6000,7 @@ static void nvmtl_tg_reshape(NVMTLComputePipelineState *ps, const uint32_t l[3],
     for (unsigned k = 0; k < NVMTL_NBUFAT; k++) { _baObj[k] = nil; _baN[k] = 0; }
     _samplers = nil; _cpixMask = 0; _tgLen = nil; _e78Key = nil;
     _indirectImages = nil;   // 9a05b0a's declared textures: dead with the encoder's other tables
+    if (_tsEnd) { nvmtl_ts_pass_end(_cb, self, _tsEnd); _tsEnd = nil; }
 }
 - (void)setLabel:(NSString *)l { _label = [l copy]; }
 - (NSString *)label { return _label; }
@@ -6224,7 +6265,7 @@ destinationBytesPerImage:(NSUInteger)img options:(MTLBlitOption)opt {
 // The encoder lets go of its command buffer when encoding ends, as Metal's own encoders do. An app's autorelease pool
 // can keep an ended encoder alive for a long time (a benchmark loop that never drains), and a strong reference here kept
 // every such command buffer, and every buffer it used, alive with it: VRAM filled until allocations were refused.
-- (void)endEncoding { if (_cb) { _cb->_nEnd++; _cb = nil; } }
+- (void)endEncoding { if (_cb) { if (_tsEnd) { nvmtl_ts_pass_end(_cb, self, _tsEnd); _tsEnd = nil; } _cb->_nEnd++; _cb = nil; } }
 - (void)setLabel:(NSString *)l { _label = [l copy]; }
 - (NSString *)label { return _label; }
 - (id<MTLDevice>)device { id<MTLDevice> d = _cb ? [_cb device] : nil; return d ? d : (id<MTLDevice>)gNVMTLMainDevice; }
@@ -6285,6 +6326,7 @@ destinationBytesPerImage:(NSUInteger)img options:(MTLBlitOption)opt {
     nvmtl_g79_flush(self);
     NVMTLRenderCommandEncoder *e = [NVMTLRenderCommandEncoder new];
     _nEnc++;
+    e->_tsEnd = nvmtl_ts_pass_begin(self, e, d.sampleBufferAttachments, YES);
     e->_cb = self; e->_target = (NVMTLTexture *)d.colorAttachments[0].texture;
     if (!_resources) _resources = [NVMTLResSet new];
     if (e->_target) [_resources addObject:e->_target];
@@ -6411,8 +6453,13 @@ destinationBytesPerImage:(NSUInteger)img options:(MTLBlitOption)opt {
     NVMTLComputeCommandEncoder *e = (NVMTLComputeCommandEncoder *)[self computeCommandEncoder];
     e->_e78Concurrent = t == MTLDispatchTypeConcurrent; return e; }
 - (id<MTLComputeCommandEncoder>)computeCommandEncoderWithDescriptor:(MTLComputePassDescriptor *)d {
-    return [self computeCommandEncoderWithDispatchType:d ? d.dispatchType : MTLDispatchTypeSerial]; }
-- (id<MTLBlitCommandEncoder>)blitCommandEncoderWithDescriptor:(MTLBlitPassDescriptor *)d { return [self blitCommandEncoder]; }
+    NVMTLComputeCommandEncoder *e = (NVMTLComputeCommandEncoder *)[self computeCommandEncoderWithDispatchType:d ? d.dispatchType : MTLDispatchTypeSerial];
+    if (d) e->_tsEnd = nvmtl_ts_pass_begin(self, e, d.sampleBufferAttachments, NO);
+    return e; }
+- (id<MTLBlitCommandEncoder>)blitCommandEncoderWithDescriptor:(MTLBlitPassDescriptor *)d {
+    NVMTLBlitCommandEncoder *e = (NVMTLBlitCommandEncoder *)[self blitCommandEncoder];
+    if (d) e->_tsEnd = nvmtl_ts_pass_begin(self, e, d.sampleBufferAttachments, NO);
+    return e; }
 - (id<MTLResourceStateCommandEncoder>)resourceStateCommandEncoder { return nil; }
 - (id<MTLResourceStateCommandEncoder>)resourceStateCommandEncoderWithDescriptor:(MTLResourceStatePassDescriptor *)d { return nil; }
 - (id<MTLBlitCommandEncoder>)blitCommandEncoder {
@@ -6423,7 +6470,10 @@ destinationBytesPerImage:(NSUInteger)img options:(MTLBlitOption)opt {
     nvmtl_g79_flush(self);
     NVMTLAccelerationStructureCommandEncoder *e = [NVMTLAccelerationStructureCommandEncoder new]; e->_cb = self; e->_owner = self; _nEnc++; return e;
 }
-- (id<MTLAccelerationStructureCommandEncoder>)accelerationStructureCommandEncoderWithDescriptor:(MTLAccelerationStructurePassDescriptor *)d { return [self accelerationStructureCommandEncoder]; }
+- (id<MTLAccelerationStructureCommandEncoder>)accelerationStructureCommandEncoderWithDescriptor:(MTLAccelerationStructurePassDescriptor *)d {
+    NVMTLAccelerationStructureCommandEncoder *e = (NVMTLAccelerationStructureCommandEncoder *)[self accelerationStructureCommandEncoder];
+    if (d) e->_tsEnd = nvmtl_ts_pass_begin(self, e, d.sampleBufferAttachments, NO);
+    return e; }
 - (void)addCompletedHandler:(MTLCommandBufferHandler)h {
     if (!h) return;
     // copied once and kept as a retained pointer: no array insertion and no extra retain/release pair per handler; the
@@ -7220,7 +7270,7 @@ uint32_t nvmtl_geoms_from_descriptor(id desc, nvmtl_geom **outp, int *instance, 
 - (id<MTLCommandBuffer>)commandBuffer { return (id<MTLCommandBuffer>)(_cb ? _cb : _owner); }   // SPI, see the render encoder
 - (NSString *)label { return _label; }
 - (void)setLabel:(NSString *)l { _label = [l copy]; }
-- (void)endEncoding { if (_cb) { _cb->_nEnd++; _cb = nil; } }   // lets go of the command buffer, as the blit encoder does
+- (void)endEncoding { if (_cb) { if (_tsEnd) { nvmtl_ts_pass_end(_cb, self, _tsEnd); _tsEnd = nil; } _cb->_nEnd++; _cb = nil; } }   // lets go of the command buffer, as the blit encoder does
 - (void)nvmtlTrack:(id)r { if (!r) return; if (!_cb->_resources) _cb->_resources = [NVMTLResSet new]; [_cb->_resources addObject:r]; }
 - (void)nvmtlHold:(NVMTLBuffer *)b { if (!b) return; if (!_cb->_scratch) _cb->_scratch = [NSMutableArray new]; [_cb->_scratch addObject:b]; }
 /* A build refused after the structure exists is recorded as an empty build instead: a ray query that reaches the
