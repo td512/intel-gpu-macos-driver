@@ -297,9 +297,16 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
   passed it through: every offset read half a pixel up and to the left); `interpolate_at_center` (an offset of 0, 0);
   half interpolants, interpolated at 32 bits as half varyings travel and converted (upstream refused any fragment
   function with a half interpolant). The struct-wrapped scalar-array load (14c19f3) came to upstream from WatchAndyTW's
-  DaVinci Resolve report. `nvmtl_translate_fc_spec2` bakes its structural constants with the others unknown, so the
-  config-struct fold reads only baked values (checked: every specialization constant of QuartzCore's `fixed_frag` stays
-  referenced; the module shrinks from ~700 KB to 23-26 KB for five of six sets).
+  DaVinci Resolve report. In `nvmtl_translate_fc_spec2` (this copy's fc-spec path) the config-struct fold runs only
+  after every defined constant is marked defined and with the unbaked ones unknown
+  (`specialize_air_function_constants_for_spec`): its evaluator reads a remaining `air.is_function_constant_defined` as
+  false, and the first merged build folded each field the initializer guards with `is_function_constant_defined(c) ?
+  c : default` to its default for every constant left to a specialization constant. Core Animation's `fixed_frag` reads
+  its image functions that way: WindowServer drew a white desktop, every textured and glyph draw empty, on the B580,
+  while every SPIR-V corpus stayed byte-identical (the whole-variant path, which bakes every value, was right). The
+  fc-spec module keeps those fields as the module before the merge did (530-590 KB for fixed_frag; whole variants fold to
+  20-37 KB). Tests: three `fc_air_specialize` unit tests, and `tools/xlate-compare` (the frozen fc-spec module keeps at
+  least the whole translation's texture operations on fixed_frag: the first merged build lost them in 3 of 8 sets).
   - **LOD queries on every shape (ours):** `calculate_clamped_lod` / `calculate_unclamped_lod` on 2D array, 3D, cube and
     cube array textures and on the depth forms lower to `OpImageQueryLod` (an array coordinate carries no layer); only
     the 2D form translated before, here and upstream. Tests: `tests/lod_query_and_pull_shapes.rs` on AIR compiled on this

@@ -14,6 +14,53 @@ pub fn specialize_air_function_constants<'a>(
     })
 }
 
+/// The AIR of a function-constant module whose constants `defined` are all defined but only `values` are baked; the
+/// others become specialization constants (the wrapper's nvmtl_translate_fc_spec2). The config-struct fold
+/// (meta::fold_static_init_struct_fields) must see every defined constant as defined and every unbaked one as unknown:
+/// its evaluator reads a remaining `air.is_function_constant_defined` call as false, so folding before the defined set
+/// is marked replaced each field the static initializer guards with `is_function_constant_defined(c) ? c : default`
+/// by its default for every unbaked constant. Core Animation's fixed_frag reads its image functions that way, and every
+/// textured and glyph draw of WindowServer came out empty (nm29 on the B580: a white desktop).
+pub fn specialize_air_function_constants_for_spec<'a>(
+    air_ll: &'a str,
+    values: &[(u32, Vec<u8>)],
+    defined: &[u32],
+) -> Result<Cow<'a, str>, String> {
+    let specialized = specialize_air_function_constants_unfolded(air_ll, values)?;
+    let marked = mark_function_constants_defined(&specialized, defined);
+    let folded = crate::meta::with_function_constants_unknown(|| crate::meta::fold_static_init_struct_fields(&marked));
+    Ok(match (folded, marked) {
+        (Some(folded), _) => Cow::Owned(folded),
+        (None, Cow::Owned(marked)) => Cow::Owned(marked),
+        (None, Cow::Borrowed(_)) => specialized,
+    })
+}
+
+/// `air.is_function_constant_defined(c)` becomes true for each constant in `defined` (the same rewrite the baking does
+/// for a supplied constant).
+fn mark_function_constants_defined<'a>(ll: &'a str, defined: &[u32]) -> Cow<'a, str> {
+    if defined.is_empty() || !ll.contains("@air.is_function_constant_defined(") {
+        return Cow::Borrowed(ll);
+    }
+    let mut out = String::with_capacity(ll.len());
+    for line in ll.split_inclusive('\n') {
+        if line.contains("@air.is_function_constant_defined(") && !line.trim_start().starts_with("declare ") {
+            if let (Some(index), Some((result, _))) = (crate::fc_specialize::fc_init_index(line), line.split_once(" = ")) {
+                if defined.contains(&index) {
+                    out.push_str(result);
+                    out.push_str(" = icmp eq i32 0, 0");
+                    if line.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+    }
+    Cow::Owned(out)
+}
+
 pub(crate) fn specialize_air_function_constants_unfolded<'a>(
     air_ll: &'a str,
     values: &[(u32, Vec<u8>)],
@@ -416,6 +463,59 @@ define void @main(ptr addrspace(2) %buf) {
             .expect("specialize");
         assert!(out.contains("%pair = load <2 x i8>"), "{out}");
         assert!(out.contains("%sum = add i8 3, 70"), "the untouched fields still fold: {out}");
+    }
+
+    // Core Animation's fixed_frag in miniature: the static initializer copies its image-function constant into the config
+    // struct only when it is defined (`is_function_constant_defined(c) ? c : 0`), and the shader samples when the copy is
+    // not 0. The fc-spec path (nvmtl_translate_fc_spec2) bakes only structural constants; the image function stays a
+    // specialization constant, defined but unbaked.
+    const GUARDED_CONFIG: &str = r#"%T = type { i8, i8 }
+@fc_image.MTL_FC_INIT_47_h = internal addrspace(2) externally_initialized constant i8 undef, section "air.fc_initializer", align 1
+@fc_mode.MTL_FC_INIT_3_h = internal addrspace(2) externally_initialized constant i8 undef, section "air.fc_initializer", align 1
+@config = internal unnamed_addr addrspace(2) global %T zeroinitializer, align 4
+define internal void @_GLOBAL__sub_I_t() section "air.static_init" {
+  %d = call i1 @air.is_function_constant_defined(ptr addrspace(2) @fc_image.MTL_FC_INIT_47_h)
+  %v = load i8, ptr addrspace(2) @fc_image.MTL_FC_INIT_47_h, align 1
+  %img = select i1 %d, i8 %v, i8 0
+  store i8 %img, ptr addrspace(2) @config, align 4
+  %m = load i8, ptr addrspace(2) @fc_mode.MTL_FC_INIT_3_h, align 1
+  store i8 %m, ptr addrspace(2) getelementptr inbounds (%T, ptr addrspace(2) @config, i64 0, i32 1), align 1
+  ret void
+}
+define void @main() {
+  %f = load i8, ptr addrspace(2) @config, align 1
+  %b = getelementptr inbounds %T, ptr addrspace(2) @config, i64 0, i32 1
+  %mode = load i8, ptr addrspace(2) %b, align 1
+  %sum = add i8 %f, %mode
+  ret void
+}
+declare i1 @air.is_function_constant_defined(ptr addrspace(2))
+"#;
+
+    #[test]
+    fn a_whole_variant_folds_the_guarded_field_to_its_value() {
+        let out = specialize_air_function_constants(GUARDED_CONFIG, &[(47, vec![2]), (3, vec![5])]).expect("specialize");
+        assert!(out.contains("%sum = add i8 2, 5"), "{out}");
+    }
+
+    #[test]
+    fn the_fc_spec_path_keeps_a_field_whose_constant_is_defined_but_unbaked() {
+        // constant 3 baked, constant 47 defined and left to a specialization constant: its field must stay a load (the
+        // first nm29 build folded it to the `not defined` default 0, so every image draw of WindowServer sampled nothing)
+        let out = specialize_air_function_constants_for_spec(GUARDED_CONFIG, &[(3, vec![5])], &[3, 47]).expect("specialize");
+        assert!(out.contains("%f = load i8, ptr addrspace(2) @config"), "the unbaked field must not fold: {out}");
+        assert!(!out.contains("%sum = add i8 0, 5"), "{out}");
+        assert!(out.contains("%mode = or i8 0, 5") || out.contains("%sum = add i8 %f, 5"), "the baked field still folds: {out}");
+        // what the first nm29 build did: fold with the unbaked constant's definedness unknown to the evaluator
+        let wrong = specialize_air_function_constants(GUARDED_CONFIG, &[(3, vec![5])]).expect("specialize");
+        assert!(wrong.contains("%sum = add i8 0, 5"), "control: folding before definedness is marked reads `not defined`: {wrong}");
+    }
+
+    #[test]
+    fn the_fc_spec_path_folds_nothing_from_a_constant_that_is_not_defined_by_the_variant() {
+        // 47 not supplied at all: `is_function_constant_defined` is false, so its default 0 is the right value
+        let out = specialize_air_function_constants_for_spec(GUARDED_CONFIG, &[(3, vec![5])], &[3]).expect("specialize");
+        assert!(out.contains("%sum = add i8 0, 5"), "{out}");
     }
 
     #[test]

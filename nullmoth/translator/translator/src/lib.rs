@@ -32,7 +32,7 @@ mod spirv_variable_ptr;
 pub mod tools;
 pub(crate) mod types;
 
-pub use fc_air_specialize::specialize_air_function_constants;
+pub use fc_air_specialize::{specialize_air_function_constants, specialize_air_function_constants_for_spec};
 pub use fc_specialize::{
     specialize_function_constant_bytes, specialize_function_constants,
     specialize_function_constants_zero,
