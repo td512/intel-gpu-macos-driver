@@ -4841,7 +4841,7 @@ static BOOL nvmtl_bytes_ring_at(__unsafe_unretained NVMTLCommandBuffer *cb, NSUI
 }
 // A GPU-encodable ICB (nvmtl_icb_layout.h): each slot's state is replayed as the CPU encoded it, and its draw comes from
 // its record, which the CPU (indirectRenderCommandAtIndex:) or a shader (render_command) wrote last: an indexed indirect
-// draw when the slot has an index buffer, then a plain indirect draw; the form the record does not hold has zero counts.
+// draw when the slot has an index buffer, else a plain indirect draw.
 // The app orders the shader's writes before this with a barrier or an encoder boundary, as Metal requires
 // (memoryBarrierWithScope: and the pass boundary are ALL_COMMANDS MEMORY_WRITE -> MEMORY_READ, which covers the
 // indirect-argument read).
@@ -4868,27 +4868,30 @@ static BOOL nvmtl_bytes_ring_at(__unsafe_unretained NVMTLCommandBuffer *cb, NSUI
         // the topology: the CPU draw's, else the pipeline's class; written back so a later GPU encode is checked against it
         const uint32_t prim = c->_armed ? (uint32_t)c->_type
                                         : nvmtl_icb_prim_for_class(_ps ? (unsigned long)_ps->_descriptor.inputPrimitiveTopology : 0);
-        if (rec[i].execPrim != prim) rec[i].execPrim = prim;
+        if (rec[i].execPrim != prim) [b nvmtlSetExecPrim:i prim:prim];
         if (![self nvmtlBindSamplerPipeline]) continue;
         if (nvmtl_vk_cmd_set_topology(&_cb->_c, prim)) continue;
         if ([self nvmtlVertexInputs]) continue;
         const size_t at = i * (size_t)NVMTL_ICB_RECORD_BYTES;
         NVMTLBuffer *ib = c->_armed && c->_indexed && [(id)c->_ibuf isKindOfClass:[NVMTLBuffer class]] ? (NVMTLBuffer *)c->_ibuf : nil;
+        // one indirect draw per slot: the indexed form when the slot has an index buffer (the translator refuses a plain
+        // draw a shader writes there), else the plain form
         if (ib && rec[i].ibShift) {
             nvmtl_retain_resource(_cb, ib);
             const uint32_t sh = rec[i].ibShift;
             nvmtl_vk_cmd_draw_indexed_indirect(&_cb->_c, &ib->_b, c->_ioff & ((1u << sh) - 1u), sh == 2,
                                                &b->_rec->_b, at + NVMTL_ICB_W_IDX * 4);
-        }
-        nvmtl_vk_cmd_draw_indirect(&_cb->_c, &b->_rec->_b, at + NVMTL_ICB_W_DRAW * 4);
+        } else nvmtl_vk_cmd_draw_indirect(&_cb->_c, &b->_rec->_b, at + NVMTL_ICB_W_DRAW * 4);
         n++;
     }
     { static int said; if (said++ < 8) nvlog("executeCommandsInBuffer: %lu of %lu slot(s) drawn from their records (GPU-encodable ICB)", (unsigned long)n, (unsigned long)r.length); }
-    // diagnostic: a GPU-written draw the execute could not express (nvmtl_icb_layout.h, kind REFUSED), said up to 8 times per ICB
-    if (b->_refusedSaid < 8 && end > r.location) {
+    // diagnostic: a GPU-written draw the execute could not express (nvmtl_icb_layout.h, kind REFUSED), said up to 8 times per
+    // ICB and looked for in its first 32 executes only (the records may be in VRAM: each read crosses the BAR)
+    if (b->_refusedSaid < 8 && b->_refusedChecks < 32 && end > r.location) {
         NVMTLIndirectCommandBuffer *held = b; const NSUInteger lo = r.location;
+        b->_refusedChecks++;
         [_cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
-            nvmtl_icb_record *rr = [held nvmtlRecords];
+            nvmtl_icb_record *rr = [held nvmtlGPURecords];
             if (!rr || done.status != MTLCommandBufferStatusCompleted) return;
             for (NSUInteger k = lo; k < end && held->_refusedSaid < 8; k++) if (rr[k].kind == NVMTL_ICB_REFUSED) {
                 held->_refusedSaid++;
@@ -5717,14 +5720,20 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
         if (!_rec && _cmds.count) {
             NVMTLBuffer *b = [NVMTLBuffer new];
             const size_t bytes = _cmds.count * (size_t)NVMTL_ICB_RECORD_BYTES;
-            if (nvmtl_vk_buffer_create(bytes, 1, &b->_b) || !b->_b.map) {
+            // VRAM through the BAR (host_visible 3) when there is room, else system RAM: each indirect draw of the execute
+            // loads its parameters from here one register at a time, and a system-RAM read costs a PCIe round trip each
+            // (mtl_icb_cost: ~5 us per indirect draw from system RAM). NVMTL_ICB_SYSRAM=1 keeps them in system RAM.
+            static int sysram = -1; if (sysram < 0) { const char *e = getenv("NVMTL_ICB_SYSRAM"); sysram = e && e[0] == '1'; }
+            nvmtl_icb_record *shadow = calloc(_cmds.count, sizeof *shadow);
+            if (!shadow || nvmtl_vk_buffer_create(bytes, sysram ? 1 : 3, &b->_b) || !b->_b.map) {
+                free(shadow);
                 static int said; if (!said++) nvlog("indirect command buffer: the %zu-byte slot record buffer was REFUSED - GPU-side encoding into it is unavailable, CPU replay only", bytes);
                 return 0;
             }
             b->_storage = MTLStorageModeShared;
-            nvmtl_icb_record *r = (nvmtl_icb_record *)b->_b.map;
-            memset(r, 0, bytes);
-            for (NSUInteger i = 0; i < _cmds.count; i++) r[i].execPrim = NVMTL_ICB_NO_PRIM;
+            for (NSUInteger i = 0; i < _cmds.count; i++) shadow[i].execPrim = NVMTL_ICB_NO_PRIM;
+            memcpy(b->_b.map, shadow, bytes);
+            _shadow = shadow;
             _rec = b;
             for (NSUInteger i = 0; i < _cmds.count; i++) [self nvmtlWriteRecord:i];
             nvlog("indirect command buffer %p: %lu slot record(s) at 0x%llx - GPU-encodable, executed from the records (vkCmdDraw*Indirect)",
@@ -5733,7 +5742,15 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
     }
     return _rec ? nvmtl_vk_buffer_address(&_rec->_b) : 0;
 }
-- (nvmtl_icb_record *)nvmtlRecords { return _rec ? (nvmtl_icb_record *)_rec->_b.map : NULL; }
+- (nvmtl_icb_record *)nvmtlRecords { return _rec ? _shadow : NULL; }
+- (nvmtl_icb_record *)nvmtlGPURecords { return _rec ? (nvmtl_icb_record *)_rec->_b.map : NULL; }
+// the execute's topology for slot i, in the CPU's copy and in the record a shader checks its draw against (word 11)
+- (void)nvmtlSetExecPrim:(NSUInteger)i prim:(uint32_t)prim {
+    if (!_rec || i >= _cmds.count) return;
+    _shadow[i].execPrim = prim;
+    ((nvmtl_icb_record *)_rec->_b.map)[i].execPrim = prim;
+}
+- (void)dealloc { free(_shadow); }
 - (MTLStorageMode)storageMode { return (MTLStorageMode)((_opts >> MTLResourceStorageModeShift) & 0xF); }
 // The record of slot i from what the CPU encoded there (indirectRenderCommandAtIndex:): the draw, its topology and its
 // index buffer. A slot without a CPU draw keeps the topology an earlier execute or its pipeline chose, so a shader that
@@ -5765,7 +5782,8 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
             v.draw[0] = (uint32_t)c->_count; v.draw[1] = (uint32_t)c->_instances; v.draw[2] = (uint32_t)c->_start; v.draw[3] = (uint32_t)c->_baseInstance;
         }
     }
-    memcpy(&rec[i], &v, sizeof v);
+    rec[i] = v;
+    memcpy(&((nvmtl_icb_record *)_rec->_b.map)[i], &v, sizeof v);
 }
 - (MTLCPUCacheMode)cpuCacheMode { return (MTLCPUCacheMode)(_opts & 0xF); }
 - (MTLHazardTrackingMode)hazardTrackingMode { return nvmtl_res_hazard(nil, _opts); }

@@ -201,6 +201,9 @@ uint16_t nvmtl_vk_vendor(void);
 void nvmtl_vk_limits(uint32_t *layers, uint32_t *shared_bytes, uint32_t wg[3], uint32_t *wg_inv, uint32_t *sm);
 int nvmtl_vk_tg_reject(const uint32_t l[3], const uint32_t *t, const char *kernel, uint32_t lin);
 void nvmtl_vk_pubcaps(uint32_t *color_samples, uint32_t *depth_samples, uint64_t *max_storage_range, uint64_t *linear_align);
+/* host_visible: 0 VRAM (Private), 1 system RAM (mapped), 2 Shared (VRAM through BAR1 when NVMTL_SHARED_VRAM=1, else
+   system RAM), 3 a small dedicated buffer the command streamer reads (ICB slot records): VRAM through BAR1 whatever the
+   Shared policy, system RAM if that is refused; never pooled or parked-taken */
 int  nvmtl_vk_buffer_create(size_t size, int host_visible, nvk_buffer *out);
 enum { NVP_BEGIN, NVP_BUFNEW, NVP_BUFPOOL, NVP_BUFDEL, NVP_HEAP, NVP_SYNCIN, NVP_SYNCOUT, NVP_COPY, NVP_N };
 uint64_t nvmtl_perf_now(void);

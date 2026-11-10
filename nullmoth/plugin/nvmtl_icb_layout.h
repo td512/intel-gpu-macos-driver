@@ -4,11 +4,12 @@
    air.draw_indexed_primitives_render_command.p1i16/.p1i32 and air.reset_render_command to stores into it).
 
    An MTLIndirectCommandBuffer whose gpuResourceID is taken (an argument encoder's setIndirectCommandBuffer:atIndex:
-   or the app itself) gets a host-visible record buffer: one 64-byte record per slot. Its device address is the
+   or the app itself) gets a record buffer (VRAM through the BAR when it can, else system RAM; the CPU keeps its own copy
+   of what it wrote and never reads the buffer back): one 64-byte record per slot. Its device address is the
    gpuResourceID, which is what a shader's `command_buffer` holds. The CPU writes a record when the app encodes a draw
    through indirectRenderCommandAtIndex:, the GPU when a shader encodes one; executeCommandsInBuffer:withRange: then
-   draws every slot from its record with vkCmdDrawIndexedIndirect / vkCmdDrawIndirect, so the last writer wins on
-   either side, as on Apple's GPUs.
+   draws every slot from its record with vkCmdDrawIndexedIndirect (a slot with an index buffer) or vkCmdDrawIndirect,
+   so the last writer wins on either side, as on Apple's GPUs.
 
    Words (uint32):
      0      kind: NVMTL_ICB_EMPTY / _DRAW / _INDEXED / _REFUSED                                      CPU + GPU
@@ -19,10 +20,13 @@
      12,13  device address bound as the slot's index buffer (0: none)                                CPU
      14     bytes from that address to the end of the index buffer                                   CPU
      15     log2 of the index size (1 uint16, 2 uint32, 0 none)                                      CPU
-   A write zeroes the counts of the form it does not use: the execute issues both draws for a slot with an index buffer
-   and exactly one of them draws. Topology and index buffer are bound by the CPU (core Vulkan takes neither from GPU
-   memory), so a GPU draw with another primitive type than word 11, another index type than word 15, or an index
-   pointer outside [word 12/13, + word 14] is written with zero counts and kind NVMTL_ICB_REFUSED. */
+   A write zeroes the counts of the form it does not use. The execute issues one draw per slot: the indexed form when
+   word 15 is non-zero, else the plain form (both, until 11 Nov 2026: Xe2 ANV loads each indirect parameter with its
+   own MI_LOAD_REGISTER_MEM, ~2.2 us per indirect draw from VRAM and ~5 us from system RAM, user/tests/metal/
+   mtl_icb_cost.m). Topology and index buffer are bound by the CPU (core Vulkan takes neither from GPU memory), so a GPU
+   draw with another primitive type than word 11, another index type than word 15, an index pointer outside
+   [word 12/13, + word 14], or a plain draw into a slot with an index buffer is written with zero counts and kind
+   NVMTL_ICB_REFUSED. */
 #ifndef NVMTL_ICB_LAYOUT_H
 #define NVMTL_ICB_LAYOUT_H
 #include <stdint.h>

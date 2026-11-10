@@ -345,9 +345,14 @@ static inline MTLSize nvmtl_desc_size(id d, SEL sel) {
 @interface NVMTLIndirectCommandBuffer () { @public uint64_t _resid; } @end
 #include "nvmtl_icb_layout.h"
 /* GPU-encodable ICBs (nvmtl_icb_layout.h): _rec is the slot record buffer, made when the gpuResourceID is first taken
-   (the address a shader's command_buffer holds); nil for an ICB only the CPU encodes, which keeps the replay path. */
-@interface NVMTLIndirectCommandBuffer () { @public NVMTLBuffer *_rec; uint32_t _refusedSaid; }
-- (nvmtl_icb_record *)nvmtlRecords;
+   (the address a shader's command_buffer holds); nil for an ICB only the CPU encodes, which keeps the replay path.
+   _rec lives in VRAM when it can (the execute's indirect draws read it with one MI_LOAD_REGISTER_MEM per parameter: from
+   system RAM that was ~5 us per draw on the B580); _shadow is the CPU's copy of what the CPU wrote, so the CPU never
+   reads the records back through the BAR. _refusedChecks counts the completed executes the refusal diagnostic read. */
+@interface NVMTLIndirectCommandBuffer () { @public NVMTLBuffer *_rec; nvmtl_icb_record *_shadow; uint32_t _refusedSaid, _refusedChecks; }
+- (nvmtl_icb_record *)nvmtlRecords;      /* the CPU's copy */
+- (nvmtl_icb_record *)nvmtlGPURecords;   /* the record buffer's mapping (what a shader wrote): read sparingly */
+- (void)nvmtlSetExecPrim:(NSUInteger)i prim:(uint32_t)prim;
 - (void)nvmtlWriteRecord:(NSUInteger)i;
 @end
 @interface NVMTLIndirectCommand () { @public __unsafe_unretained NVMTLIndirectCommandBuffer *_owner; NSUInteger _slot; } @end

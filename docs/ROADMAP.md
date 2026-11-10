@@ -79,8 +79,8 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   - The translator lowers each call to plain stores into `address + slot * 64`; it zeroes the counts of the form the
     call does not use.
   - `executeCommandsInBuffer:withRange:` replays each slot's CPU state (pipeline, buffers, depth and raster state, as
-    before) and draws it with `vkCmdDrawIndexedIndirect` (when the slot has an index buffer) and `vkCmdDrawIndirect`
-    from its record. ICBs nobody took the ID of keep the CPU replay. Blit `resetCommandsInBuffer` and
+    before) and draws it from its record with `vkCmdDrawIndexedIndirect` when the slot has an index buffer, else
+    `vkCmdDrawIndirect` (one draw per slot since 11 Nov; a shader's plain draw into a CPU-indexed slot is refused). ICBs nobody took the ID of keep the CPU replay. Blit `resetCommandsInBuffer` and
     `copyIndirectCommandBuffer` also update the records on the GPU timeline. The app orders the shader's writes before
     the execute (render-encoder memory barrier or encoder boundary), as Metal requires; both are already
     `ALL_COMMANDS`/`MEMORY_WRITE -> MEMORY_READ` and cover the indirect-argument read.
@@ -91,7 +91,13 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
     lowers a `ptrtoint` without an address payload to 0. The lowering's own `ptrtoint`s (`%nvicbN.addr`) now take a
     loaded pointer's device address plus its offset, an entry buffer parameter's address, and `p + k` as the address
     of `p` plus k elements; other shaders' `ptrtoint`s are unchanged. The entry-parameter form is untested on the GPU.
-  - Not measured: an indexed slot of a GPU-encodable ICB issues two indirect draws (one with zero counts).
+  - **Cost (11 Nov, `user/tests/metal/mtl_icb_cost.m`, 1024 tiny draws, GPU time per slot):** direct draws and the CPU
+    replay ~0.04 us; a GPU-encodable ICB 11.2 us per indexed slot and 5.1 us per plain slot. Xe2 ANV executes a
+    single-draw `vkCmdDraw*Indirect` with one synchronous `MI_LOAD_REGISTER_MEM` per parameter, and the records were in
+    system RAM (a PCIe read each); an indexed slot also issued a second, zero-count draw. Now the records are in VRAM
+    through the BAR (`nvmtl_vk_buffer_create` host_visible 3, whatever the Shared policy; the CPU keeps its own copy and
+    never reads them back) and each slot issues one draw: 2.6 us per indexed slot, 2.2 us per plain slot (4.3x and
+    2.3x). Still ~60x a direct draw: a large GPU-encoded ICB is slow.
 - **Limits (core Vulkan takes neither an index buffer address nor a topology from GPU memory).** A GPU-written indexed
   draw must point into the index buffer the CPU encoded in that slot (same index type, inside the buffer, aligned):
   the first index is computed from the pointer. A GPU-written draw must use the topology the execute chose (the
@@ -101,6 +107,9 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   same buffer). The newer WebKit `vsICBIndirect*` helpers (WebKit main, not yet in Safari 26.7) encode indexed draws
   into slots the CPU never filled: those are refused until the next step.
 - **Next:**
+  - Fewer indirect loads: runs of slots with the same CPU state, form and index buffer as one multi-draw
+    (`drawCount` > 1, stride 64), which ANV executes with its generated-draws shader or `EXECUTE_INDIRECT_DRAW`
+    instead of a register load per parameter.
   - Index buffer by address: `VK_EXT_device_generated_commands` (ANV exposes it for verx10 >= 125, so on Xe2) has
     an index-buffer token that takes a device address from GPU memory. A slot record laid out as a DGC sequence
     (index-buffer token + draw-indexed token) executed with `vkCmdExecuteGeneratedCommandsEXT` would remove the

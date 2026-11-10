@@ -17,13 +17,15 @@
 //! | 14    | CPU        | bytes from that address to the end of the buffer                        |
 //! | 15    | CPU        | log2 of that index buffer's element size (1: uint16, 2: uint32; 0: none) |
 //!
-//! The execute (`executeCommandsInBuffer:withRange:`) issues, per slot, an indexed indirect draw from words 2..6 (when
-//! the slot has an index buffer) and a plain indirect draw from words 7..10, with the topology of word 11. A write
-//! zeroes the counts of the form it does not use, so exactly one of the two draws anything. Vulkan cannot take an index
-//! buffer address or a topology from GPU memory (core Vulkan; VK_EXT_device_generated_commands could, see
-//! docs/ROADMAP.md), so a GPU-written draw the execute cannot express - an index pointer outside the slot's bound index
-//! buffer, a different index type, a misaligned pointer, or a primitive type other than word 11 - is written with zero
-//! counts and kind 3: nothing is drawn rather than something wrong, and the plugin can report the slot.
+//! The execute (`executeCommandsInBuffer:withRange:`) issues one indirect draw per slot, with the topology of word 11:
+//! an indexed one from words 2..6 when the slot has an index buffer (word 15 non-zero), else a plain one from words
+//! 7..10. (It issued both until 11 Nov 2026: Xe2 ANV loads an indirect draw's parameters one MI_LOAD_REGISTER_MEM at a
+//! time, ~2.2 us per draw from VRAM, and the second, zero-count draw doubled an indexed slot's cost; mtl_icb_cost.)
+//! A write zeroes the counts of the form it does not use. Vulkan cannot take an index buffer address or a topology from
+//! GPU memory (core Vulkan; VK_EXT_device_generated_commands could, see docs/ROADMAP.md), so a GPU-written draw the
+//! execute cannot express - an index pointer outside the slot's bound index buffer, a different index type, a
+//! misaligned pointer, a plain draw into a slot with an index buffer, or a primitive type other than word 11 - is
+//! written with zero counts and kind 3: nothing is drawn rather than something wrong, and the plugin can report the slot.
 use std::borrow::Cow;
 
 /// Bytes per command record (a power of two: the slot index is shifted by RECORD_SHIFT).
@@ -352,8 +354,12 @@ fn lower_line(body: &str, serial: usize, geps: &std::collections::HashMap<String
             let (start, count, instances, base_instance) =
                 (args[3].1.clone(), args[4].1.clone(), args[5].1.clone(), args[6].1.clone());
             let exec = e.load(W_EXEC_PRIM);
-            let ok = e.name("ok");
-            e.line(&format!("{ok} = icmp eq i32 {exec}, {prim}"));
+            // the execute draws a slot with an index buffer (word 15) from its indexed form only
+            let have_shift = e.load(W_IB_SHIFT);
+            let (primok, noib, ok) = (e.name("primok"), e.name("noib"), e.name("ok"));
+            e.line(&format!("{primok} = icmp eq i32 {exec}, {prim}"));
+            e.line(&format!("{noib} = icmp eq i32 {have_shift}, 0"));
+            e.line(&format!("{ok} = and i1 {primok}, {noib}"));
             let kind = e.name("kind");
             e.line(&format!("{kind} = select i1 {ok}, i32 {KIND_DRAW}, i32 {KIND_REFUSED}"));
             let count = e.gated(&ok, &count, "count");
@@ -496,7 +502,9 @@ mod tests {
         let text = "  tail call void @air.draw_primitives_render_command(ptr addrspace(1) captures(none) %cb, i32 %t, i32 4, i32 7, i32 8, i32 9, i32 10) #2\n  tail call void @air.reset_render_command(ptr addrspace(1) captures(none) %cb, i32 %t) #2\n";
         let out = lower_render_commands(text).into_owned();
         assert!(!out.contains("render_command("), "{out}");
-        assert!(out.contains("%nvicb0.ok = icmp eq i32 %nvicb0.r11, 4"), "{out}");
+        assert!(out.contains("%nvicb0.primok = icmp eq i32 %nvicb0.r11, 4"), "{out}");
+        assert!(out.contains("%nvicb0.noib = icmp eq i32 %nvicb0.r15, 0"), "{out}");
+        assert!(out.contains("%nvicb0.ok = and i1 %nvicb0.primok, %nvicb0.noib"), "{out}");
         assert!(out.contains("store i32 %nvicb0.count, ptr addrspace(1) %nvicb0.w7"), "{out}");
         assert!(out.contains("store i32 7, ptr addrspace(1) %nvicb0.w9"), "{out}");
         assert!(out.contains("%nvicb1.base = shl i64 %nvicb1.slot, 4"), "{out}");

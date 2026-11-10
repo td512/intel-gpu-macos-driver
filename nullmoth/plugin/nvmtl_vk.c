@@ -1474,10 +1474,14 @@ static int bar1_on(void)
         if (!env) nvlog("vk: shared-in-VRAM off - Shared stays in system RAM at every size (batch 56 default; NVMTL_SHARED_VRAM=1 opts in)"); }
     return env;
 }
-static int bar1_memtype(uint32_t bits, VkDeviceSize size)
+/* force: a small internal buffer the GPU reads from its command streamer (ICB slot records, host_visible 3) goes to VRAM
+   whatever the Shared policy (bar1_on) says, within the same BAR budget */
+static int bar1_memtype_for(uint32_t bits, VkDeviceSize size, int force)
 {
-    if (g_bar1_off) return -1;
-    if (!bar1_on()) { g_bar1_off = 1; return -1; }
+    if (!force) {
+        if (g_bar1_off) return -1;
+        if (!bar1_on()) { g_bar1_off = 1; return -1; }
+    }
     const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     for (uint32_t i = 0; i < g_memp.memoryTypeCount; i++) {
         if (!(bits & (1u << i)) || (g_memp.memoryTypes[i].propertyFlags & want) != want) continue;
@@ -1493,6 +1497,7 @@ static int bar1_memtype(uint32_t bits, VkDeviceSize size)
     { static int said; if (!said++) nvlog("vk: shared-in-VRAM: no DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT type in bits 0x%x", bits); }
     return -1;
 }
+static int bar1_memtype(uint32_t bits, VkDeviceSize size) { return bar1_memtype_for(bits, size, 0); }
 static int  pool_buffer_create(size_t size, nvk_buffer *out);
 static int  pool_buffer_create_in(int vram, size_t size, nvk_buffer *out);
 static int  vpool_on(void);
@@ -1743,11 +1748,11 @@ static int nvmtl_vk_buffer_create_body(size_t size, int host_visible, nvk_buffer
     memset(out, 0, sizeof *out); out->size = size;
     if (host_visible == 2 && size <= NVMTL_POOL_MAX && vpool_on() && pool_buffer_create_in(1, size, out) == 0) return 0;
     memset(out, 0, sizeof *out); out->size = size;
-    if (host_visible && size <= NVMTL_POOL_MAX && pool_buffer_create(size, out) == 0) return 0;
+    if (host_visible && host_visible != 3 && size <= NVMTL_POOL_MAX && pool_buffer_create(size, out) == 0) return 0;
     memset(out, 0, sizeof *out); out->size = size;
     if (!host_visible && size < NVMTL_PPOOL_MAX && ppool_on() && pool_buffer_create_in(2, size, out) == 0) return 0;
     memset(out, 0, sizeof *out); out->size = size;
-    if (bpark_take(size, host_visible, out) == 0) return 0;
+    if (host_visible != 3 && bpark_take(size, host_visible, out) == 0) return 0;
     memset(out, 0, sizeof *out); out->size = size;
     if (!host_visible && size >= (1u << 20) && nvmtl_vk_sparse_on() && nvmtl_vk_buffer_create_sparse(size, out) == 0) return 0;
     memset(out, 0, sizeof *out); out->size = size;
@@ -1761,7 +1766,7 @@ static int nvmtl_vk_buffer_create_body(size_t size, int host_visible, nvk_buffer
     int mt = host_visible ? memtype(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
                           : nvmtl_vk_buffer_vram_type(mr.memoryTypeBits);
     if (mt < 0) { nvlog("vk: no memory type for buffer (host_visible=%d)", host_visible); return -1; }
-    if (host_visible == 2 && size > NVMTL_POOL_MAX) { int bt = bar1_memtype(mr.memoryTypeBits, mr.size); if (bt >= 0) {
+    if ((host_visible == 2 && size > NVMTL_POOL_MAX) || host_visible == 3) { int bt = bar1_memtype_for(mr.memoryTypeBits, mr.size, host_visible == 3); if (bt >= 0) {
         VkMemoryAllocateFlagsInfo bf = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, NULL, VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT, 0 };
         VkMemoryAllocateInfo bi = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &bf, mr.size, (uint32_t)bt };
         VkDeviceMemory bm = VK_NULL_HANDLE; void *bp = NULL;
@@ -1770,12 +1775,15 @@ static int nvmtl_vk_buffer_create_body(size_t size, int host_visible, nvk_buffer
         VkResult r3 = r2 == VK_SUCCESS ? pvkBindBufferMemory(g_dev, out->buf, bm, 0) : r2;
         if (r3 == VK_SUCCESS) {
             out->mem = bm; out->map = bp; out->alloc = mr.size; out->bar1 = 1; out->mtype1 = (uint32_t)bt + 1; g_alloc_bytes += mr.size; g_bar1_bytes += mr.size; g_buf_made++;
-            { static int said; if (!said++) nvlog("vk: shared buffer of %zu bytes placed in VRAM through BAR1 (type %d)", size, bt); }
+            { static int said[2]; if (!said[host_visible == 3]++) nvlog("vk: %s buffer of %zu bytes placed in VRAM through BAR1 (type %d)",
+                                                                     host_visible == 3 ? "command-streamer-read (ICB records)" : "shared", size, bt); }
             return 0; }
         if (bp) pvkUnmapMemory(g_dev, bm);
         if (bm) pvkFreeMemory(g_dev, bm, NULL);
+        if (host_visible == 3) { static int said; if (!said++) nvlog("vk: ICB record buffer REFUSED VRAM (alloc %d, map %d, bind %d) - system RAM (said once)", r1, r2, r3); }
+        else {
         g_bar1_off = 1;
-        nvlog("vk: shared-in-VRAM REFUSED (alloc %d, map %d, bind %d) at %zu BAR bytes - system RAM for this process", r1, r2, r3, g_bar1_bytes); } }
+        nvlog("vk: shared-in-VRAM REFUSED (alloc %d, map %d, bind %d) at %zu BAR bytes - system RAM for this process", r1, r2, r3, g_bar1_bytes); } } }
     VkMemoryAllocateFlagsInfo mafi = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, NULL,
                                        VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT, 0 };
     VkMemoryAllocateInfo mai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &mafi, mr.size, (uint32_t)mt };
