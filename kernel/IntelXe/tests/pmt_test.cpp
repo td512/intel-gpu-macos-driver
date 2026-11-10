@@ -142,30 +142,37 @@ int main() {
 		g.update(word(c, p), 5 * s, win);
 		c += 37 * J, p += 85 * J;
 		g.update(word(c, p), 6 * s, win);
-		CHECK(!g.havePower && g.rejected == 1 && g.baseNs == 6 * s, "package 85 W > card 37 W: n/a, re-based, counted");
+		CHECK(g.havePower && !g.pkgValid && g.mw[XE_ENERGY_CARD] == 37000 && g.rejected == 1 && g.baseNs == 6 * s,
+			"package 85 W > card 37 W: package n/a (card kept), re-based, counted");
 		c += J / 10;   // a reader 0.1 s later: still n/a, the base kept
 		g.update(word(c, p), 6 * s + s / 10, win);
-		CHECK(!g.havePower && g.rejected == 1 && g.baseNs == 6 * s, "inside the window after a refusal: n/a, base kept");
+		CHECK(g.havePower && !g.pkgValid && g.rejected == 1 && g.baseNs == 6 * s, "inside the window after a refusal: package n/a, base kept");
 		c += 37 * J - J / 10, p += 152 * J;
 		g.update(word(c, p), 7 * s, win);
-		CHECK(!g.havePower && g.rejected == 2, "package 152 W: refused too (%u)", g.rejected);
+		CHECK(g.havePower && !g.pkgValid && g.rejected == 2, "package 152 W: refused too (%u)", g.rejected);
 		c += 37 * J, p += 19 * J + J / 2;   // 19.5 W (the idle reading was 19.6 W)
 		g.update(word(c, p), 8 * s, win);
-		CHECK(g.havePower && g.rejected == 2 && g.mw[XE_ENERGY_CARD] == 37000 && g.mw[XE_ENERGY_PKG] == 19500,
+		CHECK(g.havePower && g.pkgValid && g.rejected == 2 && g.mw[XE_ENERGY_CARD] == 37000 && g.mw[XE_ENERGY_PKG] == 19500,
 			"consistent window: card %u mW, package %u mW", g.mw[XE_ENERGY_CARD], g.mw[XE_ENERGY_PKG]);
 		CHECK(g.uj(XE_ENERGY_PKG) == (600 * J + 85 * J + 152 * J + 19 * J + J / 2) * 1000000 >> 14,
 			"the energy sums are not touched by the guard");
 		// a counter that steps back by one count reads as a 2^32 wrap: ~262144 J in 1 s, above the ceiling
 		g.update(word(c, p - 1), 9 * s, win);
-		CHECK(!g.havePower && g.rejected == 3, "counter stepped back: refused (%u)", g.rejected);
+		CHECK(g.havePower && !g.pkgValid && g.rejected == 3, "package counter stepped back: package refused (%u)", g.rejected);
 		c += 30 * J, p += 1 + 15 * J;
 		g.update(word(c, p), 10 * s, win);
-		CHECK(g.havePower && g.mw[XE_ENERGY_CARD] == 30000 && g.mw[XE_ENERGY_PKG] == 15000, "next window after it: %u / %u mW",
+		CHECK(g.havePower && g.pkgValid && g.mw[XE_ENERGY_CARD] == 30000 && g.mw[XE_ENERGY_PKG] == 15000, "next window after it: %u / %u mW",
 			g.mw[XE_ENERGY_CARD], g.mw[XE_ENERGY_PKG]);
+		// the card counter stepping back is above the ceiling for the card itself: no power at all for that window
+		g.update(word(c - 1, p + 15 * J), 11 * s, win);
+		CHECK(!g.havePower && !g.pkgValid && g.rejected == 4, "card counter stepped back: both n/a (%u)", g.rejected);
+		c += 30 * J, p += 15 * J;
+		g.update(word(c - 1, p + 15 * J), 12 * s, win);
+		CHECK(g.havePower && g.mw[XE_ENERGY_CARD] == 30000, "card back to normal: %u mW", g.mw[XE_ENERGY_CARD]);
 		// a refusal keeps the resync path's behaviour: the first read after resume still only re-bases
 		g.resync = true;
 		g.update(word(3 * J, J), 50 * s, win);
-		CHECK(!g.havePower && g.rejected == 3, "resync is not a refusal");
+		CHECK(!g.havePower && !g.pkgValid && g.rejected == 4, "resync is not a refusal");
 	}
 
 	// 6. descriptor

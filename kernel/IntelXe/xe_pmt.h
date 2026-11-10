@@ -120,6 +120,7 @@ struct XeEnergyMeter {
 	uint64_t baseUj[XE_ENERGY_CHANNELS] {}, baseNs {0};
 	uint32_t mw[XE_ENERGY_CHANNELS] {};   // average power of the last full window, milliwatts
 	bool haveBase {false}, havePower {false};
+	bool pkgValid {false};   // the package average of the last window passed xePowerWindowSane (card power still shown)
 	bool resync {false};   // set at suspend: the counter may have restarted, so the next read only re-bases
 	uint32_t rejected {0};   // windows xePowerWindowSane refused (reported n/a, re-based)
 	uint8_t shift {XE_ENERGY_UNIT_MBX};
@@ -130,7 +131,7 @@ struct XeEnergyMeter {
 			// Sleep may have powered the card off and restarted the counters: a smaller value would read as a wrap of
 			// 262144 J. Take the new values as the reference, keep the sum, and start a new power window.
 			for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) ch[c].prev = reg[c];
-			resync = haveBase = havePower = false;
+			resync = haveBase = havePower = pkgValid = false;
 		} else {
 			for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) ch[c].add(reg[c]);
 		}
@@ -140,12 +141,14 @@ struct XeEnergyMeter {
 				uint64_t mwide[XE_ENERGY_CHANNELS];
 				for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++)
 					mwide[c] = (uj(c) - baseUj[c]) * 1000 / dtUs;   // uJ / us = W; * 1000 = mW
-				havePower = xePowerWindowSane(mwide[XE_ENERGY_CARD], mwide[XE_ENERGY_PKG]);
-				if (havePower) {
-					for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) mw[c] = (uint32_t)mwide[c];   // <= the ceiling
-				} else {
-					rejected++;
-				}
+				// Per channel: the card counter is the one that stays consistent (on the B580 the package counter ran at
+				// 60-200 W against a 36 W card for the first 15+ minutes after boot), so a refused package window keeps
+				// the card's average and reports only the package as n/a.
+				havePower = mwide[XE_ENERGY_CARD] <= XE_POWER_CEILING_MW;
+				pkgValid = havePower && xePowerWindowSane(mwide[XE_ENERGY_CARD], mwide[XE_ENERGY_PKG]);
+				if (havePower) mw[XE_ENERGY_CARD] = (uint32_t)mwide[XE_ENERGY_CARD];
+				if (pkgValid) mw[XE_ENERGY_PKG] = (uint32_t)mwide[XE_ENERGY_PKG];
+				if (!pkgValid) rejected++;
 			}
 			for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) baseUj[c] = uj(c);
 			baseNs = nowNs;
