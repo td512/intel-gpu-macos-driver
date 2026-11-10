@@ -105,10 +105,11 @@ fn every_shape_the_type_name_grammar_produces_matches_its_emitted_image() {
 }
 
 #[test]
-#[ignore = "suspected defect, needs a GPU check: under bindless-all the texel-read cube is read through the sampled \
-            heap as a 2D-array image, while its heap slot holds the texture's own cube view and reflection reports \
-            Cube, so no 2D-array view is ever made for it"]
-fn a_texel_read_cube_reflects_the_two_dimensional_array_it_binds() {
+fn a_texel_read_cube_reads_the_cube_view_its_heap_slot_holds() {
+    // The plugin writes a texture's own view into its bindless slot: VK_IMAGE_VIEW_TYPE_CUBE for a cube. The image
+    // the read goes through must therefore be Dim Cube too (VUID-vkCmdDispatch-viewType-07752); a 2D-array image over
+    // that slot is a view-type mismatch, and Mesa ANV gives a sampled cube view a SURFTYPE_CUBE surface whose Depth
+    // counts cubes, not faces.
     let (spirv, reflection) = translate(CUBE_TEXEL_COPY, Stage::Kernel, "cube_texel_copy");
     assert_shapes_match_the_module("the cube texel copy", &spirv, &reflection);
 
@@ -120,17 +121,207 @@ fn a_texel_read_cube_reflects_the_two_dimensional_array_it_binds() {
     let source = shapes[&32];
     assert_eq!(
         (source.dimension, source.arrayed),
-        (TextureDimension::D2, true),
-        "the texel-read cube binds as a 2D array, so a consumer must create a 2D-array view"
+        (TextureDimension::Cube, false),
+        "the texel-read cube is bound as the cube view the texture has"
     );
     let destination = shapes[&481];
     assert_eq!(
         (destination.dimension, destination.arrayed),
-        (TextureDimension::Cube, false),
-        "the written cube keeps Dim Cube, so the same AIR type name must not decide both"
+        (TextureDimension::Cube, false)
     );
     assert!(destination.writable && !source.writable);
     assert_eq!(source.component, TextureComponent::Float);
+
+    let text = metal2vulkan::disassemble(&spirv).expect("disassemble");
+    let heap = heap_images(&text);
+    assert!(
+        heap.len() == 1 && heap[0].starts_with("Cube 0 0 0 1 "),
+        "the read reaches the heap as a sampled cube, not {heap:?}:\n{text}"
+    );
+    assert!(
+        !text.contains("OpImageFetch"),
+        "SPIR-V forbids OpImageFetch on Dim Cube:\n{text}"
+    );
+    assert!(
+        text.contains("OpImageSampleExplicitLod"),
+        "the texel is a centre sample at an explicit level:\n{text}"
+    );
+}
+
+/// One cube texel read per shape Metal has, each in its own kernel, with the read's mip level a kernel argument so
+/// the level is seen to reach the instruction.
+fn cube_read_kernel(texture_type: &str, access: &str, read: &str, declare: &str) -> String {
+    format!(
+        r#"target triple = "spirv-unknown-vulkan1.2"
+
+define void @read_cube(ptr addrspace(1) %src, ptr addrspace(1) %out, <2 x i32> %coord, i32 %level) {{
+entry:
+  %sampler = tail call ptr addrspace(2) @air.get_read_sampler()
+{read}
+  store <4 x float> %texel, ptr addrspace(1) %out, align 16
+  ret void
+}}
+
+declare ptr addrspace(2) @air.get_read_sampler()
+{declare}
+
+!air.kernel = !{{!0}}
+!0 = !{{ptr @read_cube, !1, !2}}
+!1 = !{{}}
+!2 = !{{!3, !4, !5, !6}}
+!3 = !{{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"{access}", !"air.arg_type_name", !"{texture_type}", !"air.arg_name", !"src"}}
+!4 = !{{i32 1, !"air.buffer", !"air.buffer_size", i32 16, !"air.location_index", i32 0, i32 1, !"air.write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"float4", !"air.arg_name", !"out"}}
+!5 = !{{i32 2, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint2", !"air.arg_name", !"coord"}}
+!6 = !{{i32 3, !"air.threadgroup_position_in_grid", !"air.arg_type_name", !"uint", !"air.arg_name", !"level"}}
+"#
+    )
+}
+
+#[test]
+fn every_cube_texel_read_declares_the_view_type_its_descriptor_holds() {
+    let cases = [
+        (
+            "texturecube<float, read>",
+            "air.read",
+            "  %r = tail call { <4 x float>, i8 } @air.read_texture_cube.v4f32(ptr addrspace(1) %src, ptr addrspace(2) %sampler, <2 x i32> %coord, i32 3, i32 %level, i32 1)\n  %texel = extractvalue { <4 x float>, i8 } %r, 0",
+            "declare { <4 x float>, i8 } @air.read_texture_cube.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x i32>, i32, i32, i32)",
+            (TextureDimension::Cube, false),
+            "Cube 0 0 0 1",
+        ),
+        (
+            "texturecube_array<float, read>",
+            "air.read",
+            "  %r = tail call { <4 x float>, i8 } @air.read_texture_cube_array.v4f32(ptr addrspace(1) %src, ptr addrspace(2) %sampler, <2 x i32> %coord, i32 3, i32 2, i32 %level, i32 1)\n  %texel = extractvalue { <4 x float>, i8 } %r, 0",
+            "declare { <4 x float>, i8 } @air.read_texture_cube_array.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x i32>, i32, i32, i32, i32)",
+            (TextureDimension::Cube, true),
+            "Cube 0 1 0 1",
+        ),
+        (
+            "depthcube<float, read>",
+            "air.read",
+            "  %d = tail call float @air.read_depth_cube.f32(ptr addrspace(1) %src, ptr addrspace(2) %sampler, <2 x i32> %coord, i32 3, i32 %level, i32 1)\n  %texel = insertelement <4 x float> zeroinitializer, float %d, i32 0",
+            "declare float @air.read_depth_cube.f32(ptr addrspace(1), ptr addrspace(2), <2 x i32>, i32, i32, i32)",
+            (TextureDimension::Cube, false),
+            "Cube",
+        ),
+    ];
+    for (texture_type, access, read, declare, shape, heap_image) in cases {
+        let source = cube_read_kernel(texture_type, access, read, declare);
+        let (spirv, reflection) = translate(&source, Stage::Kernel, texture_type);
+        let text = metal2vulkan::disassemble(&spirv).expect("disassemble");
+        let reflected = reflection
+            .bindings
+            .iter()
+            .find(|resource| resource.metal_index == 0 && resource.texture_shape.is_some())
+            .and_then(|resource| resource.texture_shape)
+            .unwrap_or_else(|| panic!("{texture_type}: the texture reflects a shape"));
+        assert_eq!(
+            (reflected.dimension, reflected.arrayed),
+            shape,
+            "{texture_type}: the consumer makes the view this reflects"
+        );
+        let heap = heap_images(&text);
+        assert_eq!(heap.len(), 1, "{texture_type}: one heap image:\n{text}");
+        assert!(
+            heap[0].starts_with(heap_image),
+            "{texture_type}: the heap image {:?} is not the {heap_image} view its slot holds:\n{text}",
+            heap[0]
+        );
+        assert!(
+            !text.lines().any(|line| line.contains("= OpTypeImage") && line.contains(" 2D 0 1 ")),
+            "{texture_type}: no 2D-array image is declared over a cube view:\n{text}"
+        );
+        assert!(
+            !text.contains("OpImageFetch"),
+            "{texture_type}: OpImageFetch may not read Dim Cube:\n{text}"
+        );
+        // the read's level reaches the sample: a float conversion of the %level argument is its Lod operand
+        let sample = text
+            .lines()
+            .find(|line| line.contains("OpImageSampleExplicitLod"))
+            .unwrap_or_else(|| panic!("{texture_type}: the texel is sampled:\n{text}"));
+        let lod = sample.split_whitespace().last().expect("the Lod operand");
+        assert!(
+            text.lines()
+                .any(|line| line.trim_start().starts_with(&format!("{lod} = OpConvertUToF"))),
+            "{texture_type}: the Lod {lod} is not the converted level argument:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn a_read_write_cube_reads_its_storage_cube_view_by_face_layer() {
+    // A storage cube's view is the same cube view, which Vulkan lets OpImageRead address as (x, y, face).
+    let source = cube_read_kernel(
+        "texturecube<float, read_write>",
+        "air.read_write",
+        "  %r = tail call { <4 x float>, i8 } @air.read_texture_cube.v4f32(ptr addrspace(1) %src, ptr addrspace(2) %sampler, <2 x i32> %coord, i32 3, i32 0, i32 3)\n  %texel = extractvalue { <4 x float>, i8 } %r, 0\n  tail call void @air.write_texture_cube.v4f32(ptr addrspace(1) %src, <2 x i32> %coord, i32 3, <4 x float> %texel, i32 0, i32 3)",
+        "declare { <4 x float>, i8 } @air.read_texture_cube.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x i32>, i32, i32, i32)\ndeclare void @air.write_texture_cube.v4f32(ptr addrspace(1), <2 x i32>, i32, <4 x float>, i32, i32)",
+    );
+    let (spirv, reflection) = translate(&source, Stage::Kernel, "read_write_cube");
+    assert_shapes_match_the_module("the read-write cube", &spirv, &reflection);
+    let text = metal2vulkan::disassemble(&spirv).expect("disassemble");
+    assert!(text.contains("OpImageRead"), "{text}");
+    assert!(
+        text.lines()
+            .any(|line| line.contains("= OpTypeImage") && line.contains(" Cube 0 0 0 2 ")),
+        "the storage image keeps Dim Cube:\n{text}"
+    );
+    assert!(
+        !text.lines().any(|line| line.contains("= OpTypeImage") && line.contains(" 2D ")),
+        "{text}"
+    );
+}
+
+/// The sampled images the module declares over the bindless heap (set 2), as their `OpTypeImage` operands after the
+/// sampled type ("Cube 0 0 0 1 Unknown").
+fn heap_images(text: &str) -> Vec<String> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let heap_variables = lines
+        .iter()
+        .filter_map(|line| {
+            let tokens = line.split_whitespace().collect::<Vec<_>>();
+            match tokens.as_slice() {
+                ["OpDecorate", target, "DescriptorSet", "2"] => Some((*target).to_string()),
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut pointees: HashMap<&str, &str> = HashMap::new();
+    let mut elements: HashMap<&str, &str> = HashMap::new();
+    let mut variables: HashMap<&str, &str> = HashMap::new();
+    let mut images: HashMap<&str, String> = HashMap::new();
+    for line in &lines {
+        let tokens = line.split_whitespace().collect::<Vec<_>>();
+        match tokens.as_slice() {
+            [result, "=", "OpTypePointer", _, pointee] => {
+                pointees.insert(result, pointee);
+            }
+            [result, "=", "OpTypeArray", element, _]
+            | [result, "=", "OpTypeRuntimeArray", element] => {
+                elements.insert(result, element);
+            }
+            [result, "=", "OpVariable", pointer, _] => {
+                variables.insert(result, pointer);
+            }
+            [result, "=", "OpTypeImage", _, rest @ ..] => {
+                images.insert(result, rest.join(" "));
+            }
+            _ => {}
+        }
+    }
+    let mut out = heap_variables
+        .iter()
+        .filter_map(|variable| {
+            let mut ty = *pointees.get(variables.get(variable.as_str())?)?;
+            while let Some(element) = elements.get(ty) {
+                ty = element;
+            }
+            images.get(ty).cloned()
+        })
+        .collect::<Vec<_>>();
+    out.sort();
+    out
 }
 
 #[test]

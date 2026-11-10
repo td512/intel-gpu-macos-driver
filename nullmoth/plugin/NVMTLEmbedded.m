@@ -158,15 +158,31 @@ static NSArray<NSArray *> *nvmtl_static_samplers(NVMTLFunction *fn)
                   ? nvmtl_reflect_air_cached(fn, fn->_air, fn->_stage, e, sizeof e) : nil;
         NSDictionary *refl = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL] : nil;
         NSArray *all = [refl isKindOfClass:[NSDictionary class]] ? refl[@"bindings"] : nil;
+        // the translator's sampler band: a constexpr sampler's metal_index is already its slot in it, a synthesized
+        // read sampler's slot is its binding's offset into it
+        id band = [refl isKindOfClass:[NSDictionary class]] ? refl[@"descriptor_layout"] : nil;
+        band = [band isKindOfClass:[NSDictionary class]] ? band[@"samplers"] : nil;
+        NSNumber *bandStart = [band isKindOfClass:[NSDictionary class]] ? band[@"start"] : nil;
         for (NSDictionary *b in [all isKindOfClass:[NSArray class]] ? all : @[]) {
-            if (![b isKindOfClass:[NSDictionary class]] || ![b[@"kind"] isEqual:@"StaticSampler"]) continue;
+            if (![b isKindOfClass:[NSDictionary class]]) continue;
             NSNumber *slot = b[@"metal_index"]; NSDictionary *st = b[@"static_sampler"];
+            if ([b[@"kind"] isEqual:@"SynthesizedReadSampler"]) {
+                /* The sampler the translator adds for a read that names none (a texel read of a sampled cube is a
+                   nearest sample at the texel centre: SPIR-V has no fetch of a cube). It reports the state it needs:
+                   nearest, mip nearest, no LOD clamp. Unbound, its slot read the dummy sampler (linear, maxLod 0.25),
+                   which filters integer textures and pins every read to level 0. */
+                NSDictionary *at = b[@"descriptor"];
+                NSNumber *binding = [at isKindOfClass:[NSDictionary class]] ? at[@"binding"] : nil;
+                if (![binding isKindOfClass:[NSNumber class]] || ![bandStart isKindOfClass:[NSNumber class]]
+                    || binding.longLongValue < bandStart.longLongValue) continue;
+                slot = @(binding.longLongValue - bandStart.longLongValue);
+            } else if (![b[@"kind"] isEqual:@"StaticSampler"]) continue;
             if (![slot isKindOfClass:[NSNumber class]] || ![st isKindOfClass:[NSDictionary class]]) continue;
             id<MTLSamplerState> s = nvmtl_static_sampler_from(st);
             if (s) [out addObject:@[slot, s]];
             else nvlog("static sampler: %s slot %@ NOT created - it keeps the dummy sampler", fn->_fname.UTF8String, slot);
         }
-        if (out.count) nvlog("static sampler: %s binds %lu constexpr sampler(s) with their own state", fn->_fname.UTF8String, (unsigned long)out.count);
+        if (out.count) nvlog("static sampler: %s binds %lu constexpr or synthesized read sampler(s) with their own state", fn->_fname.UTF8String, (unsigned long)out.count);
         objc_setAssociatedObject(fn, NVMTL_SSAMP_KEY, out, OBJC_ASSOCIATION_RETAIN);
     }
     return out;

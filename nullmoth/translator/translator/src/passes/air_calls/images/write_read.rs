@@ -289,9 +289,6 @@ pub(in crate::passes) fn lower_read(
         .unwrap_or((Dim::Dim2D, false));
     let cube = dim == Dim::DimCube && !arrayed;
     let cube_array = dim == Dim::DimCube && arrayed;
-    if cube_array && !image_is_storage(ctx, img) {
-        return Err("air.read_texture on a sampled cube array texture is unsupported".into());
-    }
     let (coord, layer, lod, slice) = if cube_array {
         let base = if value_is_int_or_intvec(ctx, args[1]) {
             1
@@ -318,6 +315,26 @@ pub(in crate::passes) fn lower_read(
         (coord, layer, lod, None)
     };
     let mut out = vec![];
+    if (cube || cube_array) && !image_is_storage(ctx, img) {
+        // A sampled cube keeps Dim Cube (its descriptor is a cube view), which OpImageFetch may not read.
+        let face = layer.ok_or("air.read_texture cube read missing face")?;
+        let sampler_arg = (!value_is_int_or_intvec(ctx, args[1])).then_some(args[1]);
+        let fetch_v4 = image_fetch_v4(ctx, img, v4);
+        let color = ctx.module.fresh_id();
+        cube_fetch_as_center_sample(
+            ctx,
+            &mut out,
+            img,
+            coord,
+            face,
+            slice,
+            lod,
+            fetch_v4,
+            color,
+            sampler_arg,
+        )?;
+        return finish_read(ctx, out, res, rty, v4, fetch_v4, color);
+    }
     let layer = match (layer, slice) {
         (Some(face), Some(slice)) => Some(combine_cube_array_layer(
             ctx,
@@ -330,23 +347,8 @@ pub(in crate::passes) fn lower_read(
     };
     let fetch_v4 = image_fetch_v4(ctx, img, v4);
     let color = ctx.module.fresh_id();
-    if cube && !image_is_storage(ctx, img) {
-        let face = layer.ok_or("air.read_texture cube read missing face")?;
-        let sampler_arg = (!value_is_int_or_intvec(ctx, args[1])).then_some(args[1]);
-        cube_fetch_as_center_sample(
-            ctx,
-            &mut out,
-            img,
-            coord,
-            face,
-            fetch_v4,
-            color,
-            sampler_arg,
-        )?;
-    } else {
-        let coord32 = build_fetch_coord(ctx, dim, arrayed, coord, layer, &mut out)?;
-        read_rest(ctx, &mut out, img, dim, coord32, lod, fetch_v4, color)?;
-    }
+    let coord32 = build_fetch_coord(ctx, dim, arrayed, coord, layer, &mut out)?;
+    read_rest(ctx, &mut out, img, dim, coord32, lod, fetch_v4, color)?;
     finish_read(ctx, out, res, rty, v4, fetch_v4, color)
 }
 
@@ -533,65 +535,101 @@ pub(in crate::passes) fn lower_read_depth(
         return Err("air.read_depth on non-float texture".into());
     }
 
-    let (coord, layer, lod) = if value_is_int_or_intvec(ctx, args[1]) {
-        let coord_idx = if vector_shape(ctx, args[1]).is_none()
-            && args
-                .get(2)
-                .is_some_and(|coord| vector_shape(ctx, *coord).is_some())
-        {
-            2
-        } else {
-            1
-        };
-        let coord = *args.get(coord_idx).ok_or("air.read_depth missing coord")?;
-        if arrayed {
-            (
-                coord,
-                args.get(coord_idx + 1).copied(),
-                args.get(coord_idx + 2).copied(),
-            )
-        } else {
-            (coord, None, args.get(coord_idx + 1).copied())
-        }
-    } else {
-        let coord = *args.get(3).ok_or("air.read_depth missing coord")?;
-        if arrayed {
-            (
-                coord,
-                args.get(4).copied(),
-                args.get(if args.len() >= 8 { 6 } else { 5 }).copied(),
-            )
-        } else {
-            (
-                coord,
-                None,
-                args.get(if args.len() >= 7 { 5 } else { 4 }).copied(),
-            )
-        }
-    };
     let mut out = vec![];
-    let coord32 = build_fetch_coord(ctx, dim, arrayed, coord, layer, &mut out)?;
-    let lod32 = match lod {
-        Some(lod) => Some(coerce_image_coord32(
-            ctx,
-            lod,
-            &mut out,
-            "air.read_depth lod",
-        )?),
-        None => None,
-    };
     let color = ctx.module.fresh_id();
-    let mut ops = vec![Operand::IdRef(img), Operand::IdRef(coord32)];
-    if image_value_is_multisampled(ctx, img) {
-        let sample = lod.ok_or("air.read_depth multisample read missing sample index")?;
-        let sample32 = coerce_image_coord32(ctx, sample, &mut out, "air.read_depth sample")?;
-        ops.push(Operand::ImageOperands(spirv::ImageOperands::SAMPLE));
-        ops.push(Operand::IdRef(sample32));
-    } else if let Some(lod) = lod32 {
-        ops.push(Operand::ImageOperands(spirv::ImageOperands::LOD));
-        ops.push(Operand::IdRef(lod));
+    if dim == Dim::DimCube && !image_is_storage(ctx, img) {
+        // depthcube / depthcube_array read(coord, face[, slice], lod): Dim Cube stays (the descriptor is a cube
+        // view), so the texel is a centre sample, as for colour cubes (cube_fetch_as_center_sample).
+        let at = args
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, arg)| {
+                vector_shape(ctx, **arg).is_some() && value_is_int_or_intvec(ctx, **arg)
+            })
+            .map(|(at, _)| at)
+            .ok_or("air.read_depth cube read missing coord")?;
+        let face = *args.get(at + 1).ok_or("air.read_depth cube read missing face")?;
+        let (slice, lod_at) = if arrayed {
+            let slice = *args
+                .get(at + 2)
+                .ok_or("air.read_depth cube array read missing slice")?;
+            (Some(slice), at + 3)
+        } else {
+            (None, at + 2)
+        };
+        let sampler_arg = (!value_is_int_or_intvec(ctx, args[1])).then_some(args[1]);
+        cube_fetch_as_center_sample(
+            ctx,
+            &mut out,
+            img,
+            args[at],
+            face,
+            slice,
+            args.get(lod_at).copied(),
+            v4,
+            color,
+            sampler_arg,
+        )?;
+    } else {
+        let (coord, layer, lod) = if value_is_int_or_intvec(ctx, args[1]) {
+            let coord_idx = if vector_shape(ctx, args[1]).is_none()
+                && args
+                    .get(2)
+                    .is_some_and(|coord| vector_shape(ctx, *coord).is_some())
+            {
+                2
+            } else {
+                1
+            };
+            let coord = *args.get(coord_idx).ok_or("air.read_depth missing coord")?;
+            if arrayed {
+                (
+                    coord,
+                    args.get(coord_idx + 1).copied(),
+                    args.get(coord_idx + 2).copied(),
+                )
+            } else {
+                (coord, None, args.get(coord_idx + 1).copied())
+            }
+        } else {
+            let coord = *args.get(3).ok_or("air.read_depth missing coord")?;
+            if arrayed {
+                (
+                    coord,
+                    args.get(4).copied(),
+                    args.get(if args.len() >= 8 { 6 } else { 5 }).copied(),
+                )
+            } else {
+                (
+                    coord,
+                    None,
+                    args.get(if args.len() >= 7 { 5 } else { 4 }).copied(),
+                )
+            }
+        };
+        let coord32 = build_fetch_coord(ctx, dim, arrayed, coord, layer, &mut out)?;
+        let lod32 = match lod {
+            Some(lod) => Some(coerce_image_coord32(
+                ctx,
+                lod,
+                &mut out,
+                "air.read_depth lod",
+            )?),
+            None => None,
+        };
+        let mut ops = vec![Operand::IdRef(img), Operand::IdRef(coord32)];
+        if image_value_is_multisampled(ctx, img) {
+            let sample = lod.ok_or("air.read_depth multisample read missing sample index")?;
+            let sample32 = coerce_image_coord32(ctx, sample, &mut out, "air.read_depth sample")?;
+            ops.push(Operand::ImageOperands(spirv::ImageOperands::SAMPLE));
+            ops.push(Operand::IdRef(sample32));
+        } else if let Some(lod) = lod32 {
+            ops.push(Operand::ImageOperands(spirv::ImageOperands::LOD));
+            ops.push(Operand::IdRef(lod));
+        }
+        out.push(Instruction::new(Op::ImageFetch, Some(v4), Some(color), ops));
     }
-    out.push(Instruction::new(Op::ImageFetch, Some(v4), Some(color), ops));
     let depth = ctx.module.fresh_id();
     out.push(Instruction::new(
         Op::CompositeExtract,
