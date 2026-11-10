@@ -722,6 +722,15 @@ pub(in crate::passes) fn build_pixel_fetch_coord_from_signed_components(
     })
 }
 
+/// A texel read (`read(coord, face[, slice][, lod])`) of a sampled cube or cube array.
+///
+/// The image keeps Dim Cube: its descriptor is the texture's own cube view (the bindless heap slot, or a binding
+/// of its own), and Vulkan requires the shader's `OpTypeImage` Dim/Arrayed to match the view type
+/// (VUID-vkCmdDispatch-viewType-07752). Reading a cube view through a 2D-array image instead is undefined, and on
+/// Intel the view is a SURFTYPE_CUBE surface whose Depth counts cubes, not faces (isl_surface_state.c). SPIR-V
+/// forbids OpImageFetch on Dim Cube, so the texel is sampled instead: the direction through the centre of texel
+/// (x, y) of `face`, at the explicit level `lod`, with the synthesized nearest read sampler (or the call's own
+/// sampler). Cube arrays add the slice as the cube-array layer coordinate.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::passes) fn cube_fetch_as_center_sample(
     ctx: &mut Ctx,
@@ -729,6 +738,8 @@ pub(in crate::passes) fn cube_fetch_as_center_sample(
     img: Word,
     coord: Word,
     face: Word,
+    slice: Option<Word>,
+    lod: Option<Word>,
     fetch_v4: Word,
     color: Word,
     sampler_arg: Option<Word>,
@@ -760,8 +771,11 @@ pub(in crate::passes) fn cube_fetch_as_center_sample(
     };
     let x = extract(coord32, 0, ctx, out);
     let y = extract(coord32, 1, ctx, out);
-    let lod_zero = ctx.const_uint(0);
-    let size = query_image_size(ctx, img, 2, false, lod_zero, out);
+    let lod32 = match lod {
+        Some(lod) => coerce_image_coord32(ctx, lod, out, "air.read_texture cube lod")?,
+        None => ctx.const_uint(0),
+    };
+    let size = query_image_size(ctx, img, 2, slice.is_some(), lod32, out);
     let w = extract(size, 0, ctx, out);
     let h = extract(size, 1, ctx, out);
     let to_float = |v: Word, ctx: &mut Ctx, out: &mut Vec<Instruction>| {
@@ -907,16 +921,45 @@ pub(in crate::passes) fn cube_fetch_as_center_sample(
         Some(si),
         vec![Operand::IdRef(img), Operand::IdRef(sampler)],
     ));
-    let lod0 = ctx.const_float(0.0);
+    let sample_coord = match slice {
+        Some(slice) => {
+            let slice32 =
+                coerce_image_coord32(ctx, slice, out, "air.read_texture cube array slice")?;
+            let slicef = to_float(slice32, ctx, out);
+            let v4f = ctx.ty_vecf(4);
+            let mut comps = Vec::with_capacity(4);
+            for idx in 0..3 {
+                let component = ctx.module.fresh_id();
+                out.push(Instruction::new(
+                    Op::CompositeExtract,
+                    Some(float),
+                    Some(component),
+                    vec![Operand::IdRef(dir), Operand::LiteralBit32(idx)],
+                ));
+                comps.push(Operand::IdRef(component));
+            }
+            comps.push(Operand::IdRef(slicef));
+            let id = ctx.module.fresh_id();
+            out.push(Instruction::new(
+                Op::CompositeConstruct,
+                Some(v4f),
+                Some(id),
+                comps,
+            ));
+            id
+        }
+        None => dir,
+    };
+    let lodf = to_float(lod32, ctx, out);
     out.push(Instruction::new(
         Op::ImageSampleExplicitLod,
         Some(fetch_v4),
         Some(color),
         vec![
             Operand::IdRef(si),
-            Operand::IdRef(dir),
+            Operand::IdRef(sample_coord),
             Operand::ImageOperands(spirv::ImageOperands::LOD),
-            Operand::IdRef(lod0),
+            Operand::IdRef(lodf),
         ],
     ));
     Ok(())

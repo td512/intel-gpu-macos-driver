@@ -463,7 +463,6 @@ pub(in crate::passes) fn texture_dims(
     let names = air_names(&ctx.module);
     let write_textures = write_texture_operands(ctx, entry_idx, &names);
     let mut out = HashMap::default();
-    let mut direction_sampled: HashSet<Word> = HashSet::default();
     for blk in &ctx.module.functions[entry_idx].blocks {
         for inst in &blk.instructions {
             if inst.class.opcode != Op::FunctionCall {
@@ -475,11 +474,6 @@ pub(in crate::passes) fn texture_dims(
             let Some(name) = names.get(callee) else {
                 continue;
             };
-            if name.starts_with("air.sample_") || name.starts_with("air.gather_") {
-                if let Some(Operand::IdRef(tex)) = inst.operands.get(1) {
-                    direction_sampled.insert(*tex);
-                }
-            }
             if !(name.starts_with("air.sample_texture")
                 || name.starts_with("air.sample_depth")
                 || name.starts_with("air.read_texture")
@@ -540,12 +534,9 @@ pub(in crate::passes) fn texture_dims(
                 .or_insert(shape);
         }
     }
-    for (tex, entry) in out.iter_mut() {
-        if entry.dim == Dim::DimCube && !entry.arrayed && !direction_sampled.contains(tex) {
-            entry.dim = Dim::Dim2D;
-            entry.arrayed = true;
-        }
-    }
+    // A cube that is only read (never sampled by direction) keeps Dim Cube: its descriptor is the texture's own
+    // cube view, and a 2D-array image over a cube view is a view-type mismatch (VUID-vkCmdDispatch-viewType-07752).
+    // Its texel reads become centre samples (cube_fetch_as_center_sample).
     out
 }
 
