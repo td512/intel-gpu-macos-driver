@@ -451,6 +451,7 @@ typedef struct {
        pipeline switch back and forth (A, B, A ...) finds its region again instead of writing a new one */
     struct { const nvmtl_dbplan *plan; uint32_t off, gen, epoch, need; } mru[2][NVMTL_DB_MRU];
     uint32_t epoch[2], mru_next[2];
+    uint64_t objgen[2];                /* the object generation the valid descriptors were made at (nvmtl_dirty.h) */
     uint64_t valid[2][NVMTL_CHG_WORDS];
     uint8_t ty[2][NVMTL_NBIND];
     uint8_t d[2][NVMTL_NBIND][NVMTL_DB_MAXDESC];   /* each slot's descriptor, made when the slot changes */
@@ -541,6 +542,10 @@ static int nvmtl_db_stage(nvk_cmdbuf *c, nvmtl_dbstate *s, uint32_t which, const
     if (t && t->dirty[which]) {   // a slot that changed has its descriptor made again when a plan next reads it
         for (int k = 0; k < NVMTL_CHG_WORDS; k++) { s->valid[which][k] &= ~t->chg[which][k]; t->chg[which][k] = 0; }
         t->dirty[which] = 0; s->epoch[which]++;
+    }
+    {   // a view or sampler was destroyed since: a slot's unchanged pointer may name a new object - make every descriptor again
+        const uint64_t gen = nvmtl_objgen();
+        if (s->objgen[which] != gen) { memset(s->valid[which], 0, sizeof s->valid[which]); s->objgen[which] = gen; s->epoch[which]++; }
     }
     // a region is reused only when its table holds the entries this stage reads (stage 1d: tables hold only those)
     if (s->plan[which] == pl && s->ogen[which] == s->gen && s->oepoch[which] == s->epoch[which] && nvmtl_tabneed_covers(s->oneed[which], need)) { s->n_reuse++; return 0; }
