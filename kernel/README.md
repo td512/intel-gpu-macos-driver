@@ -39,6 +39,21 @@ A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e2
   `intelxe-gpu-min-mhz`, `intelxe-gpu-max-mhz`, written by the app); `debug.intelxe.sensors` (GT clock, temperatures,
   and on BMG the card and package energy and average power from PMT telemetry as Linux xe_hwmon reads them; readable
   by anyone); `debug.intelxe.jobtime` (each job's stages in GPU timestamps, off by default).
+- **PCIe ASPM (experimental, untested, off unless written):** `xe_aspm.cpp`, the checks in `xe_aspm.h`.
+  - `sysctl debug.intelxe.aspm` (anyone): every link between the GPU function and its root port (on the B580: the
+    card's switch downstream port <-> GPU, and root port <-> the card's switch upstream port), each end's Link
+    Capabilities (ASPM support, L0s/L1 exit latency), Link Control (ASPM, Common Clock, CLKREQ#), Link Status (speed,
+    width, slot clock), Device Capabilities (acceptable latencies, RBER) and L1 PM Substates, whether L1 passes the
+    checks, the endpoints below the path, and the last change made.
+  - `sudo sysctl debug.intelxe.aspm_l1=1`: ASPM L1 on every link of the path, only if every link passes Linux
+    `drivers/pci/pcie/aspm.c`'s rules (L1 in both ends' Link Capabilities, no pre-1.1 function, Common Clock configured
+    where the slot clock is shared, each endpoint's acceptable L1 latency against the link's exit latency plus 1 us per
+    link); otherwise nothing changes and the reason is in the report and the log. `=0`: ASPM off on the path. `=-1`
+    (default): leave the links alone (what was changed stays until a reboot). Changes go through
+    `IOPCIDevice::setASPMState`, upstream end first to enable and downstream end first to disable, the root port's
+    link first to enable and the GPU's link first to disable; L1 substates are not enabled (IOPCIFamily clears their
+    control registers on a link it changes). After a system wake the last 0 or 1 is applied again where the links lost
+    it.
 
 **Version:** since 0.1.2 the kext carries the number of the release that last rebuilt it (0.1.4 here). 0.1.0 to 0.1.3
 shipped `rb7u` (renamed to IntelXe; tested on macOS 26.7.1); 0.1.4 adds the B570's ID, the NVRAM settings, the sensors and job-timing sysctls, the engine dump and direct submission (the 9 Nov test build), and since 10 Nov in this tree the platform descriptors, user fences and the wider CAT-fault dump. `rb7u` is
@@ -124,9 +139,11 @@ Host tests (no GPU, any Mac), from `kernel/IntelXe/tests/`:
 c++ -std=c++17 -Wall -Wextra -I.. -o platform_test platform_test.cpp ../xe_platform.cpp && ./platform_test
 c++ -std=c++17 -Wall -Wextra -I.. -o uapi_test uapi_test.cpp ../xe_uapi_args.cpp && ./uapi_test
 c++ -std=c++17 -Wall -Wextra -I.. -o pmt_test pmt_test.cpp ../xe_platform.cpp && ./pmt_test
+c++ -std=c++17 -Wall -Wextra -I.. -o aspm_test aspm_test.cpp && ./aspm_test
 ```
 
 `platform_test` checks the descriptor table against the constants the code used and XeProbe's former family table;
 `uapi_test` checks the sync, user-fence wait and `GEM_CREATE` extension argument handling against Linux xe; `pmt_test`
 checks the BMG energy path (PMT offsets, GUID decode, field extraction, unit scaling, wrap accumulation, average
-power). The GPU test for user fences is `user/tests/kernel/ufence.c`.
+power); `aspm_test` checks the ASPM path logic (latency decoding against Linux aspm.c, which links may take L1,
+the call order for enabling and disabling, the report text). The GPU test for user fences is `user/tests/kernel/ufence.c`.

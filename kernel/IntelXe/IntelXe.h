@@ -360,6 +360,12 @@ void xeRequestGtReset();
 uint32_t ggttRecCount();
 void xeRequestGtResetFor(const char *why);   // xe_gt_reset_async from IntelXe.cpp (CT dead)
 void xePowerEvent(uint32_t event);   // gDev->powerEvent, for xe_core.cpp
+// xe_aspm.cpp: PCIe ASPM on the GPU's path (debug.intelxe.aspm, debug.intelxe.aspm_l1; experimental, off by default)
+extern IOLock *gAspmLock;
+int xeAspmSet(int v);                        // -1 leave, 0 off, 1 L1 where every check passes
+void xeAspmWake();                           // after a system wake: the last 0 or 1 again where the links lost it
+int xeAspmReport(char *out, size_t len);
+void xeAspmRegister(bool on);                // the two sysctls
 int xeSuspend();
 int xeResume();   // xe_core.cpp: stop submissions, let the GPU go idle, then GDRST (power-off / restart)
 extern uint8_t gHwconfig[4096];

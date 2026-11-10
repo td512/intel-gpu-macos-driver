@@ -87,6 +87,18 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   are recognised too.
 - **Next:** run the Windows EFI tool's HybridPM step on Windows (checked on macOS against `efi.sh` only).
 
+### Idle power (PCIe ASPM)
+- Measured on 10 Nov 2026 with the PMT power readings in `debug.intelxe.sensors`: idle card power 36.2 W (package
+  19.6 W), light load 40.4 W. Intel's documentation for Arc B-series ties low idle power to PCIe ASPM L1 on the card's
+  path (root port, the card's own switch, the GPU); Windows with ASPM idles far lower.
+- **Experimental, untested on hardware (since 10 Nov in this tree):** `debug.intelxe.aspm` reports every link between
+  the GPU and its root port (Link Capabilities/Control/Status, Device Capabilities, L1 PM Substates) and whether L1
+  passes Linux's checks; `debug.intelxe.aspm_l1=1` turns L1 on through `IOPCIDevice::setASPMState` where every check
+  passes, `0` turns ASPM off, `-1` (default) leaves the firmware's settings. Nothing changes unless it is written.
+- Next: read the report on the B580, opt in, measure idle power and look for link errors or stalls; then L1
+  substates (L1.1/L1.2: LTR, T_power_on, CLKREQ#), which IOPCIFamily only enables with device-tree properties, and
+  whether a measured gain justifies an NVRAM setting or an OpenCore `pci-aspm-default` property.
+
 ### Integrated GPU
 - Out of scope for this stack: the test machine runs with the CPU's integrated GPU off. A headless iGPU next to the B580
   (Quick Sync through VideoToolbox) needs a separate iGPU driver and is not tested with this release.
