@@ -26,6 +26,18 @@ private func firstInt(_ text: String, after label: String) -> Int? {
     return Int(digits)
 }
 
+/// The GT clock's hardware range as IntelXe reads it (debug.intelxe.sensors, from 0.1.4): RP0, the most the GPU runs at,
+/// and RPn, the least. nil without the sysctl or while the GPU sleeps.
+func gtClockLimits() -> (rp0: Int, rpn: Int)? {
+    guard let text = sysctlString("debug.intelxe.sensors"), text.hasPrefix("act"),
+          let rp0 = firstInt(text, after: "RP0"), let rpn = firstInt(text, after: "RPn"), rp0 > 0 else { return nil }
+    return (rp0, rpn)
+}
+
+/// The GT clock range of the default setting: IntelXe's SLPC floor of 1200 MHz (Wa_14022085890) up to RP0, both kept
+/// within RPn...RP0 as the kernel keeps them (xe_core.cpp slpcParams). The B580: 1200-2850 MHz.
+func defaultClockRange(rp0: Int, rpn: Int) -> (min: Int, max: Int) { (min(max(1200, rpn), rp0), rp0) }
+
 struct MonitorSample {
     var fps: Double?
     var actMHz: Int?, reqMHz: Int?, maxMHz: Int?
@@ -48,6 +60,8 @@ final class MonitorModel: ObservableObject {
     @Published var clockHistory: [MonitorPoint] = []
     @Published var tempHistory: [MonitorPoint] = []
     @Published var sensorsMissing = false
+    /// the last RP0 read: the clock chart's top while the GPU sleeps
+    var lastMaxMHz: Int?
     static let window: TimeInterval = 300
     /// false: keep the values set from outside (the snapshots)
     var live = true
@@ -73,6 +87,7 @@ final class MonitorModel: ObservableObject {
         if let text = sysctlString("debug.intelxe.sensors"), text.hasPrefix("act") {
             s.actMHz = firstInt(text, after: "act"); s.reqMHz = firstInt(text, after: "req"); s.maxMHz = firstInt(text, after: "RP0")
             s.packageC = firstInt(text, after: "package"); s.vramC = firstInt(text, after: "VRAM")
+            if let m = s.maxMHz, m > 0 { lastMaxMHz = m }
             sensorsMissing = false
         } else { sensorsMissing = sysctlString("debug.intelxe.state") != nil }
         if let v = sysctlString("debug.intelxe.vram"), let a = firstInt(v, after: "): used"), let b = firstInt(v, after: "the window: used") { s.vramUsedMB = a + b }
@@ -166,7 +181,8 @@ struct MonitorView: View {
                     MetricRow(title: "Clock", symbol: "speedometer",
                               value: s.actMHz.map { $0 == 0 ? String(localized: "idle (power saving)") : "\($0) MHz" } ?? "–",
                               detail: s.maxMHz.map { String(localized: "max") + " \($0) MHz" } ?? "",
-                              points: model.clockHistory, color: .accentColor, top: Double(s.maxMHz ?? 2850))
+                              points: model.clockHistory, color: .accentColor,
+                              top: Double(s.maxMHz ?? model.lastMaxMHz ?? max(1000, Int(model.clockHistory.map(\.v).max() ?? 0))))
                     MetricRow(title: "Temperature", symbol: "thermometer.medium",
                               value: s.packageC.map { String(localized: "GPU \($0) °C") } ?? "–",
                               detail: s.vramC.map { String(localized: "memory \($0) °C") } ?? "",

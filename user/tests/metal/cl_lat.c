@@ -2,7 +2,7 @@
 // cl_lat: OpenCL.framework round trip and small-kernel throughput on the B580 (Apple's CL over our Metal plugin),
 // the OpenCL twin of mtl_lat's lat/inflight/small. Measurement only.
 //   clang -arch x86_64 -mmacosx-version-min=15.0 -O2 -Wno-deprecated-declarations -o cl_lat cl_lat.c -framework OpenCL
-// Run on the hackintosh: NVMTL_ENABLE=1 ./cl_lat [n]
+// Run on the hackintosh: NVMTL_ENABLE=1 ./cl_lat [n]   (CL_LAT_DEVICE=<i>: GPU i of the list it prints)
 #include <OpenCL/opencl.h>
 #include <mach/mach_time.h>
 #include <math.h>
@@ -30,13 +30,22 @@ int main(int argc, char **argv) {
 	int N = argc > 1 ? atoi(argv[1]) : 1000;
 	cl_platform_id plat; CK(clGetPlatformIDs(1, &plat, NULL));
 	cl_device_id devs[8]; cl_uint nd = 0; CK(clGetDeviceIDs(plat, CL_DEVICE_TYPE_GPU, 8, devs, &nd));
-	cl_device_id dev = NULL;
+	// Intel's GPU: CL_DEVICE_VENDOR_ID 0x8086, or else a CL_DEVICE_VENDOR naming Intel (Apple's OpenCL reports vendor ids
+	// of its own, not PCI ones); without one, the first GPU (the only one on the test machine). CL_LAT_DEVICE=<n> picks GPU n.
+	cl_device_id dev = NULL; int best = 0;
 	for (cl_uint i = 0; i < nd; i++) {
-		char name[256] = ""; clGetDeviceInfo(devs[i], CL_DEVICE_NAME, sizeof name, name, NULL);
-		printf("GPU %u: %s\n", i, name);
-		if (strstr(name, "IntelXe") || strstr(name, "NVMTL") || strstr(name, "Arc")) dev = devs[i];
+		char name[256] = "", vendor[256] = ""; cl_uint vid = 0;
+		clGetDeviceInfo(devs[i], CL_DEVICE_NAME, sizeof name, name, NULL);
+		clGetDeviceInfo(devs[i], CL_DEVICE_VENDOR, sizeof vendor, vendor, NULL);
+		clGetDeviceInfo(devs[i], CL_DEVICE_VENDOR_ID, sizeof vid, &vid, NULL);
+		printf("GPU %u: %s, vendor \"%s\" 0x%x\n", i, name, vendor, vid);
+		const int rank = vid == 0x8086 ? 3 : (strstr(vendor, "Intel") || strstr(vendor, "intel")) ? 2 : 1;
+		if (rank > best) { dev = devs[i]; best = rank; }
 	}
-	if (!dev) { printf("no B580 CL device\n"); return 2; }
+	const char *pickenv = getenv("CL_LAT_DEVICE");
+	if (pickenv) { cl_uint n = (cl_uint)atoi(pickenv); dev = n < nd ? devs[n] : NULL; }
+	if (!dev) { printf("no OpenCL GPU%s\n", pickenv ? " with that number" : ""); return 2; }
+	if (best < 2 && !pickenv) printf("no GPU reports Intel as its vendor: measuring GPU 0\n");
 	cl_int err;
 	cl_context ctx = clCreateContext(NULL, 1, &dev, NULL, NULL, &err); CK(err);
 	cl_command_queue q = clCreateCommandQueue(ctx, dev, CL_QUEUE_PROFILING_ENABLE, &err); CK(err);
