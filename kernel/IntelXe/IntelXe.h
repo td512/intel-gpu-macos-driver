@@ -11,6 +11,7 @@
 #include <kern/thread_call.h>
 #include <IOKit/pci/IOPCIDevice.h>
 #include "xe_platform.h"
+#include "xe_pmt.h"
 
 #define LOG(fmt, ...) IOLog("IntelXe: " fmt "\n", ##__VA_ARGS__)
 
@@ -102,7 +103,8 @@ private:
 	bool mCtOn {false};
 public:
 	void mediaDown() { mCtOn = mHucOn = mSlpcOn = false; }   // after suspend: reloaded by mediaUp on next use
-	int sensorsString(char *buf, size_t len);   // debug.intelxe.sensors: GT clock and temperatures, read-only
+	int sensorsString(char *buf, size_t len);   // debug.intelxe.sensors: GT clock, temperatures, energy and power
+	XeEnergyMeter energy;   // card and package energy sums and average power (xe_pmt.h), under gPmtLock
 private:
 	IOBufferMemoryDescriptor *mHucMem {nullptr}, *mSlpcMem {nullptr};
 	bool mHucOn {false}, mSlpcOn {false};
@@ -112,6 +114,7 @@ private:
 	bool mapBar0();
 	int probe();
 	int pcodeInitStatus();
+	int pmtTelemRead(uint32_t guid, uint32_t userOffset, uint64_t *data);   // xe_vsec.c xe_pmt_telem_read, 8 bytes
 	int waitDeviceReady();
 	void publishVram();
 	// gt: register base of the GT (0 primary, MEDIA_GT_GSI_OFFSET media); applies to registers below 0x40000 only.

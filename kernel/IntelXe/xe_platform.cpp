@@ -174,6 +174,11 @@ constexpr XePlatformDesc bmg(bool g21) {   // bmg_desc
 	d.dmaMaskBits = 46;
 	d.hasDisplay = d.hasFanControl = d.hasFlatCcs = d.hasMbxPowerLimits = d.hasMbxThermalInfo = true;
 	d.hasGscNvm = d.hasHeciCscfi = d.hasSriov = d.needsScratch = true;
+	d.hasSocRemapperTelem = true;
+	// xe_hwmon.c:513-528: BMG energy is the PMT telemetry word, not an MMIO energy register; ENERGY_UNIT since BMG
+	// takes its power limits through the pcode mailbox (has_mbx_power_limits, xe_hwmon.c:1499, 1527).
+	d.energySource = XE_ENERGY_PMT;
+	d.energyShift = 14;
 	d.maxGtPerTile = 2;
 	d.vaBits = 48;
 	d.vmMaxLevel = 4;

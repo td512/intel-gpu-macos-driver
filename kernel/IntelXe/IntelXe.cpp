@@ -79,6 +79,8 @@ IntelXe *gDev;
 const XePlatformDesc *gXePlat;
 uint16_t gXePlatId;
 IOLock *gDevLock, *gH2gLock[2], *gG2hLock[2], *gFwLock, *gSayLock, *gDispLock;
+// xe->pmt.lock (xe_vsec.c:160): one PMT read at a time, the re-mapper index and the energy meter with it
+static IOLock *gPmtLock;
 XeEngine gEngines[8];
 uint32_t gNumEngines;
 XeEngine gMediaEngines[4];
@@ -272,17 +274,20 @@ SYSCTL_PROC(_debug_intelxe, OID_AUTO, vram, CTLTYPE_STRING | CTLFLAG_RD | CTLFLA
 // debug.intelxe.sensors (anyone may read; IntelXe Manager's monitor): the render GT's actual and requested clock and its
 // limits, and the package and VRAM temperatures, as Linux xe reads them: xe_guc_pc_get_act_freq reads CAGF from
 // MTL_MIRROR_TARGET_WP1 without forcewake (0 while the GT sits in RC6), the caps from MTL_RP_STATE_CAP; xe_hwmon reads
-// BMG_PACKAGE_TEMPERATURE and BMG_VRAM_TEMPERATURE, degrees Celsius in bits 7:0 (xe_pcode_regs.h TEMP_MASK). No write,
-// no forcewake: reading it does not wake the GPU.
+// BMG_PACKAGE_TEMPERATURE and BMG_VRAM_TEMPERATURE, degrees Celsius in bits 7:0 (xe_pcode_regs.h TEMP_MASK). Then, on a
+// platform whose energy comes from PMT telemetry (BMG), the card and package energy as xe_hwmon's energy1/2_input
+// (joules, summed across the counters' 32-bit wraps) and the average power of each since an earlier reading at least
+// 0.5 s old (n/a until there is one). The text before the energy fields is unchanged (IntelXe Manager parses it: the
+// first "act", "req", "RP0", "RPn", "package" and "VRAM"); new fields go at the end. No forcewake: reading it does not
+// wake the GPU. The one write is the telemetry region index in SG_REMAP_INDEX1, which xe_pmt_telem_read sets before
+// every telemetry read too.
 static int sensorsHandler SYSCTL_HANDLER_ARGS {
-	char buf[256];
+	char buf[384];
 	const int n = gDev ? gDev->sensorsString(buf, sizeof buf) : snprintf(buf, sizeof buf, "no device\n");
 	return SYSCTL_OUT(req, buf, (size_t)(n < (int)sizeof buf - 1 ? n : (int)sizeof buf - 1) + 1);
 }
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, sensors, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_ANYBODY, nullptr, 0, sensorsHandler, "A",
-	"act/req MHz, RP0/RPn MHz, package and VRAM temperature (C)");
-// rb7r: purgeable BOs (DRM_IOCTL_XE_MADVISE). purge: write 1 = purge every DONTNEED BO that can be now (memory pressure
-// on demand); purge_stats: madvise and purge counters.
+	"act/req MHz, RP0/RPn MHz, package and VRAM temperature (C), card and package energy (J) and average power (W)");
 int IntelXe::sensorsString(char *buf, size_t len)
 {
 	if (!bar0 || suspended) return snprintf(buf, len, "unavailable (%s)\n", suspended ? "asleep" : "not mapped");
@@ -290,9 +295,67 @@ int IntelXe::sensorsString(char *buf, size_t len)
 	const uint32_t wp1 = rd(0xc60), req = rd(0xa008), cap = rd(0x138000);
 	const uint32_t pkg = rd(BMG_PACKAGE_TEMPERATURE), vram = rd(BMG_VRAM_TEMPERATURE);
 	if (wp1 == 0xffffffffu && cap == 0xffffffffu) return snprintf(buf, len, "unavailable (the device does not answer)\n");
-	return snprintf(buf, len, "act %u MHz, req %u MHz, RP0 %u MHz, RPn %u MHz, package %u C, VRAM %u C\n", mhz(wp1 & 0x1ff),
-		mhz(req >> 23 & 0x1ff), mhz(cap & 0x1ff), mhz(cap >> 16 & 0x1ff), pkg & 0xff, vram & 0xff);
+	size_t n = (size_t)snprintf(buf, len, "act %u MHz, req %u MHz, RP0 %u MHz, RPn %u MHz, package %u C, VRAM %u C",
+		mhz(wp1 & 0x1ff), mhz(req >> 23 & 0x1ff), mhz(cap & 0x1ff), mhz(cap >> 16 & 0x1ff), pkg & 0xff, vram & 0xff);
+	if (gXePlat && gXePlat->energySource == XE_ENERGY_PMT && gPmtLock) {
+		// xe_hwmon.c:513-538 on XE_BATTLEMAGE: the 64-bit word at BMG_ENERGY_STATUS_PMT_OFFSET of the region the
+		// PUNIT_TELEMETRY_GUID register names, package in bits 31:0 and card in 63:32, each summed across wraps and
+		// scaled by 2^-scl_shift_energy J.
+		uint64_t v = 0, ns = 0, uj[XE_ENERGY_CHANNELS] = {};
+		uint32_t mw[XE_ENERGY_CHANNELS] = {};
+		bool power = false;
+		IOLockLock(gPmtLock);
+		const uint32_t guid = rd(PUNIT_TELEMETRY_GUID);
+		const int err = pmtTelemRead(guid, BMG_ENERGY_STATUS_PMT_OFFSET, &v);
+		if (!err) {
+			uint64_t t;
+			clock_get_uptime(&t);
+			absolutetime_to_nanoseconds(t, &ns);
+			energy.shift = gXePlat->energyShift;
+			energy.update(v, ns, 500000000ull);
+			for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) uj[c] = energy.uj(c), mw[c] = energy.mw[c];
+			power = energy.havePower;
+		}
+		IOLockUnlock(gPmtLock);
+		if (err && n < len) {
+			n += (size_t)snprintf(buf + n, len - n, ", energy unavailable (PMT error %d, GUID 0x%08x)", err, guid);
+		} else if (n < len) {
+			n += (size_t)snprintf(buf + n, len - n, ", card energy %llu.%03llu J, package energy %llu.%03llu J",
+				uj[XE_ENERGY_CARD] / 1000000, uj[XE_ENERGY_CARD] % 1000000 / 1000, uj[XE_ENERGY_PKG] / 1000000,
+				uj[XE_ENERGY_PKG] % 1000000 / 1000);
+			if (n < len && power)
+				n += (size_t)snprintf(buf + n, len - n, ", card power %u.%02u W, package power %u.%02u W",
+					mw[XE_ENERGY_CARD] / 1000, mw[XE_ENERGY_CARD] % 1000 / 10, mw[XE_ENERGY_PKG] / 1000,
+					mw[XE_ENERGY_PKG] % 1000 / 10);
+			else if (n < len)
+				n += (size_t)snprintf(buf + n, len - n, ", card power n/a, package power n/a");
+		}
+	}
+	if (n < len) n += (size_t)snprintf(buf + n, len - n, "\n");
+	return (int)n;
 }
+// xe_vsec.c:143-174 xe_pmt_telem_read for 8 bytes: the GUID names the telemetry region and the offset in the window
+// (xe_guid_decode, xe_pmt.h), the SoC re-mapper shows that region (xe_soc_remapper_set_telem_region: rmw of
+// SG_REMAP_INDEX1 bits 31:24), then the bytes are read from BAR0 + BMG_TELEMETRY_OFFSET + offset + userOffset. Linux
+// answers -ENODATA unless the device is runtime-active (xe_pm_runtime_get_if_active); here: not while suspended. Linux
+// copies with memcpy_fromio; here two aligned 32-bit reads, low dword first: the energy word is two independent 32-bit
+// counters (ENERGY_PKG 31:0, ENERGY_CARD 63:32), so a read between their updates still gives two valid values.
+// Caller holds gPmtLock. 0 or an errno.
+int IntelXe::pmtTelemRead(uint32_t guid, uint32_t userOffset, uint64_t *data)
+{
+	uint32_t index = 0, offset = 0;
+	const int dec = xePmtGuidDecode(guid, &index, &offset);
+	if (dec) return dec == -19 ? ENODEV : EINVAL;
+	if (!gXePlat || !gXePlat->hasSocRemapperTelem) return ENODEV;   // soc_remapper.set_telem_region unset: -ENODEV
+	if (!bar0 || suspended) return ENODATA;
+	wr(SG_REMAP_INDEX1, xePmtRemapValue(rd(SG_REMAP_INDEX1), index));
+	const uint32_t off = xePmtTelemOffset(offset, userOffset);
+	const uint32_t lo = rd(off), hi = rd(off + 4);
+	*data = (uint64_t)hi << 32 | lo;
+	return 0;
+}
+// rb7r: purgeable BOs (DRM_IOCTL_XE_MADVISE). purge: write 1 = purge every DONTNEED BO that can be now (memory pressure
+// on demand); purge_stats: madvise and purge counters.
 static int purgeHandler SYSCTL_HANDLER_ARGS {
 	int v = 0, err = sysctl_handle_int(oidp, &v, 0, req);
 	if (err || !req->newptr) return err;
@@ -1500,7 +1563,12 @@ void IntelXe::gpuSuspend() {
 	const uint32_t f0 = fwCount[0], f1 = fwCount[1];
 	IOLockUnlock(gFwLock);
 	if (f0 || f1) say("suspend: forcewake still referenced (GT %u, media %u): re-requested at resume\n", f0, f1);
+	// The energy counters may restart while the card is off: the first reading after resume only re-bases them. Set
+	// together with `suspended` under gPmtLock, so that no PMT read between the two takes the re-base before sleep.
+	IOLockLock(gPmtLock);
+	energy.resync = true;
 	suspended = true;
+	IOLockUnlock(gPmtLock);
 }
 
 // D3cold clears the forcewake requests in the hardware, but not our reference counts: a domain still referenced at
@@ -3268,7 +3336,7 @@ int IntelXe::pciDump() {
 
 extern "C" {
 static IOLock **const kLocks[] = {&gDevLock, &gH2gLock[0], &gH2gLock[1], &gG2hLock[0], &gG2hLock[1], &gFwLock, &gSayLock,
-	&gDispLock, &gGgttLock};
+	&gDispLock, &gGgttLock, &gPmtLock};
 kern_return_t IntelXe_stop(kmod_info_t *, void *);
 kern_return_t IntelXe_start(kmod_info_t *, void *) {
 	bool ok = true;
