@@ -37,8 +37,9 @@ A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e2
   armed slot on its ring, so a job starts without a GuC round trip ([design](../docs/design/DESIGN-direct-submission.md)).
 - **Settings and readings:** the GPU power profile and clock range from NVRAM (`intelxe-gpu-profile`,
   `intelxe-gpu-min-mhz`, `intelxe-gpu-max-mhz`, written by the app); `debug.intelxe.sensors` (GT clock, temperatures,
-  and on BMG the card and package energy and average power from PMT telemetry as Linux xe_hwmon reads them; readable
-  by anyone); `debug.intelxe.jobtime` (each job's stages in GPU timestamps, off by default).
+  and on BMG the card and package energy and average power from PMT telemetry as Linux xe_hwmon reads them, with
+  implausible power windows refused and counted, then the card and package PL1/PL2 and the card's I1 read through the
+  pcode mailbox as xe_hwmon reads them, read only; readable by anyone); `debug.intelxe.jobtime` (each job's stages in GPU timestamps, off by default).
 - **PCIe ASPM (experimental, untested, off unless written):** `xe_aspm.cpp`, the checks in `xe_aspm.h`.
   - `sysctl debug.intelxe.aspm` (anyone): every link between the GPU function and its root port (on the B580: the
     card's switch downstream port <-> GPU, and root port <-> the card's switch upstream port), each end's Link
@@ -140,10 +141,13 @@ c++ -std=c++17 -Wall -Wextra -I.. -o platform_test platform_test.cpp ../xe_platf
 c++ -std=c++17 -Wall -Wextra -I.. -o uapi_test uapi_test.cpp ../xe_uapi_args.cpp && ./uapi_test
 c++ -std=c++17 -Wall -Wextra -I.. -o pmt_test pmt_test.cpp ../xe_platform.cpp && ./pmt_test
 c++ -std=c++17 -Wall -Wextra -I.. -o aspm_test aspm_test.cpp && ./aspm_test
+c++ -std=c++17 -Wall -Wextra -I.. -o pcode_test pcode_test.cpp ../xe_platform.cpp && ./pcode_test
 ```
 
-`platform_test` checks the descriptor table against the constants the code used and XeProbe's former family table;
-`uapi_test` checks the sync, user-fence wait and `GEM_CREATE` extension argument handling against Linux xe; `pmt_test`
-checks the BMG energy path (PMT offsets, GUID decode, field extraction, unit scaling, wrap accumulation, average
-power); `aspm_test` checks the ASPM path logic (latency decoding against Linux aspm.c, which links may take L1,
-the call order for enabling and disabling, the report text). The GPU test for user fences is `user/tests/kernel/ufence.c`.
+`platform_test` checks the descriptor table against the constants the code used, XeProbe's former family table and
+Linux's BMG id lists; `uapi_test` checks the sync, user-fence wait and `GEM_CREATE` extension argument handling against
+Linux xe; `pmt_test` checks the BMG energy path (PMT offsets, GUID decode, field extraction, unit scaling, wrap
+accumulation, average power, the power-window sanity guard); `pcode_test` checks the pcode mailbox protocol against a
+fake pcode (write order, busy mailbox, timeout, error codes as Linux `xe_pcode.c`) and the power-limit units and report
+text; `aspm_test` checks the ASPM path logic (latency decoding against Linux aspm.c, which links may take L1, the call
+order for enabling and disabling, the report text). The GPU test for user fences is `user/tests/kernel/ufence.c`.

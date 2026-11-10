@@ -100,12 +100,28 @@ static inline uint64_t xeEnergyMicrojoules(uint64_t accum, uint8_t shift) {
 // closer together than that (sysctl reads twice: size, then text; two apps polling) get the last average again rather
 // than one over a few microseconds.
 enum : uint32_t { XE_ENERGY_CARD = 0, XE_ENERGY_PKG = 1, XE_ENERGY_CHANNELS = 2 };
+// Sanity limits of one power window (this driver's, not Linux's: xe_hwmon hands out the energy sums only). On the B580
+// right after a boot two windows read package 85 W and then 152 W against a card 37 W, which cannot be: the package is
+// part of the card (xe_hwmon.c:1464-1472 labels the channels "card" and "pkg"). Later windows were consistent. Nothing
+// in the read path explains it (the two counters are separate 32-bit words, each read whole under gPmtLock right
+// after the re-mapper write, as xe_pmt_telem_read does), so it is taken as the firmware's counters running apart for a
+// while (one updated later or filtered more than the other). Such a window is not reported: its averages are dropped
+// (n/a), the base moves on to this reading, and the meter counts it. Rejected: either channel above
+// XE_POWER_CEILING_MW (no Battlemage card draws that much; a counter that stepped back reads as ~262144 J), or the
+// package above the card by more than a quarter of the card plus XE_POWER_PKG_SLACK_MW (the two counters are not
+// sampled at the same instant, so a short window can see some of one without the other).
+static constexpr uint64_t XE_POWER_CEILING_MW = 600000, XE_POWER_PKG_SLACK_MW = 10000;
+static inline bool xePowerWindowSane(uint64_t cardMw, uint64_t pkgMw) {
+	if (cardMw > XE_POWER_CEILING_MW || pkgMw > XE_POWER_CEILING_MW) return false;
+	return pkgMw <= cardMw + cardMw / 4 + XE_POWER_PKG_SLACK_MW;
+}
 struct XeEnergyMeter {
 	XeEnergyAccum ch[XE_ENERGY_CHANNELS];
 	uint64_t baseUj[XE_ENERGY_CHANNELS] {}, baseNs {0};
 	uint32_t mw[XE_ENERGY_CHANNELS] {};   // average power of the last full window, milliwatts
 	bool haveBase {false}, havePower {false};
 	bool resync {false};   // set at suspend: the counter may have restarted, so the next read only re-bases
+	uint32_t rejected {0};   // windows xePowerWindowSane refused (reported n/a, re-based)
 	uint8_t shift {XE_ENERGY_UNIT_MBX};
 	uint64_t uj(uint32_t c) const { return xeEnergyMicrojoules(ch[c].accum, shift); }
 	void update(uint64_t pmtVal, uint64_t nowNs, uint64_t minWindowNs) {
@@ -121,11 +137,15 @@ struct XeEnergyMeter {
 		if (!haveBase || nowNs - baseNs >= minWindowNs) {
 			if (haveBase) {
 				const uint64_t dtUs = (nowNs - baseNs) / 1000 ? (nowNs - baseNs) / 1000 : 1;
-				for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) {
-					const uint64_t mwide = (uj(c) - baseUj[c]) * 1000 / dtUs;   // uJ / us = W; * 1000 = mW
-					mw[c] = mwide > 0xffffffffull ? 0xffffffffu : (uint32_t)mwide;
+				uint64_t mwide[XE_ENERGY_CHANNELS];
+				for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++)
+					mwide[c] = (uj(c) - baseUj[c]) * 1000 / dtUs;   // uJ / us = W; * 1000 = mW
+				havePower = xePowerWindowSane(mwide[XE_ENERGY_CARD], mwide[XE_ENERGY_PKG]);
+				if (havePower) {
+					for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) mw[c] = (uint32_t)mwide[c];   // <= the ceiling
+				} else {
+					rejected++;
 				}
-				havePower = true;
 			}
 			for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) baseUj[c] = uj(c);
 			baseNs = nowNs;

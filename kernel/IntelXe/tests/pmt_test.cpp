@@ -6,6 +6,8 @@
 //   4. unit scaling (mul_u64_u32_shr(accum, SF_ENERGY, 14)) against 128-bit arithmetic
 //   5. 32-bit wrap accumulation (xe_hwmon.c:534-535), the meter's power windows and the resync after suspend
 //   6. the descriptor: BMG (G21 and G31) reads energy from PMT with unit shift 14; no other family reads energy
+//   7. the power-window sanity guard: the B580's post-boot readings (package 85 W, then 152 W, card 37 W) are refused,
+//      re-based and counted; the boundary of the margin; the 600 W ceiling; a counter that steps back
 // c++ -std=c++17 -Wall -Wextra -I.. -o pmt_test pmt_test.cpp ../xe_platform.cpp && ./pmt_test
 #include <stdio.h>
 #include "xe_platform.h"
@@ -124,6 +126,47 @@ int main() {
 	w.update(word(5 * J + 15 * J, 2 * J + 5 * J), 101 * s, win);
 	CHECK(w.havePower && w.mw[XE_ENERGY_CARD] == 15000 && w.mw[XE_ENERGY_PKG] == 5000 &&
 		w.uj(XE_ENERGY_CARD) == before + 15000000, "after resync: 15 W / 5 W, card %u mW", w.mw[XE_ENERGY_CARD]);
+
+	// 7. sanity guard
+	CHECK(xePowerWindowSane(37000, 19600) && xePowerWindowSane(0, 0) && xePowerWindowSane(190000, 150000), "normal windows");
+	CHECK(!xePowerWindowSane(37000, 85000) && !xePowerWindowSane(37000, 152000), "package 85 / 152 W over card 37 W");
+	CHECK(xePowerWindowSane(40000, 40000 + 10000 + 10000) && !xePowerWindowSane(40000, 60001),
+		"margin: a quarter of the card plus 10 W");
+	CHECK(xePowerWindowSane(0, 10000) && !xePowerWindowSane(0, 10001), "card 0: package up to 10 W");
+	CHECK(xePowerWindowSane(600000, 600000) && !xePowerWindowSane(600001, 1000) && !xePowerWindowSane(600000, 600001),
+		"600 W ceiling on either channel");
+	{
+		// after boot: windows of 1 s each. card 37 W throughout; package 85 W, then 152 W, then 19.5 W.
+		XeEnergyMeter g;
+		uint64_t c = 1000 * J, p = 600 * J;
+		g.update(word(c, p), 5 * s, win);
+		c += 37 * J, p += 85 * J;
+		g.update(word(c, p), 6 * s, win);
+		CHECK(!g.havePower && g.rejected == 1 && g.baseNs == 6 * s, "package 85 W > card 37 W: n/a, re-based, counted");
+		c += J / 10;   // a reader 0.1 s later: still n/a, the base kept
+		g.update(word(c, p), 6 * s + s / 10, win);
+		CHECK(!g.havePower && g.rejected == 1 && g.baseNs == 6 * s, "inside the window after a refusal: n/a, base kept");
+		c += 37 * J - J / 10, p += 152 * J;
+		g.update(word(c, p), 7 * s, win);
+		CHECK(!g.havePower && g.rejected == 2, "package 152 W: refused too (%u)", g.rejected);
+		c += 37 * J, p += 19 * J + J / 2;   // 19.5 W (the idle reading was 19.6 W)
+		g.update(word(c, p), 8 * s, win);
+		CHECK(g.havePower && g.rejected == 2 && g.mw[XE_ENERGY_CARD] == 37000 && g.mw[XE_ENERGY_PKG] == 19500,
+			"consistent window: card %u mW, package %u mW", g.mw[XE_ENERGY_CARD], g.mw[XE_ENERGY_PKG]);
+		CHECK(g.uj(XE_ENERGY_PKG) == (600 * J + 85 * J + 152 * J + 19 * J + J / 2) * 1000000 >> 14,
+			"the energy sums are not touched by the guard");
+		// a counter that steps back by one count reads as a 2^32 wrap: ~262144 J in 1 s, above the ceiling
+		g.update(word(c, p - 1), 9 * s, win);
+		CHECK(!g.havePower && g.rejected == 3, "counter stepped back: refused (%u)", g.rejected);
+		c += 30 * J, p += 1 + 15 * J;
+		g.update(word(c, p), 10 * s, win);
+		CHECK(g.havePower && g.mw[XE_ENERGY_CARD] == 30000 && g.mw[XE_ENERGY_PKG] == 15000, "next window after it: %u / %u mW",
+			g.mw[XE_ENERGY_CARD], g.mw[XE_ENERGY_PKG]);
+		// a refusal keeps the resync path's behaviour: the first read after resume still only re-bases
+		g.resync = true;
+		g.update(word(3 * J, J), 50 * s, win);
+		CHECK(!g.havePower && g.rejected == 3, "resync is not a refusal");
+	}
 
 	// 6. descriptor
 	const XePlatformDesc *g21 = xePlatformFind(0xe20b), *g31 = xePlatformFind(0xe221);

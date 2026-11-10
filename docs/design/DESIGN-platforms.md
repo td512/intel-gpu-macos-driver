@@ -64,6 +64,7 @@ private family table is gone.
 | `mocsUcIndex` | GuC shim `GUC_MOCS_INDEX`, MEM_SET, MEM_COPY, XY_BLOCK_COPY MOCS fields |
 | `engineMask` | the CCS fuse (`read_compute_fuses_from_reg`) and the VDBOX/VEBOX fuses (`read_media_fuses`) |
 | `gucFw`, `hucFw` | the start check against the built-in images |
+| `hasMbxPowerLimits` | the power limits in `debug.intelxe.sensors`, read through the pcode mailbox (`xe_pcode.h`; since 2026-11-10, branch `power-limits`) |
 
 ### Equivalence on BMG (how it was checked)
 
@@ -191,6 +192,63 @@ Other G21 cards (B50/B60 Pro: e211, e212, …) share the supported G21 entry. Th
    `graphicsVerx100 >= 1270`, the IRQ handler by `>= 1210`, and an integrated memory path selected by `isDgfx`.
 4. Bring its workaround rules over from `xe_wa_oob.rules` / `xe_wa.c`.
 5. Extend `tests/platform_test.cpp` with that family's expected values.
+
+### How to enable another BMG card
+
+> Added 2026-11-10 (branch `power-limits`). No id was added to the supported list by this change.
+
+**The ids today.** Linux `include/drm/intel/pciids.h:852-868` (tree abf8c33) lists `INTEL_BMG_G21_IDS` (e202, e209,
+e20b, e20c, e20d, e210, e211, e212, e216) and, for the rest of `INTEL_BMG_IDS`, the G31 ids e220-e223.
+`xe_pci.c:412-439` gives all of them `bmg_desc`; the G21 ones also get the G21 subplatform.
+`kIdsBMGG21` / `kIdsBMGG31` (`xe_platform.cpp`) and `kIdsBMG` (`xe_probe_ids.inc`) hold exactly these.
+`platform_test` section 5 pins them to the Linux lists.
+
+Mesa's `include/pci_ids/iris_pci_ids.h:276-289` (the Mesa tree of 28 Oct) names e20b "Arc B580", e20c "Arc B570",
+e211 "Arc Pro B60" and e212 "Arc Pro B50"; it names every other id "Intel(R) Graphics". It also has e215, which Linux
+does not list, so the descriptor has no entry for it. It files e216 under "BMG" where Linux files it under G21.
+
+**Where each card stands.**
+
+| ids | descriptor | reaches `start`? |
+|---|---|---|
+| e20b (B580), e20c (B570) | G21, `supported` | yes: `build.py` IOPCIMatch, `data/platforms.json` "supported" |
+| e211 (Pro B60), e212 (Pro B50), e202, e209, e20d, e210, e216 | G21, `supported` | no: not in IOPCIMatch, so IntelXe never matches them (XeProbe can) |
+| e220-e223 (G31) | G31, not `supported` | no; if matched, `start` refuses with the entry's `missing` line |
+
+**A G21 card (Pro B50/B60 and the others).** The code paths are the B580's. What can differ is the card, not the
+chip. Check, in order:
+
+1. **Identity.** Boot with `xeprobe=0x<id>` (`docs/PROBE-MODE.md`), stages 1 and 2. GMD_ID must read graphics 20.01
+   and media 13.01 (`tests/xe_pci.c` GMDID_CASE(BATTLEMAGE, 2001, ..., 1301, ...)). Then run stages 3-5.
+2. **What the code reads at run time but has only seen on the B580/B570:**
+   - the VRAM size from `SG_TILE_ADDR_RANGE0` (the Pro B60 has 24 GB, the Pro B50 16 GB);
+   - the Resizable BAR sizes the slot grants and the 1 GB CPU-visible window that follows from them;
+   - the Xe-core and engine fuses (`XEHP_GT_COMPUTE_DSS_ENABLE`, the CCS and VDBOX/VEBOX fuses);
+   - the outputs IntelXeFB finds (DisplayPort over the C20 PHYs; an HDMI connector has never been driven);
+   - `debug.intelxe.sensors`: the card PL1 should be the card's rated board power (the Pro B50 draws only from the
+     slot, about 70 W), and an idle machine should show 0 rejected power windows.
+3. **SR-IOV.** The Pro cards are sold for SR-IOV (`bmg_desc` has `has_sriov`). The driver only ever runs as the PF
+   with no VFs; nothing enables them.
+4. **Add the id.** Add it to `data/platforms.json` "supported" (id, name, `model`, `tested: false`, and `gpu_test`
+   figures from the specification with their basis). Then add it to every copy in section 4: IOPCIMatch,
+   NMXAccel's plist, `kMatch`, `install.sh`, `efi.sh`, `Model.swift`, `IntelXe-EFI.ps1`, `clbench`, the READMEs,
+   and `SupportedDevices.swift` (`devices.py --write-swift`). `IntelXe.cpp` picks the `model` property with a
+   B570-or-B580 test; a third card turns that into a per-id table.
+5. **Run:**
+   - `platform_test`, `pmt_test`, `pcode_test`, `uapi_test` and `aspm_test` (commands in `kernel/README.md`);
+   - `tools/parity/devices.py` (0 problems);
+   - the kext build (the same 22 warnings);
+   - on the card: `tools/regress` (full), the app's GPU test, Metal and Vulkan, and a sleep/wake cycle.
+   Only then set `tested: true`.
+
+**A G31 card (e220-e223)** also needs everything above, plus:
+
+- **Wa_14022085890** (the SLPC minimum of 1200 MHz, `BMG_MIN_FREQ`). Linux applies it to G21 only
+  (`xe_device_wa_oob.rules:5` SUBPLATFORM(BATTLEMAGE, G21)), but here it is applied unconditionally. Make it
+  conditional on the subplatform.
+- **GMD_ID.** Read it on the card. `tests/xe_pci.c` lists BMG as 20.01 / 13.01 only, so the entry's
+  `graphicsVerx100` and `mediaVerx100` are an assumption until then.
+- **Then** mark the entry `supported` and change `platform_test` section 2, which expects only G21 to be supported.
 
 ## 4. The userland side
 

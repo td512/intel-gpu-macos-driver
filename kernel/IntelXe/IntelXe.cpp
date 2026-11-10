@@ -81,6 +81,9 @@ uint16_t gXePlatId;
 IOLock *gDevLock, *gH2gLock[2], *gG2hLock[2], *gFwLock, *gSayLock, *gDispLock;
 // xe->pmt.lock (xe_vsec.c:160): one PMT read at a time, the re-mapper index and the energy meter with it
 static IOLock *gPmtLock;
+// tile->pcode.lock (xe_pcode.c:111, 120-147): one pcode mailbox transaction at a time (the init-status polls at start
+// and resume, the power-limit reads of debug.intelxe.sensors)
+static IOLock *gPcodeLock;
 XeEngine gEngines[8];
 uint32_t gNumEngines;
 XeEngine gMediaEngines[4];
@@ -277,17 +280,21 @@ SYSCTL_PROC(_debug_intelxe, OID_AUTO, vram, CTLTYPE_STRING | CTLFLAG_RD | CTLFLA
 // BMG_PACKAGE_TEMPERATURE and BMG_VRAM_TEMPERATURE, degrees Celsius in bits 7:0 (xe_pcode_regs.h TEMP_MASK). Then, on a
 // platform whose energy comes from PMT telemetry (BMG), the card and package energy as xe_hwmon's energy1/2_input
 // (joules, summed across the counters' 32-bit wraps) and the average power of each since an earlier reading at least
-// 0.5 s old (n/a until there is one). The text before the energy fields is unchanged (IntelXe Manager parses it: the
-// first "act", "req", "RP0", "RPn", "package" and "VRAM"); new fields go at the end. No forcewake: reading it does not
-// wake the GPU. The one write is the telemetry region index in SG_REMAP_INDEX1, which xe_pmt_telem_read sets before
-// every telemetry read too.
+// 0.5 s old (n/a until there is one, and for a window xePowerWindowSane refuses: "power windows rejected" counts
+// those). Then, on a platform with has_mbx_power_limits (BMG), the card and package PL1/PL2 and the card's I1 (crit) as
+// xe_hwmon reads them through the pcode mailbox (xe_pcode.h; read only, cached for a second). The text before the energy
+// fields is unchanged (IntelXe Manager parses it: the first "act", "req", "RP0", "RPn", "package" and "VRAM";
+// tools/regress the first "card power" and "package power"); new fields go at the end. No forcewake: reading it does
+// not wake the GPU. The writes are the telemetry region index in SG_REMAP_INDEX1, which xe_pmt_telem_read sets before
+// every telemetry read too, and the pcode mailbox's request registers (PCODE_DATA0/1, PCODE_MAILBOX) of a read command.
 static int sensorsHandler SYSCTL_HANDLER_ARGS {
-	char buf[384];
+	char buf[768];
 	const int n = gDev ? gDev->sensorsString(buf, sizeof buf) : snprintf(buf, sizeof buf, "no device\n");
 	return SYSCTL_OUT(req, buf, (size_t)(n < (int)sizeof buf - 1 ? n : (int)sizeof buf - 1) + 1);
 }
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, sensors, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_ANYBODY, nullptr, 0, sensorsHandler, "A",
-	"act/req MHz, RP0/RPn MHz, package and VRAM temperature (C), card and package energy (J) and average power (W)");
+	"act/req MHz, RP0/RPn MHz, package and VRAM temperature (C), card and package energy (J), average power (W) and "
+	"power limits (W)");
 int IntelXe::sensorsString(char *buf, size_t len)
 {
 	if (!bar0 || suspended) return snprintf(buf, len, "unavailable (%s)\n", suspended ? "asleep" : "not mapped");
@@ -302,7 +309,7 @@ int IntelXe::sensorsString(char *buf, size_t len)
 		// PUNIT_TELEMETRY_GUID register names, package in bits 31:0 and card in 63:32, each summed across wraps and
 		// scaled by 2^-scl_shift_energy J.
 		uint64_t v = 0, ns = 0, uj[XE_ENERGY_CHANNELS] = {};
-		uint32_t mw[XE_ENERGY_CHANNELS] = {};
+		uint32_t mw[XE_ENERGY_CHANNELS] = {}, rejected = 0;
 		bool power = false;
 		IOLockLock(gPmtLock);
 		const uint32_t guid = rd(PUNIT_TELEMETRY_GUID);
@@ -315,6 +322,7 @@ int IntelXe::sensorsString(char *buf, size_t len)
 			energy.update(v, ns, 500000000ull);
 			for (uint32_t c = 0; c < XE_ENERGY_CHANNELS; c++) uj[c] = energy.uj(c), mw[c] = energy.mw[c];
 			power = energy.havePower;
+			rejected = energy.rejected;
 		}
 		IOLockUnlock(gPmtLock);
 		if (err && n < len) {
@@ -329,7 +337,13 @@ int IntelXe::sensorsString(char *buf, size_t len)
 					mw[XE_ENERGY_PKG] % 1000 / 10);
 			else if (n < len)
 				n += (size_t)snprintf(buf + n, len - n, ", card power n/a, package power n/a");
+			if (n < len) n += (size_t)snprintf(buf + n, len - n, ", power windows rejected %u", rejected);
 		}
+	}
+	if (gXePlat && gXePlat->hasMbxPowerLimits && gPcodeLock && n < len) {
+		XePowerLimits pl;
+		powerLimitsRead(&pl);
+		n += xePowerLimitsText(buf + n, len - n, pl);
 	}
 	if (n < len) n += (size_t)snprintf(buf + n, len - n, "\n");
 	return (int)n;
@@ -353,6 +367,81 @@ int IntelXe::pmtTelemRead(uint32_t guid, uint32_t userOffset, uint64_t *data)
 	const uint32_t lo = rd(off), hi = rd(off + 4);
 	*data = (uint64_t)hi << 32 | lo;
 	return 0;
+}
+// xe_pcode.c:138-147 xe_pcode_read: __pcode_mailbox_rw (xePcodeMailboxRw, xe_pcode.h) with PCODE_DEFAULT_TIMEOUT_MS and
+// the data read back. Busy-waits (IODelay) for at most the timeout, as xe_mmio_wait32 polls. Caller holds gPcodeLock.
+int IntelXe::pcodeReadLocked(uint32_t mbox, uint32_t *val0, uint32_t *val1)
+{
+	struct Io {
+		IntelXe *x;
+		uint32_t rd(uint32_t off) { return x->rd(off); }
+		void wr(uint32_t off, uint32_t v) { x->wr(off, v); }
+		void delayUs(uint32_t us) { IODelay(us); }
+	} io {this};
+	return xePcodeMailboxRw(io, mbox, val0, val1, PCODE_DEFAULT_TIMEOUT_MS * 1000, true);
+}
+// xe_pcode_read with its lock. Linux's callers hold a runtime-PM reference (xe_hwmon: guard(xe_pm_runtime)); here: not
+// while the device sleeps (ENODATA), checked under the lock that suspend takes to set `suspended`.
+int IntelXe::pcodeRead(uint32_t mbox, uint32_t *val0, uint32_t *val1)
+{
+	if (!gPcodeLock) return ENODEV;
+	IOLockLock(gPcodeLock);
+	const int err = !bar0 || suspended ? ENODATA : pcodeReadLocked(mbox, val0, val1);
+	IOLockUnlock(gPcodeLock);
+	return err;
+}
+// The power limits as xe_hwmon_get_preregistration_info reads them on a has_mbx_power_limits platform (xe_hwmon.c:
+// 1499-1508 through xe_hwmon_pcode_read_power_limit, :190-221): PCODE_POWER_SETUP with READ_PSYSGPU_POWER_LIMIT (card)
+// and READ_PACKAGE_POWER_LIMIT (package), param2 READ_PL_FROM_FW, PL1 in DATA0 and PL2 in DATA1; then I1
+// (xe_hwmon_pcode_read_i1, :856-867). Linux goes on to write those limits back (:1513-1525) and reads READ_PL_FROM_PCODE
+// from then on; nothing is written here, so the request stays READ_PL_FROM_FW. The first reading also asks
+// READ_PL_FROM_PCODE once and logs both raw, for comparison on hardware. Cached for a second (a failure too): sysctl
+// calls the handler twice per read (size, then text), and the limits change only when written.
+void IntelXe::powerLimitsRead(XePowerLimits *out)
+{
+	uint64_t t, ns;
+	clock_get_uptime(&t);
+	absolutetime_to_nanoseconds(t, &ns);
+	IOLockLock(gPcodeLock);
+	if (!bar0 || suspended) {
+		out->err = ENODATA;
+		IOLockUnlock(gPcodeLock);
+		return;
+	}
+	if (plNs && ns - plNs < 1000000000ull) {   // a failed reading too: a pcode that times out costs 10 ms a try
+		*out = plCache;
+		IOLockUnlock(gPcodeLock);
+		return;
+	}
+	XePowerLimits pl;
+	pl.err = 0;
+	static const uint32_t kCmd[XE_PL_CHANNELS] = {READ_PSYSGPU_POWER_LIMIT, READ_PACKAGE_POWER_LIMIT};
+	for (uint32_t c = 0; c < XE_PL_CHANNELS && !pl.err; c++) {
+		uint32_t v0 = 0, v1 = 0;
+		pl.err = pcodeReadLocked(xePcodeMbox(PCODE_POWER_SETUP, kCmd[c], READ_PL_FROM_FW), &v0, &v1);
+		pl.word[c][0] = v0;
+		pl.word[c][1] = v1;
+	}
+	if (!pl.err) {
+		uint32_t i1 = 0;
+		pl.i1Err = pcodeReadLocked(xePcodeMbox(PCODE_POWER_SETUP, POWER_SETUP_SUBCOMMAND_READ_I1, 0), &i1, nullptr);
+		pl.i1 = i1;
+	}
+	if (!plLogged) {
+		plLogged = true;
+		uint32_t p[XE_PL_CHANNELS][2] = {};
+		int perr = 0;
+		for (uint32_t c = 0; c < XE_PL_CHANNELS && !perr; c++)
+			perr = pcodeReadLocked(xePcodeMbox(PCODE_POWER_SETUP, kCmd[c], READ_PL_FROM_PCODE), &p[c][0], &p[c][1]);
+		LOG("power limits (pcode mailbox, read only): FROM_FW %d card 0x%08x 0x%08x package 0x%08x 0x%08x; FROM_PCODE %d "
+			"card 0x%08x 0x%08x package 0x%08x 0x%08x; I1 %d 0x%08x; PL1 tau card %llu ms package %llu ms", pl.err,
+			pl.word[0][0], pl.word[0][1], pl.word[1][0], pl.word[1][1], perr, p[0][0], p[0][1], p[1][0], p[1][1], pl.i1Err,
+			pl.i1, xePowerLimitTauMs(pl.word[0][0], XE_TIME_UNIT_MBX), xePowerLimitTauMs(pl.word[1][0], XE_TIME_UNIT_MBX));
+	}
+	plCache = pl;
+	plNs = ns;
+	*out = pl;
+	IOLockUnlock(gPcodeLock);
 }
 // rb7r: purgeable BOs (DRM_IOCTL_XE_MADVISE). purge: write 1 = purge every DONTNEED BO that can be now (memory pressure
 // on demand); purge_stats: madvise and purge counters.
@@ -1006,8 +1095,15 @@ int IntelXe::probe() {
 	return 0;
 }
 
-// xe_pcode.c __pcode_mailbox_rw with DGFX_PCODE_STATUS / DGFX_GET_INIT_STATUS, one try with a 10 ms wait.
+// xe_pcode.c __pcode_mailbox_rw with DGFX_PCODE_STATUS / DGFX_GET_INIT_STATUS, one try with a 10 ms wait, under
+// gPcodeLock (pcode_try_request with locked, xe_pcode.c:158-160).
 int IntelXe::pcodeInitStatus() {
+	if (gPcodeLock) IOLockLock(gPcodeLock);
+	const int err = pcodeInitStatusLocked();
+	if (gPcodeLock) IOLockUnlock(gPcodeLock);
+	return err;
+}
+int IntelXe::pcodeInitStatusLocked() {
 	uint32_t mb = rd(PCODE_MAILBOX);
 	if (mb & PCODE_READY) {
 		say("mailbox busy 0x%08x\n", mb);
@@ -1057,7 +1153,9 @@ int IntelXe::waitDeviceReady() {
 	if (!mapBar0()) return ENXIO;
 	uint32_t mb = 0, d0 = 0, tries = 0;
 	for (;;) {
+		IOLockLock(gPcodeLock);
 		mb = rd(PCODE_MAILBOX);
+		bool ready = false;
 		if (mb != 0xffffffffu && !(mb & PCODE_READY)) {
 			wr(PCODE_DATA0, DGFX_GET_INIT_STATUS);   // as pcodeInitStatus(), without its log line per try
 			wr(PCODE_DATA1, 0);
@@ -1066,8 +1164,10 @@ int IntelXe::waitDeviceReady() {
 			mb = rd(PCODE_MAILBOX);
 			d0 = rd(PCODE_DATA0);
 			tries++;
-			if (!(mb & PCODE_READY) && (d0 & DGFX_INIT_STATUS_COMPLETE)) break;
+			ready = !(mb & PCODE_READY) && (d0 & DGFX_INIT_STATUS_COMPLETE);
 		}
+		IOLockUnlock(gPcodeLock);
+		if (ready) break;
 		if (elapsedMs() >= limitMs) {
 			say("pcode initialization timed out after %llu ms (mailbox 0x%08x data0 0x%08x, %u tries)\n", elapsedMs(), mb, d0, tries);
 			return ETIMEDOUT;
@@ -1577,8 +1677,10 @@ void IntelXe::gpuSuspend() {
 	// The energy counters may restart while the card is off: the first reading after resume only re-bases them. Set
 	// together with `suspended` under gPmtLock, so that no PMT read between the two takes the re-base before sleep.
 	IOLockLock(gPmtLock);
+	IOLockLock(gPcodeLock);   // and no pcode mailbox read (pcodeRead, powerLimitsRead) after this point
 	energy.resync = true;
 	suspended = true;
+	IOLockUnlock(gPcodeLock);
 	IOLockUnlock(gPmtLock);
 }
 
@@ -3347,7 +3449,7 @@ int IntelXe::pciDump() {
 
 extern "C" {
 static IOLock **const kLocks[] = {&gDevLock, &gH2gLock[0], &gH2gLock[1], &gG2hLock[0], &gG2hLock[1], &gFwLock, &gSayLock,
-	&gDispLock, &gGgttLock, &gPmtLock, &gAspmLock};
+	&gDispLock, &gGgttLock, &gPmtLock, &gAspmLock, &gPcodeLock};
 kern_return_t IntelXe_stop(kmod_info_t *, void *);
 kern_return_t IntelXe_start(kmod_info_t *, void *) {
 	bool ok = true;
