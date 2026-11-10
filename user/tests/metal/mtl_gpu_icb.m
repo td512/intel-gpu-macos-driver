@@ -30,6 +30,9 @@ static NSString *const kSource =
     @"#include <metal_stdlib>\n"
      "using namespace metal;\n"
      "struct Container { command_buffer cb [[id(0)]]; };\n"
+     // the index pointers come from memory (gpuAddress), as in WebKit's vsICB: a pointer loaded from a buffer
+     // carries its device address, a bound buffer parameter has none in the B580 translation
+     "struct Ptrs { device uint *ib32; device ushort *ib16; };\n"
      "struct VOut { float4 pos [[position]]; float4 col; };\n"
      "vertex VOut vmain(const device float2 *pos [[buffer(0)]], const device float4 *cols [[buffer(1)]],\n"
      "                  uint vid [[vertex_id]], uint iid [[instance_id]]) {\n"
@@ -37,22 +40,22 @@ static NSString *const kSource =
      "}\n"
      "fragment float4 fmain(VOut in [[stage_in]]) { return in.col; }\n"
      // the encoding kernel: one thread writes every slot it owns
-     "kernel void encode(device Container *c [[buffer(0)]], device uint *ib32 [[buffer(1)]], device ushort *ib16 [[buffer(2)]],\n"
+     "kernel void encode(device Container *c [[buffer(0)]], const device Ptrs *p [[buffer(1)]],\n"
      "                   uint t [[thread_position_in_grid]]) {\n"
      "    if (t != 0) return;\n"
      "    render_command c0(c->cb, 0);\n"
      "    c0.draw_primitives(primitive_type::triangle, 16, 6, 1, 0);\n"
      "    render_command c1(c->cb, 1);\n"
-     "    c1.draw_indexed_primitives(primitive_type::triangle, 6, ib32 + 6, 1, 4, 1);\n"
+     "    c1.draw_indexed_primitives(primitive_type::triangle, 6, p->ib32 + 6, 1, 4, 1);\n"
      "    render_command c2(c->cb, 2);\n"
-     "    c2.draw_indexed_primitives(primitive_type::triangle, 6, ib16 + 6, 1, 8, 2);\n"
+     "    c2.draw_indexed_primitives(primitive_type::triangle, 6, p->ib16 + 6, 1, 8, 2);\n"
      "    render_command c5(c->cb, 5);\n"
      "    c5.reset();\n"
      "}\n"
      // WebKit's vsICB shape: a vertex shader, rasterization off, replaces a draw by an empty one
-     "vertex void vclamp(device Container *c [[buffer(0)]], device uint *ib32 [[buffer(1)]], uint vid [[vertex_id]]) {\n"
+     "vertex void vclamp(device Container *c [[buffer(0)]], const device Ptrs *p [[buffer(1)]], uint vid [[vertex_id]]) {\n"
      "    render_command cmd(c->cb, 4);\n"
-     "    cmd.draw_indexed_primitives(primitive_type::triangle, 0u, ib32, 1, 16, 4);\n"
+     "    cmd.draw_indexed_primitives(primitive_type::triangle, 0u, p->ib32, 1, 16, 4);\n"
      "}\n";
 
 static uint64_t nmx_registry_id(void)
@@ -134,6 +137,8 @@ int main(int argc, char **argv)
         id<MTLBuffer> cb = [dev newBufferWithBytes:colors length:sizeof colors options:MTLResourceStorageModeShared];
         id<MTLBuffer> ib32 = [dev newBufferWithBytes:i32 length:sizeof i32 options:MTLResourceStorageModeShared];
         id<MTLBuffer> ib16 = [dev newBufferWithBytes:i16 length:sizeof i16 options:MTLResourceStorageModeShared];
+        const uint64_t ptrs[2] = { ib32.gpuAddress, ib16.gpuAddress };
+        id<MTLBuffer> pb = [dev newBufferWithBytes:ptrs length:sizeof ptrs options:MTLResourceStorageModeShared];
 
         MTLIndirectCommandBufferDescriptor *idesc = [MTLIndirectCommandBufferDescriptor new];
         idesc.commandTypes = MTLIndirectCommandTypeDraw | MTLIndirectCommandTypeDrawIndexed;
@@ -170,8 +175,9 @@ int main(int argc, char **argv)
         id<MTLComputeCommandEncoder> ce = [cmd computeCommandEncoder];
         [ce setComputePipelineState:enc];
         [ce setBuffer:container offset:0 atIndex:0];
-        [ce setBuffer:ib32 offset:0 atIndex:1];
-        [ce setBuffer:ib16 offset:0 atIndex:2];
+        [ce setBuffer:pb offset:0 atIndex:1];
+        [ce useResource:ib32 usage:MTLResourceUsageRead];
+        [ce useResource:ib16 usage:MTLResourceUsageRead];
         [ce useResource:icb usage:MTLResourceUsageWrite];
         [ce dispatchThreads:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
         [ce endEncoding];
@@ -182,7 +188,8 @@ int main(int argc, char **argv)
         id<MTLRenderCommandEncoder> re = [cmd renderCommandEncoderWithDescriptor:rp];
         [re setRenderPipelineState:clamp];
         [re setVertexBuffer:container offset:0 atIndex:0];
-        [re setVertexBuffer:ib32 offset:0 atIndex:1];
+        [re setVertexBuffer:pb offset:0 atIndex:1];
+        [re useResource:ib32 usage:MTLResourceUsageRead stages:MTLRenderStageVertex];
         [re useResource:icb usage:MTLResourceUsageRead | MTLResourceUsageWrite stages:MTLRenderStageVertex];
         [re drawPrimitives:MTLPrimitiveTypePoint vertexStart:0 vertexCount:1];
         [re memoryBarrierWithScope:MTLBarrierScopeBuffers afterStages:MTLRenderStageVertex beforeStages:MTLRenderStageVertex];

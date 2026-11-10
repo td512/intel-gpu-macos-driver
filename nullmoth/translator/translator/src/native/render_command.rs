@@ -56,6 +56,48 @@ pub(crate) const LOWERED: [&str; 4] = [
     "air.reset_render_command",
 ];
 
+/// The ptrtoint results this pass emits for an index pointer's device address (`%nvicbN.addr`, `%nvicbN.paddr`): the
+/// emitter gives their sources an address payload (a loaded pointer, an entry buffer parameter) instead of the
+/// placeholder 0 it uses for other ptrtoints.
+pub(crate) fn is_address_name(name: &str) -> bool {
+    let name = name.strip_prefix('%').unwrap_or(name);
+    name.starts_with("nvicb") && (name.ends_with(".addr") || name.ends_with(".paddr"))
+}
+
+/// `%x = getelementptr [inbounds] iN, ptr addrspace(1) %base, i64|i32 IDX` in the current function: an index pointer
+/// formed as `p + k` is addressed as the address of `p` plus k elements (the address of a GEP result has no payload of
+/// its own in the emitter).
+#[derive(Clone)]
+struct ElementGep {
+    base: String,
+    idx_ty: String,
+    idx: String,
+    bytes: u32,
+}
+
+fn element_gep(body: &str) -> Option<(String, ElementGep)> {
+    let (lhs, rhs) = body.trim().split_once(" = getelementptr ")?;
+    let rhs = rhs.strip_prefix("inbounds ").unwrap_or(rhs);
+    let rhs = rhs.strip_prefix("nuw ").unwrap_or(rhs);
+    let parts: Vec<&str> = rhs.split(", ").collect();
+    if parts.len() != 3 || !lhs.starts_with('%') {
+        return None;
+    }
+    let bytes = match parts[0].trim() {
+        "i8" => 1,
+        "i16" => 2,
+        "i32" => 4,
+        "i64" => 8,
+        _ => return None,
+    };
+    let base = parts[1].trim().strip_prefix("ptr addrspace(1) ")?;
+    let (idx_ty, idx) = parts[2].trim().split_once(' ')?;
+    if !base.starts_with('%') || !matches!(idx_ty, "i64" | "i32") || idx.contains(' ') {
+        return None;
+    }
+    Some((lhs.to_string(), ElementGep { base: base.to_string(), idx_ty: idx_ty.to_string(), idx: idx.to_string(), bytes }))
+}
+
 pub(crate) fn lower_render_commands(san_ll: &str) -> Cow<'_, str> {
     if !LOWERED.iter().any(|name| san_ll.contains(&format!("@{name}("))) {
         return Cow::Borrowed(san_ll);
@@ -63,12 +105,18 @@ pub(crate) fn lower_render_commands(san_ll: &str) -> Cow<'_, str> {
     let mut out = String::with_capacity(san_ll.len() + 4096);
     let mut serial = 0usize;
     let mut changed = false;
+    let mut geps: std::collections::HashMap<String, ElementGep> = std::collections::HashMap::new();
     for line in san_ll.split_inclusive('\n') {
         let (body, nl) = match line.strip_suffix('\n') {
             Some(body) => (body, "\n"),
             None => (line, ""),
         };
-        match lower_line(body, serial) {
+        if body.starts_with("define ") {
+            geps.clear();
+        } else if let Some((name, gep)) = element_gep(body) {
+            geps.insert(name, gep);
+        }
+        match lower_line(body, serial, &geps) {
             Some(lowered) => {
                 out.push_str(&lowered);
                 out.push_str(nl);
@@ -235,7 +283,7 @@ impl Emit {
     }
 }
 
-fn lower_line(body: &str, serial: usize) -> Option<String> {
+fn lower_line(body: &str, serial: usize, geps: &std::collections::HashMap<String, ElementGep>) -> Option<String> {
     let (callee, shape) = if body.contains(DRAW) {
         (DRAW, Shape::Draw)
     } else if body.contains(DRAW_INDEXED16) {
@@ -331,8 +379,25 @@ fn lower_line(body: &str, serial: usize) -> Option<String> {
             let have_shift = e.load(W_IB_SHIFT);
             let ib_ty = if ib_ty.starts_with("ptr") { "ptr addrspace(1)".to_string() } else { ib_ty };
             let n = |what: &str| format!("%nvicb{serial}.{what}");
+            match geps.get(&ib).filter(|_| ib_ty == "ptr addrspace(1)") {
+                Some(g) => {
+                    e.line(&format!("{} = ptrtoint ptr addrspace(1) {} to i64", n("paddr"), g.base));
+                    if let Ok(k) = g.idx.parse::<i64>() {
+                        e.line(&format!("{} = add i64 {}, {}", n("addr"), n("paddr"), k * g.bytes as i64));
+                    } else {
+                    let idx = if g.idx_ty == "i32" {
+                        e.line(&format!("{} = sext i32 {} to i64", n("pidx"), g.idx));
+                        n("pidx")
+                    } else {
+                        g.idx.clone()
+                    };
+                    e.line(&format!("{} = mul i64 {idx}, {}", n("poff"), g.bytes));
+                    e.line(&format!("{} = add i64 {}, {}", n("addr"), n("paddr"), n("poff")));
+                    }
+                }
+                None => e.line(&format!("{} = ptrtoint {ib_ty} {ib} to i64", n("addr"))),
+            }
             for text in [
-                format!("{} = ptrtoint {ib_ty} {ib} to i64", n("addr")),
                 format!("{} = zext i32 {lo} to i64", n("lo64")),
                 format!("{} = zext i32 {hi} to i64", n("hi64")),
                 format!("{} = shl i64 {}, 32", n("hish"), n("hi64")),
@@ -387,6 +452,22 @@ mod tests {
     use super::*;
 
     const INDEXED: &str = "  tail call void @air.draw_indexed_primitives_render_command.p1i32(ptr addrspace(1) captures(none) %cb, i32 %slot, i32 %prim, i32 0, ptr addrspace(1) %ib, i32 %n, i32 %bv, i32 %bi) #4\n";
+
+    #[test]
+    fn an_index_pointer_plus_k_is_addressed_from_its_base() {
+        let call = INDEXED.replace("%ib,", "%add.ptr,");
+        let text = format!("define void @f() {{\n  %add.ptr = getelementptr inbounds i32, ptr addrspace(1) %0, i64 6\n{call}  ret void\n}}\ndefine void @g() {{\n{call}  ret void\n}}\n");
+        let out = lower_render_commands(&text).into_owned();
+        assert!(out.contains("%nvicb0.paddr = ptrtoint ptr addrspace(1) %0 to i64"), "{out}");
+        assert!(out.contains("%nvicb0.addr = add i64 %nvicb0.paddr, 24"), "{out}");
+        // another function's %add.ptr is not this one's
+        assert!(out.contains("%nvicb1.addr = ptrtoint ptr addrspace(1) %add.ptr to i64"), "{out}");
+        let dynamic = text.replace("i64 6\n", "i32 %k\n");
+        let out = lower_render_commands(&dynamic).into_owned();
+        assert!(out.contains("%nvicb0.pidx = sext i32 %k to i64"), "{out}");
+        assert!(out.contains("%nvicb0.poff = mul i64 %nvicb0.pidx, 4"), "{out}");
+        assert!(is_address_name("%nvicb3.addr") && is_address_name("nvicb0.paddr") && !is_address_name("%nvicb0.delta"));
+    }
 
     #[test]
     fn an_indexed_draw_becomes_record_stores() {
