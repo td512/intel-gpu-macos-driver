@@ -1784,8 +1784,11 @@ function Test-Admin {
 
 # The "ACPI(...)" Location path of an Arc B580 or B570 (PCI 8086:E20B / E20C) in this PC, as Device Manager shows it; "" without one.
 function Get-CardLocation {
+    # the cards this tool looks for: PCI device ids (vendor 8086), the same list as data/platforms.json "supported"
+    # (tools/parity/devices.py checks every copy in the repository)
+    $cardIds = @('E20B', 'E20C')
     try {
-        $devices = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.InstanceId -like 'PCI\VEN_8086&DEV_E20B*' -or $_.InstanceId -like 'PCI\VEN_8086&DEV_E20C*' })
+        $devices = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $i = $_.InstanceId; @($cardIds | Where-Object { $i -like "PCI\VEN_8086&DEV_$_*" }).Count -gt 0 })
         foreach ($d in $devices) {
             $paths = @((Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_LocationPaths' -ErrorAction Stop).Data)
             foreach ($l in $paths) { if ("$l" -like 'ACPI(*') { return "$l" } }

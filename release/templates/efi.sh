@@ -137,11 +137,19 @@ hpm_state() { # same|different|absent|unknown, as kext_state; "different" also f
     else echo different; fi
 }
 
+# the cards efi.sh looks for: PCI device ids (vendor 8086), the same list as data/platforms.json "supported"
+# (tools/parity/devices.py checks every copy in the repository)
+CARD_IDS="e20b e20c"
 # the ACPI path of the B580's upstream port (the bridge two PCI levels above the GPU), e.g. \_SB.PC00.PEG1.PEGP;
 # "none" when that port has no ACPI name, nothing when there is no B580
 card_acpi_path() {
     if [ -n "${INTELXE_CARD_ACPI_PATH+x}" ]; then printf '%s\n' "$INTELXE_CARD_ACPI_PATH"; return 0; fi
-    { if [ -n "${INTELXE_IOREG_FILE:-}" ]; then cat "$INTELXE_IOREG_FILE"; else ioreg -p IOService -w0 -l 2>/dev/null || true; fi; } | awk '
+    { if [ -n "${INTELXE_IOREG_FILE:-}" ]; then cat "$INTELXE_IOREG_FILE"; else ioreg -p IOService -w0 -l 2>/dev/null || true; fi; } | awk -v ids="$CARD_IDS" '
+        BEGIN {   # ioreg shows a device id little-endian: e20b is <0be20000>
+            k = split(ids, a, " "); re = ""
+            for (i = 1; i <= k; i++) re = re (i > 1 ? "|" : "") substr(a[i], 3, 2) substr(a[i], 1, 2) "0000"
+            re = "\"device-id\" = <(" re ")>"
+        }
         /\+-o / {
             c = index($0, "+-o")
             while (n > 0 && col[n] >= c) n--
@@ -150,7 +158,7 @@ card_acpi_path() {
         }
         n == 0 || done { next }
         /"acpi-path" = "/ { s = $0; sub(/.*"acpi-path" = "/, "", s); sub(/".*/, "", s); acpi[n] = s }
-        /"device-id" = <0[bc]e20000>/ { did[n] = 1 }   # Arc B580 (e20b) or B570 (e20c)
+        $0 ~ re { did[n] = 1 }   # one of CARD_IDS
         /"vendor-id" = <86800000>/ { vid[n] = 1 }
         pci[n] && did[n] && vid[n] {
             done = 1; up = 0

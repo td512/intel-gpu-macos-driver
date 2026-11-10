@@ -5,7 +5,8 @@
 # package's IntelXe.kext and SSDT-ARCOFF.aml are stand-ins (and the 0.1.3 table, for adapting it). Checks status, plan,
 # apply, settings, undo, the plan hash, a different kext, the ACPI path check, SSDT-ARCOFF adapted to other ports (with
 # iasl, when there is one, to disassemble and compare), an earlier B580.kext entry, the boot-path and the ioreg parsing;
-# HybridPM.kext by CPU (hybrid with and without Lilu, an existing entry, an earlier build, not hybrid), and its undo.
+# HybridPM.kext by CPU (hybrid with and without Lilu, an existing entry, an earlier build, not hybrid), and its undo;
+# last, tools/parity/devices.py (efi.sh's CARD_IDS and the other copies of the supported-device list).
 set -uo pipefail
 R=$(cd "$(dirname "$0")" && pwd)
 S=$R/templates/efi.sh
@@ -232,6 +233,9 @@ got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg4" "$S" --pac
 grep -v 0be20000 "$ROOT/ioreg" > "$ROOT/ioreg3"
 got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg3" "$S" --package "$P" --efi "$F" --status | sed -n 's/^card_acpi_path=//p')
 [ -z "$got" ] && ok "ioreg: no card, no path" || bad "ioreg without a card: $got"
+sed 's/<0be20000>/<0de20000>/' "$ROOT/ioreg" > "$ROOT/ioreg5"   # 8086:e20d, a BMG-G21 id outside CARD_IDS
+got=$(env -u INTELXE_CARD_ACPI_PATH INTELXE_IOREG_FILE="$ROOT/ioreg5" "$S" --package "$P" --efi "$F" --status | sed -n 's/^card_acpi_path=//p')
+[ -z "$got" ] && ok "ioreg: an id efi.sh does not support, no path" || bad "ioreg with 8086:e20d: $got"
 
 # SSDT-ARCOFF adapted to another port. The table: the package's, or (with stand-ins) the 0.1.3 SSDT-ARCOFF.aml, which
 # iasl 20260408 builds from efi/SSDT-ARCOFF.dsl
@@ -438,6 +442,10 @@ has "a package without HybridPM.kext: a note" "$ROOT/hplan" "this package has no
 hasnt "... and no HybridPM change" "$ROOT/hplan" "EFI/OC/Kexts/HybridPM.kext"
 [ "$("$S" --package "$PN" --efi "$F3" --status | sed -n 's/^hybridpm_package=//p')" = no ] && ok "... and hybridpm_package=no" || bad "hybridpm_package for a package without it"
 export INTELXE_CPU_BRAND='Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz'
+
+# efi.sh's CARD_IDS and every other copy of the supported-device list = data/platforms.json "supported"
+if out=$(python3 "$R/../tools/parity/devices.py" 2>&1); then ok "supported-device lists: $(tail -1 <<< "$out")"
+else bad "supported-device lists differ from data/platforms.json:"; grep -v '^ok' <<< "$out"; fi
 
 echo "== $fails failure(s)"
 exit $fails

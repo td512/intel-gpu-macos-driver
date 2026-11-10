@@ -8,6 +8,7 @@
 # Checks (all must pass, also for --publish):
 #   - VERSION in the repository, the branch (main), a clean work tree (untracked files only warn);
 #   - the tag vVERSION exists neither here nor on origin or gitlab; origin/main is an ancestor of HEAD (a fast-forward);
+#   - every copy of the supported-device list matches data/platforms.json (tools/parity/devices.py);
 #   - OUT_DIR holds the package zips of package.sh and the app, built after the last commit to what goes into them
 #     (code, scripts, templates, packager; not documentation), and its .sha256 matches them;
 #   - the versions inside: IntelXe.kext and HybridPM.kext in the -efi.zip, IntelXe Manager in its zip, install.sh in the
@@ -19,7 +20,7 @@
 # Publishing: git tag -a vVERSION; git push origin main vVERSION; the same to gitlab (the local GitLab mirror);
 # gh release create vVERSION <zips> --notes-file release/notes-VERSION.md. Each step stops the rest on failure.
 set -uo pipefail
-[ $# -ge 2 ] || { sed -n '3,22p' "$0"; exit 2; }
+[ $# -ge 2 ] || { sed -n '3,21p' "$0"; exit 2; }
 VER=$1 OUT=$2 PUBLISH=no
 [ "${3:-}" = --publish ] && PUBLISH=yes
 R=$(cd "$(dirname "$0")/.." && pwd)
@@ -49,6 +50,8 @@ for rem in origin gitlab; do
 		[ -z "$out" ] && ok "tag v$VER is new on $rem" || bad "tag v$VER already on $rem"
 	else warn "$rem not reachable (tag not checked there)"; fi
 done
+if out=$(python3 tools/parity/devices.py 2>&1); then ok "supported-device lists match data/platforms.json ($(tail -1 <<< "$out" | sed 's/^devices: //'))"
+else bad "supported-device lists differ from data/platforms.json: $(grep -c '^FAIL' <<< "$out") (python3 tools/parity/devices.py)"; fi
 git fetch -q origin main 2>/dev/null && { git merge-base --is-ancestor origin/main HEAD && ok "origin/main is an ancestor of HEAD ($(git rev-list --count origin/main..HEAD) commits to push)" || bad "origin/main is not an ancestor of HEAD: not a fast-forward"; } || warn "origin not fetched"
 
 # --- packages
