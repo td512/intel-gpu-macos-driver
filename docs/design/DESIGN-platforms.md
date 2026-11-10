@@ -191,3 +191,76 @@ Other G21 cards (B50/B60 Pro: e211, e212, …) share the supported G21 entry. Th
    `graphicsVerx100 >= 1270`, the IRQ handler by `>= 1210`, and an integrated memory path selected by `isDgfx`.
 4. Bring its workaround rules over from `xe_wa_oob.rules` / `xe_wa.c`.
 5. Extend `tests/platform_test.cpp` with that family's expected values.
+
+## 4. The userland side
+
+> Added 2026-11-10 (branch `userland-platform`). This section was checked against the files outside `kernel/`.
+
+Almost nothing outside the kernel decides by device.
+
+- **Metal plugin (`nullmoth/plugin`).**
+  - It decides by GPU vendor, which it reads from the PCI device above NMXAccel (`nvmtl_vk_vendor`, 0x8086 = ANV).
+  - It names the device, VideoToolbox's codecs included, after IntelXe's `model` property (`nvmtl_registry_model`).
+  - It sizes memory from ANV's Vulkan heaps and budget.
+  - A compute pipeline's execution width is the SIMD width ANV compiled it for.
+  - Its "B580" mentions are comments and measurement notes.
+- **Translator.** The Rust translator holds no hardware facts. Its three mentions are comments.
+- **Mesa.** Mesa picks its code paths from the device id, through its own device table (`intel_device_info`), so the
+  repository ships no device configuration for it. The patches name the B580 only in comments. The `0xb580xxxx`
+  capability numbers are a frozen ABI.
+
+What is device-specific is the list of cards the driver attaches to. Each part keeps its own copy of that list, in its own
+language. `data/platforms.json` `"supported"` is now the one source of that list:
+
+- each device's id, the name that messages use, the kernel `model` string and whether the project has tested it;
+- the kernel descriptor that covers the devices (`kernel_ids`).
+
+`tools/parity/devices.py` reads every copy and fails when one differs. `release/test-efi-flow.sh` and
+`release/release.sh` run it.
+
+| copy | form | checked |
+|---|---|---|
+| `kernel/IntelXe/build.py` | IntelXe IOPCIMatch | exact list |
+| `nullmoth/kexts/NVRM/accel/Info-NMX-IntelXe.plist` | NMXAccel IOPCIPrimaryMatch | exact list |
+| `kernel/IntelXe/tests/platform_test.cpp` | `kMatch` | exact list |
+| `kernel/IntelXe/xe_platform.cpp` | the `kernel_ids` array of a `kXePlatforms` entry | holds every id |
+| `release/templates/install.sh`, `release/install.sh` | `CARDS=("e20b B580" "e20c B570 untested")` | ids, names, untested = not `tested` |
+| `release/templates/efi.sh` (the app carries it) | `CARD_IDS="e20b e20c"` | exact list |
+| `app/Sources/Model.swift` | `supportedCards` | ids and names |
+| `windows/IntelXe-EFI.ps1` | `$cardIds` in `Get-CardLocation` | exact list |
+| the READMEs, `README-INSTALL*.md`, `efi/README.md`, `tools/parity/platforms.py`; `IntelXe.cpp` | text | names every id and card (`IntelXe.cpp`: every `model`) |
+
+Nothing is generated: each copy stays a plain literal that can be read in its own file. On the B580 and the B570 the
+install check, efi.sh, the app and the Windows tool behave as before. Their messages are built from the list and come
+out the same.
+
+Deliberately left alone:
+
+- the Arc B580 test fixtures: xemac's `XEMAC_FAKE` device (`FAKE_DEVICE 0xe20b`, the BMG hwconfig, 20.01/13.01,
+  12 GB) and the app's `SelfTest` facts;
+- the frozen names: the `'B580'` IOServiceOpen type, `0xb580xxxx`, and `B580.kext` as the earlier name;
+- prose and measurement notes.
+
+### What a new family needs outside the kernel
+
+The ids come first. Add the device to `"supported"` and run `python3 tools/parity/devices.py`; it names every copy to
+change. The kernel side is in section 3. After that, the work is in these places:
+
+- **Device detection by name.** Detection that matches the marketing name assumes "Arc": the app's GPU test verdict
+  (`GPUTest.swift`, which also holds the B580's expected 13 TFLOP/s and 400 GB/s), `tools/clbench` and
+  `user/tests/metal/cl_lat.c`. A card that is not called "Arc" (an LNL or PTL iGPU) needs a better match. The best match
+  is the IntelXe `model` property or `DRM_XE_DEVICE_QUERY_CONFIG`.
+- **B580 figures in the app.**
+  - The Settings clock range (`Default (1200–2850 MHz)`) and the clock chart's fallback top (2850) are B580 figures.
+  - The live maximum already comes from `debug.intelxe.sensors` (RP0).
+  - On a B570 only the label is off: it shows the B580's range.
+- **Discrete-only steps.**
+  - efi.sh, the Windows tool and SSDT-ARCOFF look for a PCIe card two bridges below the root port, and they set
+    `ResizeAppleGpuBars`.
+  - An integrated GPU has no such port and no VRAM BAR, so these steps would be skipped or replaced for one.
+  - The same holds for the install guide's 1 GB BAR window.
+- **Video.** The VideoToolbox codecs register by what ANV offers. `videotoolbox/encoder/intelxevenc.c`
+  `IntelXeVEnc_Register` (the test tools' path) still names its encoders "Intel Arc B580 …". The plugin's own
+  registration names them after the `model` property.
+- **Mesa.** Mesa's own support for the family. For a pre-Xe2 family, the Xe2 video patches (`mesa/patches` 0010–0095)
+  would need a check against that family's video engine.
