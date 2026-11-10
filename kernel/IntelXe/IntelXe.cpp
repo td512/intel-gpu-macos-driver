@@ -683,6 +683,7 @@ bool IntelXe::start(IOService *provider) {
 	sysctl_register_oid(&sysctl__debug_intelxe_fd_stats);
 	sysctl_register_oid(&sysctl__debug_intelxe_display_irqs);
 	sysctl_register_oid(&sysctl__debug_intelxe_dump);
+	xeAspmRegister(true);   // debug.intelxe.aspm, aspm_l1 (xe_aspm.cpp)
 	INTELXE_PM_OIDS(INTELXE_REG_OID)
 	publishVram();   // VRAM size for System Information (again after the bring-up)
 	// The GPU's name in About This Mac / System Information comes from the PCI device's "model" (data, NUL included,
@@ -759,6 +760,7 @@ void IntelXe::stop(IOService *provider) {
 	INTELXE_PM_OIDS(INTELXE_UNREG_OID)
 	if (gFwHold && bar0) { fwHold(false); gFwHold = 0; }
 	irqTeardown();   // while BAR0 is still mapped: the tile master enable is cleared before the handler goes
+	xeAspmRegister(false);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_dump);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_display_irqs);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_surfvram_wsfull);
@@ -1544,6 +1546,7 @@ IOReturn IntelXe::setPowerState(unsigned long ordinal, IOService *) {
 		pwrSuspendSent = false;
 		if (!suspended) powerEvent(2);   // the device level came back (or was never suspended)
 		else LOG("resume: device not back, display not told");
+		if (!suspended) xeAspmWake();   // debug.intelxe.aspm_l1 0 or 1: again where the wake lost it (no-op at -1)
 	}
 	return kIOPMAckImplied;
 }
@@ -3336,7 +3339,7 @@ int IntelXe::pciDump() {
 
 extern "C" {
 static IOLock **const kLocks[] = {&gDevLock, &gH2gLock[0], &gH2gLock[1], &gG2hLock[0], &gG2hLock[1], &gFwLock, &gSayLock,
-	&gDispLock, &gGgttLock, &gPmtLock};
+	&gDispLock, &gGgttLock, &gPmtLock, &gAspmLock};
 kern_return_t IntelXe_stop(kmod_info_t *, void *);
 kern_return_t IntelXe_start(kmod_info_t *, void *) {
 	bool ok = true;
