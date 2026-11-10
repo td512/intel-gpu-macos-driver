@@ -18,7 +18,7 @@
 REGRESS_HOME=${REGRESS_HOME:-$HOME/b580/regress}
 [ -f "${REGRESS_CONF:-$REGRESS_HOME/regress.conf}" ] && . "${REGRESS_CONF:-$REGRESS_HOME/regress.conf}"
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
-BIN=${REGRESS_BIN:-$REGRESS_HOME/bin}                     # mtl_smoke mtl_cube_read mtl_props mtl_f32filter ufence vtdec vcbench srv
+BIN=${REGRESS_BIN:-$REGRESS_HOME/bin}                     # mtl_smoke mtl_cube_read mtl_props mtl_f32filter mtl_timestamps mtl_gpu_icb ufence vtdec vcbench srv
 CLIPS=${REGRESS_CLIPS:-$REGRESS_HOME/clips}               # h264.* and hevc.* unless REGRESS_H264 / REGRESS_HEVC name files
 GB=${REGRESS_GB:-/Applications/Geekbench 7.app/Contents/Resources/geekbench_avx2}
 GB_DEVICE=${REGRESS_GB_DEVICE:-}                          # --gpu-device-id for Geekbench, empty: Geekbench's default
@@ -173,6 +173,22 @@ check_f32filter() {
 		else { print "FAIL\t$p/3 pass", (@x ? ", failed: @x" : ""), " (exit $st)\n" }' "$1" "$2"
 }
 
+# check_timestamps FILE STATUS: mtl_timestamps ends in "PASS (0 failed)"; numbers: the last 4N/N spin ratio
+check_timestamps() {
+	perl -e 'my $st = $ARGV[1]; open my $f, "<", $ARGV[0] or die; my ($ok, $r, @x) = (0, "");
+		while (<$f>) { $ok = 1 if /^PASS \(0 failed\)/; $r = $1 if /^compute: .*\(x([\d.]+)\)/; push @x, $1 if /^\s*FAIL: (.*)/ }
+		if ($ok && !@x && $st == 0) { print "PASS\tstage-boundary timestamps in ns", ($r ne "" ? ", 4N/N x$r" : ""), "\n" }
+		else { print "FAIL\t", (@x ? $x[0] : "no PASS line"), " (exit $st)\n" }' "$1" "$2"
+}
+
+# check_gpu_icb FILE STATUS: mtl_gpu_icb, six "PASS slot N" lines (GPU-encoded draws, drawIndexed u32/u16, vsICB, reset)
+check_gpu_icb() {
+	perl -e 'my $st = $ARGV[1]; open my $f, "<", $ARGV[0] or die; my ($p, @x) = (0);
+		while (<$f>) { $p++ if /^PASS slot \d/; push @x, $1 if /^FAIL slot (\d)/ }
+		if ($p == 6 && !@x && $st == 0) { print "PASS\t6/6 slots (GPU draw, drawIndexed u32/u16, CPU, vsICB, reset)\n" }
+		else { print "FAIL\t$p/6 pass", (@x ? ", failed slots: @x" : ""), " (exit $st)\n" }' "$1" "$2"
+}
+
 # vtdec_md5s FILE: the per-frame md5s of a vtdec --md5 run, one per line, in output order
 vtdec_md5s() { perl -ne 'print "$1\n" if /^\s*frame \d+ .* md5 ([0-9a-f]{32})/' "$1"; }
 
@@ -303,7 +319,7 @@ table() {
 
 # ── command line ───────────────────────────────────────────────────────────────────────────────────────────────────────
 MODE=quick; ONLY=""; SKIP=""; FORCE=0; NONET=0; SAVEREF=0
-STAGES_QUICK="kext platform sensors ufence metal cube_read props f32filter vtdec_h264 vtdec_hevc stats"
+STAGES_QUICK="kext platform sensors ufence metal cube_read props f32filter timestamps gpu_icb vtdec_h264 vtdec_hevc stats"
 STAGES_FULL="vcbench webgpu gb_metal gb_opencl"
 usage() {
 	sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'
@@ -331,6 +347,8 @@ quick:
   cube_read   \$BIN/mtl_cube_read: every cube texel read correct
   props       \$BIN/mtl_props: location 1, no exception
   f32filter   \$BIN/mtl_f32filter: 3 PASS
+  timestamps  \$BIN/mtl_timestamps: Metal counter sampling at stage boundaries, ns, PASS (0 failed)
+  gpu_icb     \$BIN/mtl_gpu_icb: draws a shader encodes into an indirect command buffer, 6/6 slots
   vtdec_h264  \$BIN/vtdec --md5 twice on \$CLIPS/h264.* (or REGRESS_H264): hardware, no errors, same md5s
   vtdec_hevc  the same on \$CLIPS/hevc.* (or REGRESS_HEVC)
   stats       debug.intelxe.stats at start and end: no new GT/GuC resets, watchdog bans, TLB timeouts
@@ -447,6 +465,14 @@ fi
 if want f32filter && need mtl_f32filter f32filter; then
 	run_bin 60 "$RUN/f32filter.log" "$BIN/mtl_f32filter"; st=$?
 	result f32filter "$(check_f32filter "$RUN/f32filter.log" $st)"
+fi
+if want timestamps && need mtl_timestamps timestamps; then
+	run_bin 60 "$RUN/timestamps.log" "$BIN/mtl_timestamps"; st=$?
+	result timestamps "$(check_timestamps "$RUN/timestamps.log" $st)"
+fi
+if want gpu_icb && need mtl_gpu_icb gpu_icb; then
+	run_bin 60 "$RUN/gpu_icb.log" "$BIN/mtl_gpu_icb"; st=$?
+	result gpu_icb "$(check_gpu_icb "$RUN/gpu_icb.log" $st)"
 fi
 
 # vtdec: one clip, twice, every frame's md5

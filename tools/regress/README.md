@@ -42,6 +42,8 @@ you pass `--force`. Safari may reopen the test tabs at its next launch.
 | `cube_read` | quick | `mtl_cube_read`: `PASS: every cube texel read returned its own texel` |
 | `props` | quick | `mtl_props` reports `location 1` and throws no exception |
 | `f32filter` | quick | `mtl_f32filter`: three PASS lines (R32F, RG32F, RGBA32F) |
+| `timestamps` | quick | `mtl_timestamps`: counter sampling at stage boundaries in nanoseconds, `PASS (0 failed)` |
+| `gpu_icb` | quick | `mtl_gpu_icb`: draws a shader encodes into an indirect command buffer, six `PASS slot` lines |
 | `vtdec_h264`, `vtdec_hevc` | quick | `vtdec <clip> 60 --md5` runs twice. Both runs use the hardware decoder, report 0 errors and give the same per-frame md5s. The numbers include a 12-digit digest of the set of md5s. With `--save-ref` that digest becomes the reference, and later runs must match it |
 | `stats` | quick | the `debug.intelxe.stats` counters at the start and end of the run. A new GT reset, GuC context reset, watchdog ban, dead H2G channel, TLB timeout or WEDGED gives a FAIL. Other bans, page faults, leaked queues, FAST_REQUEST failures and failed BO moves give a WARN |
 | `vcbench:<set>` | full | each Video Codec Test set. `vcbench` runs Apple's hardware decoder in its own output format, then Apple's software decoder asked for that same format, both with `VCB_PS=1 VCB_SUM=1`, decoding every sample once. Every picture's checksum must match. The numbers add 3 s of single-session hardware throughput |
@@ -64,7 +66,7 @@ the result when nobody is logged in at the console, since the login window's red
 By default everything lives under `~/b580/regress` (`REGRESS_HOME`):
 
 ```
-~/b580/regress/bin/      mtl_smoke mtl_cube_read mtl_props mtl_f32filter ufence vtdec vcbench srv   (x86_64)
+~/b580/regress/bin/      mtl_smoke mtl_cube_read mtl_props mtl_f32filter mtl_timestamps mtl_gpu_icb ufence vtdec vcbench srv   (x86_64)
 ~/b580/regress/clips/    h264.<ext>  hevc.<ext>    one short H.264 and one HEVC clip (only the first 60 frames are decoded)
 ~/b580/regress/ref/      vtdec_*.digest            written by --save-ref
 ~/b580/regress/regress.conf                        optional settings (bash VAR=value lines, read first)
@@ -75,7 +77,7 @@ By default everything lives under `~/b580/regress` (`REGRESS_HOME`):
 The machine has no compiler, so build the binaries on the build Mac and copy them over:
 
 ```sh
-nullmoth/build/build-intelxe.sh tests        # mtl_smoke, mtl_cube_read, mtl_props, mtl_f32filter (and xlate_check)
+nullmoth/build/build-intelxe.sh tests        # mtl_smoke, mtl_cube_read, mtl_props, mtl_f32filter, mtl_timestamps, mtl_gpu_icb (and xlate_check)
 clang -arch x86_64 -mmacosx-version-min=15.0 -O2 -I kernel/IntelXe/uapi -o ufence user/tests/kernel/ufence.c -framework IOKit
 clang -arch x86_64 -mmacosx-version-min=15.0 -fobjc-arc -O1 -o vtdec videotoolbox/tests/vtdec.m -framework Foundation \
       -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework Metal

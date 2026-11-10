@@ -160,6 +160,18 @@ EOF
 expect f32filter "PASS" "$(check_f32filter "$T/f32" 0)" "3/3"
 sed 's/^PASS RG32Float: 0.0000 0.5000/FAIL RG32Float: 0.0000 0.0000/' "$T/f32" >"$T/f32-bad"
 expect f32filter-wrong "FAIL" "$(check_f32filter "$T/f32-bad" 0)" "failed: RG32Float (exit 0)"
+cat >"$T/ts" <<'EOF'
+compute: N 10.334 ms, 4N 37.517 ms (x3.63)
+compute: N 4.488 ms, 4N 18.282 ms (x4.07)
+PASS (0 failed)
+EOF
+expect timestamps "PASS" "$(check_timestamps "$T/ts" 0)" "4N/N x4.07"
+printf '  FAIL: the 4N pass took 70%% of its command buffer\nFAIL (1 failed)\n' >"$T/ts-bad"
+expect timestamps-wrong "FAIL" "$(check_timestamps "$T/ts-bad" 4)" "the 4N pass took 70% of its command buffer (exit 4)"
+for k in 0 1 2 3 4 5; do echo "PASS slot $k x"; done >"$T/icb"
+expect gpu_icb "PASS" "$(check_gpu_icb "$T/icb" 0)" "6/6 slots"
+sed 's/^PASS slot 1/FAIL slot 1/' "$T/icb" >"$T/icb-bad"
+expect gpu_icb-wrong "FAIL" "$(check_gpu_icb "$T/icb-bad" 4)" "5/6 pass, failed slots: 1 (exit 4)"
 
 # ── vtdec --md5 (two runs) ─────────────────────────────────────────────────────────────────────────────────────────────
 vt() {   # CODEC FRAMES SALT HW: a vtdec --md5 run whose md5s are made from the frame number (and SALT for one frame)
