@@ -224,7 +224,10 @@ lists every option. The IntelXe Manager app has the same on its EFI page.
 **On Windows**, `IntelXe-EFI.ps1` in the `-efi.zip` does steps 1 and 3 (*Driver: plan*, *Driver: apply*) in the EFI
 folder you choose, with a backup and an undo. Windows cannot check the ACPI path the way `efi.sh` does on macOS, so it
 adds `SSDT-ARCOFF.aml` only when you tick its box and give your card's path from step 2 (it reads it from Device
-Manager when Windows runs on the PC with the card). It does not add `HybridPM.kext` yet. See `README-Windows.md` in the zip.
+Manager when Windows runs on the PC with the card); for a path other than the shipped table's it adapts a copy of the
+table, as `efi.sh` does. On a 12th-14th gen hybrid Intel CPU it adds `HybridPM.kext` too, by the CPU of the PC it runs
+on: run it on the PC that boots the EFI. These two steps are checked on macOS against `efi.sh` but have not run on
+Windows yet. See `README-Windows.md` in the zip.
 
 1. Copy `IntelXe.kext` to `EFI/OC/Kexts/` and add it under `Kernel > Add`: `BundlePath IntelXe.kext`,
    `ExecutablePath Contents/MacOS/IntelXe`, `PlistPath Contents/Info.plist`, `Enabled true`. This is the GPU driver
@@ -269,7 +272,8 @@ repository.
 **Adding it:** on the PC, stage 4 does it: `efi.sh --plan` / `sudo ./efi.sh --apply` and the app's EFI page copy
 `HybridPM.kext` with `IntelXe.kext` when the CPU's name is one of these, and add its entry right below `Lilu.kext`'s
 (an existing entry is turned on; an earlier build under the same name is replaced). They leave it out, with a note,
-when the EFI does not load Lilu. `IntelXe-EFI.ps1` on Windows does not add it yet. By hand:
+when the EFI does not load Lilu. `IntelXe-EFI.ps1` on Windows does the same, by the CPU of the PC it runs on (not yet
+run on Windows). By hand:
 
 1. It is a Lilu plugin. Most OpenCore EFIs already have `Lilu.kext` for VirtualSMC; if yours has not, add it from
    [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases) (1.7.2 on the test machine). This package does not
@@ -380,8 +384,8 @@ off as well (the switch is the NVRAM variable).
 the translator fix, the B570's ID, the GPU clock and temperature readings, direct submission); Mesa and the video
 codecs are those of 0.1.3. Install the package (the app: *Download v0.1.4*, then *Install this package*; or
 `sudo ./install.sh --apply`), then replace `IntelXe.kext` in the EFI before you restart (the app's EFI page or
-`sudo ./efi.sh --apply` on macOS, which also add `HybridPM.kext` on a hybrid Intel CPU; `IntelXe-EFI.ps1` on Windows;
-or by hand; its `config.plist` entry stays as it is). If you installed the system-volume copy (3.3), install this
+`sudo ./efi.sh --apply` on macOS, or `IntelXe-EFI.ps1` on Windows, which also add `HybridPM.kext` on a hybrid Intel
+CPU; or by hand; its `config.plist` entry stays as it is). If you installed the system-volume copy (3.3), install this
 package's too (the Driver page's *Safari and WebKit*, or `sudo ./system-volume/ssv-install.sh --apply`), so that
 Safari gets the new Metal driver. The GuC low-latency hint that keeps the GPU clock up for apps is off by default
 from 0.1.4 (with it, a GPU fault followed a long idle in testing); the app's *Power and app* page (*Fast GPU response

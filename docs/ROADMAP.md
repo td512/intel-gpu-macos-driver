@@ -34,7 +34,10 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   Geekbench runs).
 - **Open:** the GuC `MEMORY_CAT_ERROR` after a long idle (3 of 6 cold runs with the GuC low-latency hint on, 0 of 4
   without; the replacement queue never starts and a GT reset follows). The hint is opt-in until the root cause is
-  known; the engine dump in the G2H log (0.1.4) is there to catch the next one.
+  known; the engine dump in the G2H log (0.1.4) is there to catch the next one. Two such faults on 9-10 Nov came
+  without a page-fault descriptor (a VM without fault mode touched an unmapped address); the candidates are a BAR-window
+  BO move or an unbind racing a job or its TLB invalidation, and the dump now records the moves, the TLB invalidations
+  and the VM's last unbind, remap and bind (10 Nov).
 
 ### Compute (OpenCL and Metal compute)
 - **Done (0.1.4):** the translator turns an `or` of disjoint bits back into an add, so Mesa vectorizes the loads it
@@ -45,6 +48,10 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   at 64% of Windows.
 - **Done (0.1.4):** relaxed threadgroup atomics stay relaxed in the translator, so Mesa no longer fences shared local
   memory around them (clbench `hist256`'s loop now matches IGC's).
+- **Done (10 Nov, kernel side for Intel's compute runtime):** user fences (`DRM_XE_SYNC_TYPE_USER_FENCE`,
+  `DRM_IOCTL_XE_WAIT_USER_FENCE`) as xe has them, and the `GEM_CREATE` extension chain checked as `xe_bo.c` does; the
+  compute-runtime items left in `docs/parity/` went from 35 to 24. Host tests in `kernel/IntelXe/tests/uapi_test.cpp`,
+  the GPU test in `user/tests/kernel/ufence.c`. A Level Zero / oneAPI runtime on macOS is still to come.
 
 ### Descriptor model
 - Stage 1 (front end without per-draw atomics or retain/release, address table, bind cache): done. Stage 2, the descriptor-buffer model, is in the plugin behind `NVMTL_DESC_MODEL=buffer` and off by default until it has been soaked (`docs/design/DESCRIPTOR-MODEL.md`).
@@ -75,9 +82,10 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Done (0.1.4):** `HybridPM.kext` published (`kernel/HybridPM/`, a Lilu plugin): it corrects XCPM's HWP requests on
   Alder Lake / Raptor Lake hybrid CPUs, which held the P-cores low and busy cores at 800 MHz (i7-14700K: one thread
   ~55 -> 128 M it/s; Geekbench GPU scores about a third higher). It leaves Core Ultra, CPUs without E-cores and other
-  CPUs alone. Optional; `efi.sh` and the app's EFI page add it below Lilu at stage 4 when the CPU needs it (Lilu is
-  required and not shipped).
-- **Next:** the Windows EFI tool (`IntelXe-EFI.ps1`) adds HybridPM too; it does not yet.
+  CPUs alone. Optional; `efi.sh`, the app's EFI page and the Windows EFI tool (`IntelXe-EFI.ps1`) add it below Lilu at
+  stage 4 when the CPU needs it (Lilu is required and not shipped). The U and P laptop models (e.g. i7-1255U, i7-1360P)
+  are recognised too.
+- **Next:** run the Windows EFI tool's HybridPM step on Windows (checked on macOS against `efi.sh` only).
 
 ### Integrated GPU
 - Out of scope for this stack: the test machine runs with the CPU's integrated GPU off. A headless iGPU next to the B580
@@ -100,8 +108,11 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Done (0.1.4, experimental):** Zink for native CGL/NSOpenGL applications, one application at a time
   (`zink-gl/cgl`, `cglzink-app.sh`: a launcher that starts the app with the layer). GZDoom MAP01 uncapped: ~1910 fps
   against ~1600 on Apple's OpenGL.
-- **Next:** a switch for every OpenGL application (with AMFI off `launchctl setenv` passes `DYLD_*`, but it would load
-  the layer into every process); drawing into IOSurfaces (browsers) and CGL pbuffers.
+- **Done (10 Nov, experimental, off by default):** a switch for every native OpenGL application
+  (`zink-gl/install.sh --global-gl on`): with AMFI off a LaunchAgent puts the small `libcglzink-boot.dylib` into the
+  session's `DYLD_INSERT_LIBRARIES`, and it loads the layer only into application bundles that are not Apple's (Chess
+  excepted), browsers, Electron apps or video players. Not yet tested on the B580.
+- **Next:** that switch on the B580; drawing into IOSurfaces (browsers) and CGL pbuffers.
 - The LaunchAgent sets `JAVA_TOOL_OPTIONS` at login, after apps that macOS reopens at login may already have started.
 
 ### IntelXe Manager (the app)
@@ -128,6 +139,11 @@ The kext is organized around the graphics IP version (Xe2 / graphics 20.01, medi
 | Arc Pro B60 | BMG-G21 workstation, 24 GB | device ID; larger VRAM (allocator and BAR window are already sized from the hardware) |
 | Arc Pro B70 | larger Battlemage configuration | device ID, topology; possibly display/PHY tables |
 
+Since the platform descriptors (`kernel/IntelXe/xe_platform.cpp`, 10 Nov), every BMG-G21 card shares the supported
+entry: the B50 and B60 need only their `IOPCIMatch` ID and a `model` name, then a test. BMG-G31 (e220-e223) has its own
+entry, refused until it is tested; xe's G21-only SLPC minimum (Wa_14022085890) must become conditional first
+([DESIGN-platforms.md](design/DESIGN-platforms.md)).
+
 Each needs:
 - the `IOPCIMatch` IDs;
 - a check of the per-SKU workaround and tuning tables against Linux xe (`xe_wa.c`, `xe_tuning.c`);
@@ -137,6 +153,10 @@ Each needs:
 ## Later generations
 
 These need per-generation modules, the way Linux xe separates them, rather than conditionals spread through one file.
+The first step is in place (10 Nov): `kernel/IntelXe/xe_platform.cpp` describes every family of Linux `xe_pci.c` (IP
+versions, flags, engines, firmware) and `IntelXe.kext` refuses all but BMG-G21 at start with one log line. What each
+family still needs (memory path, LRC and PAT/MOCS tables, workarounds, display) and the order of work:
+[DESIGN-platforms.md](design/DESIGN-platforms.md).
 
 | Generation | Examples | Main new work |
 |---|---|---|

@@ -25,23 +25,23 @@ Kaynak ağaçlar / source trees: linux: torvalds/linux abf8c33470f7 (7.3.0, 2026
 | Platform | Bizim durum / our status | Kanıt / evidence | Intel | Intel kaynak / source |
 |---|---|---|---|---|
 | Arc B580 | 🟩 works | IntelXe.kext: GuC 70.72.1 + SLPC, HuC 8.2.10, RCS/BCS/CCS x2/VCS x2 through GuC submission, VRAM, xe uAPI; 2026-10-28, docs/devices/b580.md#what-works-on-the-b580 | xe (default driver) | linux xe_pci.c:414 bmg_desc (no require_force_probe), :536 INTEL_BMG_IDS |
-| B570, other BMG | ⬜ not yet | B570 (8086:E20C): matched since 0.1.4 (kernel/IntelXe/build.py IOPCIMatch 0xe20b8086 0xe20c8086, PR #2), not run on hardware; other BMG IDs: not matched | xe (default driver) | linux xe_pci.c:414 bmg_desc, :536 INTEL_BMG_IDS |
-| Lunar Lake | ⬜ not yet | no kernel support; XeProbe has its device IDs | xe (default driver) | linux xe_pci.c:399 lnl_desc (no require_force_probe) |
-| Panther Lake | ⬜ not yet | no kernel support; XeProbe has its device IDs | xe (default driver) | linux xe_pci.c:441 ptl_desc (no require_force_probe), :537-538 PTL/WCL IDs |
-| Meteor/Arrow Lake | ⬜ not yet | no kernel support; XeProbe has its device IDs | xe, require_force_probe | linux xe_pci.c:386-388 mtl_desc .require_force_probe = true; :532 ARL IDs use mtl_desc |
-| Alchemist DG2 | ⬜ not yet | no kernel support; XeProbe has its device IDs | xe, require_force_probe | linux xe_pci.c:352-358 dg2_desc .require_force_probe = true |
-| Gen12 Xe-LP | ⬜ not yet | no kernel support; XeProbe stage 1 ran on RPL-S (row below) | xe, require_force_probe | linux xe_pci.c:209-314 tgl/rkl/adl_s/adl_p/adl_n/dg1_desc .require_force_probe = true |
+| B570, other BMG | ⬜ not yet | B570 (8086:E20C): matched since 0.1.4 (kernel/IntelXe/build.py IOPCIMatch 0xe20b8086 0xe20c8086, PR #2), not run on hardware; other BMG-G21 IDs: in the supported descriptor (kernel/IntelXe/xe_platform.cpp), not matched; BMG-G31 (E220-E223): described, refused at start | xe (default driver) | linux xe_pci.c:414 bmg_desc, :536 INTEL_BMG_IDS |
+| Lunar Lake | ⬜ not yet | no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line | xe (default driver) | linux xe_pci.c:399 lnl_desc (no require_force_probe) |
+| Panther Lake | ⬜ not yet | no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line | xe (default driver) | linux xe_pci.c:441 ptl_desc (no require_force_probe), :537-538 PTL/WCL IDs |
+| Meteor/Arrow Lake | ⬜ not yet | no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line | xe, require_force_probe | linux xe_pci.c:386-388 mtl_desc .require_force_probe = true; :532 ARL IDs use mtl_desc |
+| Alchemist DG2 | ⬜ not yet | no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line | xe, require_force_probe | linux xe_pci.c:352-358 dg2_desc .require_force_probe = true |
+| Gen12 Xe-LP | ⬜ not yet | no kernel support; described in kernel/IntelXe/xe_platform.cpp, refused at start with a log line; XeProbe stage 1 ran on RPL-S (row below) | xe, require_force_probe | linux xe_pci.c:209-314 tgl/rkl/adl_s/adl_p/adl_n/dg1_desc .require_force_probe = true |
 
 ## XeProbe aşamalı yoklama (docs/PROBE-MODE.md) / XeProbe staged probe (docs/PROBE-MODE.md)
 
 | Platform | Bizim durum / our status | Kanıt / evidence | Intel | Intel kaynak / source |
 |---|---|---|---|---|
 | Arc B580 | 🟩 works | stages 1 (identity) and 2 (forcewake) on 8086:E20B (xeprobe=0xe20b); stages 3-5 not run; 2026-10-30, docs/devices/b580.md (Araçlar / Tools) | - | kernel/IntelXe/xe_probe_ids.inc kIdsBMG |
-| B570, other BMG | 🟨 same code, untested | family table entry BMG; not run on another BMG ID | - | kernel/IntelXe/xe_probe_ids.inc kIdsBMG |
-| Lunar Lake | 🟨 same code, untested | family table entry LNL (GuC image lnl); not run | - | kernel/IntelXe/xe_probe_ids.inc kIdsLNL |
-| Panther Lake | 🟨 same code, untested | family table entry PTL/WCL (GuC image ptl); not run | - | kernel/IntelXe/xe_probe_ids.inc kIdsPTL, kIdsWCL |
-| Meteor/Arrow Lake | 🟨 same code, untested | family table entry MTL/ARL (GuC image mtl); not run; media GT store test not in v1 | - | kernel/IntelXe/xe_probe_ids.inc kIdsMTL, kIdsARL |
-| Alchemist DG2 | 🟨 same code, untested | family table entry DG2/ATS-M (GuC image dg2); not run | - | kernel/IntelXe/xe_probe_ids.inc kIdsDG2, kIdsATSM |
+| B570, other BMG | 🟨 same code, untested | platform descriptor BMG; not run on another BMG ID | - | kernel/IntelXe/xe_probe_ids.inc kIdsBMG |
+| Lunar Lake | 🟨 same code, untested | platform descriptor LNL (GuC image lnl); not run | - | kernel/IntelXe/xe_probe_ids.inc kIdsLNL |
+| Panther Lake | 🟨 same code, untested | platform descriptor PTL/WCL (GuC image ptl); not run | - | kernel/IntelXe/xe_probe_ids.inc kIdsPTL, kIdsWCL |
+| Meteor/Arrow Lake | 🟨 same code, untested | platform descriptor MTL/ARL (GuC image mtl); not run; media GT store test not in v1 | - | kernel/IntelXe/xe_probe_ids.inc kIdsMTL, kIdsARL |
+| Alchemist DG2 | 🟨 same code, untested | platform descriptor DG2/ATS-M (GuC image dg2); not run | - | kernel/IntelXe/xe_probe_ids.inc kIdsDG2, kIdsATSM |
 | Gen12 Xe-LP | 🟩 works | stage 1 (identity) on RPL-S iGPU 8086:A780; stage 2 refused as designed (another driver attached); stages 3-5 not run; 2026-10-30, docs/devices/b580.md (Araçlar / Tools) | - | kernel/IntelXe/xe_probe_ids.inc kIdsTGL ... kIdsDG1 |
 
 ## Ekran / Display

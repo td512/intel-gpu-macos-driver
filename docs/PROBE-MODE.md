@@ -70,7 +70,8 @@ The sequences follow Linux `xe` (`drivers/gpu/drm/xe`); each function names the 
 - context image: `set_offsets` and `reg_offsets`;
 - GGTT TLB invalidation: `send_tlb_inval_ggtt`.
 
-The family table maps device IDs to:
+The family table is the kext's platform descriptor table (`kernel/IntelXe/xe_platform.cpp`, since 10 Nov 2026), the
+same one `IntelXe` starts from ([DESIGN-platforms.md](design/DESIGN-platforms.md)). For the probe it maps device IDs to:
 - the graphics and media versions, for GPUs without `GMD_ID`;
 - the WOPCM size;
 - the GuC image (`<stem>_guc_70.bin`);
@@ -187,5 +188,5 @@ nvram xeprobe-crumb              # the last step of the previous boot (when the 
 
 | What | Where |
 |---|---|
-| Probe | `kernel/IntelXe/xe_probe.cpp`, `xe_probe_lrc.inc` (context layouts from `xe_lrc.c`), `xe_probe_ids.inc` (device IDs from `pciids.h`); built by `kernel/IntelXe/build.py` |
+| Probe | `kernel/IntelXe/xe_probe.cpp`, `xe_probe_lrc.inc` (context layouts from `xe_lrc.c`), `xe_probe_ids.inc` (device IDs from `pciids.h`), `xe_platform.cpp` (the family table); built by `kernel/IntelXe/build.py` |
 | Collector side | `collect-macos.sh --probe` |

@@ -56,8 +56,8 @@ You prepare everything from Windows, Linux or macOS; no Mac is needed. The full 
 4. In the EFI: `IntelXe.kext` and an ACPI table with your card's path, then reboot with the monitor on the card. The
    app's EFI page or `efi.sh` does it from macOS on the PC (it adapts the table to your card's ACPI path, and on a
    12th-14th gen hybrid Intel CPU adds `HybridPM.kext` below Lilu), `IntelXe-EFI.ps1` (in `-efi.zip`) from Windows, in
-   the EFI you point it to (it does not add HybridPM yet); each backs up the EFI first and changes only what the driver
-   needs.
+   the EFI you point it to (the same changes; its HybridPM and table steps are checked on macOS only so far); each backs up the EFI first
+   and changes only what the driver needs.
 
 The IntelXe Manager app's setup assistant walks through these steps from a fresh macOS install to a tested driver.
 
@@ -75,7 +75,8 @@ To build everything yourself, see [Building from source](#building-from-source).
 - **OpenGL and OpenCL** through Apple's GL-over-Metal and OpenCL-over-Metal (the default). OpenGL also runs through
   Mesa's Zink for applications that open their context with GLFW/EGL (LWJGL 3 games such as Minecraft): the optional
   `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)). Experimental: native CGL/NSOpenGL apps through Zink, one app at a
-  time (`cglzink-app.sh`; GZDoom MAP01 uncapped ~1910 fps against ~1600 on Apple's OpenGL).
+  time (`cglzink-app.sh`; GZDoom MAP01 uncapped ~1910 fps against ~1600 on Apple's OpenGL). A switch for all of them
+  at once (`zink-gl/install.sh --global-gl on`, off by default) is in the repository, not yet tested on the B580.
 - **Safari** on the GPU with the optional copy of the driver on the system volume (Safari's GPU
   process may only load code from there); desktop widgets and the Dock's icons on the GPU.
 - **Video:** VideoToolbox decoders for H.264, HEVC, AV1 and VP9, and encoders for H.264, HEVC and AV1, all on the GPU,
@@ -216,7 +217,9 @@ NullMoth Systems.
 
 **Will my Arc A-series card, another B-series card or integrated graphics work?** Not yet, except the Arc B570
 (supported from 0.1.4, not tested by us). Only the B580 and the B570 are supported; the
-[status table](#project-status) shows how much of the code the others share with them.
+[status table](#project-status) shows how much of the code the others share with them. The kext already describes the
+other families the way Linux `xe_pci.c` does and refuses them at start with one log line;
+[DESIGN-platforms.md](docs/design/DESIGN-platforms.md) lists what each one still needs.
 
 **Is it safe?** It changes how your Mac boots and runs with relaxed security. Keep a bootable USB EFI, and use
 `./install.sh --undo` to go back.

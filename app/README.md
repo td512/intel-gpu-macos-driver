@@ -26,7 +26,7 @@ choose from.
 | Display | HiDPI modes (display scaling) on or off through `hidpi.sh` (the package's, or the app's copy); needs IntelXeFB from 0.1.3, takes effect after a restart; Variable refresh |
 | Power and app | GPU power profile and clock range, *Fast GPU response for apps* (the GuC low-latency hint, off by default), open at login, the check at login |
 | Tests | the GPU test (Metal features, OpenGL, OpenCL, video decoding bit for bit, encoding quality, compute rate, bandwidth, smoothness) and a long test (about two minutes: video memory, a minute under load) |
-| Report | the diagnostics report (`tools/report/collect-macos.sh`): what it found, and the issue forms with the report ID filled in |
+| Report | the diagnostics report (`tools/report/collect-macos.sh`), optionally in administrator mode (the OpenCore config, root-only counters), with ACPI tables (greyed out on macOS 26, which no longer publishes them) or staged-probe results; a progress bar (step N of TOTAL) while it runs; what it found, and the issue forms with the report ID filled in |
 | Log | what the scripts print, while they run |
 
 The About window (app menu) has the version, the licences and the credits.

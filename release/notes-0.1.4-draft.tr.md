@@ -1,6 +1,8 @@
-<!-- 0.1.4 TASLAĞI (9 Kasım 2026). Yayından önce: paket listesini package.sh'in çıktısıyla, yükseltme adımlarını
-release/README-INSTALL.tr.md'nin "Yükseltme" bölümüyle karşılaştırın; B570 satırları hâlâ "test edilmedi" demeli;
-Windows EFI aracının HybridPM satırına bakın (başka bir dal ekliyor). -->
+<!-- 0.1.4 TASLAĞI (9 Kasım 2026, 10 Kasım'da main'e göre güncellendi). Yayından önce: paket listesini package.sh'in
+çıktısıyla, yükseltme adımlarını release/README-INSTALL.tr.md'nin "Yükseltme" bölümüyle karşılaştırın; B570 satırları
+hâlâ "test edilmedi" demeli; paketteki IntelXe.kext 10 Kasım sonrası main'den derlenmiş (platform katmanı, kullanıcı
+çitleri) ve B580'de çalışmış olmalı; Windows EFI aracı Windows'ta çalıştıktan sonra HybridPM / SSDT-ARCOFF satırlarına
+bakın. -->
 Hesaplamayı hızlandıran sürüm: Metal ve OpenCL işleri sürücüden komut arabelleği başına daha az kilitle geçiyor ve bir
 çevirici düzeltmesi bir matris çekirdeğinin hızını ikiye katlıyor. Ayrıca: katkıyla gelen bir aygıt kimliğiyle **Arc
 B570** (bizim tarafımızda test edilmedi), 12-14. nesil hibrit Intel işlemciler için **HybridPM** ve yeni macOS
@@ -45,15 +47,27 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
   güncellemesi sistem birimi kopyasını sildiyse, tek bir pencere.
 - **Yerel OpenGL uygulamaları tek tek Zink üzerinden (deneysel).** Zink paketindeki `cglzink-app.sh`,
   CGL/NSOpenGL kullanan bir uygulamayı OpenGL'i Zink'te çalışacak biçimde başlatan `~/Applications/X (zink).app`'i
-  oluşturuyor: GZDoom (MAP01, sınırsız) Apple'ın OpenGL'inde ~1600, cglzink ile ~1910 fps. Bütün uygulamalar için bir
-  anahtar yok.
-- **SSDT-ARCOFF kendini kartınıza uyarlıyor.** Kartın ACPI yolu paketle gelen tablonunkinden farklıysa `efi.sh` ve
-  uygulama yolunuzu tablonun bir kopyasına yazıyor: düzenlenecek `.dsl` ya da `iasl` yok.
+  oluşturuyor: GZDoom (MAP01, sınırsız) Apple'ın OpenGL'inde ~1600, cglzink ile ~1910 fps.
+  <!-- decision pending: ship the global switch in 0.1.4? -->
+  - **Bütün yerel OpenGL uygulamaları birden (deneysel, varsayılan kapalı):** Zink paketinde
+    `sudo ./install.sh --global-gl on`. Bir LaunchAgent küçük `libcglzink-boot.dylib`'i oturumun
+    `DYLD_INSERT_LIBRARIES` değişkenine koyuyor (sürücünün kurulumu AMFI'yi kapattığı için macOS onu geçiriyor); kütüphane
+    her süreçte cglzink'i yükleyip yüklemeyeceğine bir kez karar veriyor: yalnız uygulama paketleri; Apple'ınkiler
+    (Satranç hariç), tarayıcılar, Electron/Chromium uygulamaları, video oynatıcılar ve IntelXe Manager değil.
+    `/Library/IntelXe/GL/cglzink-global.txt` bir uygulamayı reddediyor (`-paket.kimliği`) ya da ekliyor
+    (`+paket.kimliği`). `sudo ./install.sh --global-gl off` kapatır, `--undo` önce onu kapatır. B580'de henüz test
+    edilmedi.
+- **SSDT-ARCOFF kendini kartınıza uyarlıyor.** Kartın ACPI yolu paketle gelen tablonunkinden farklıysa `efi.sh`,
+  uygulama ve Windows EFI aracı yolunuzu tablonun bir kopyasına yazıyor (üçünden de aynı baytlar): düzenlenecek `.dsl`
+  ya da `iasl` yok.
 - **Neyin yanlış olduğunu söyleyen raporlar.** Tanı raporu uyarılarla ve her birinde ne yapılacağıyla başlıyor;
-  uygulamanın Rapor sayfası raporu oluşturuyor, bulduklarını gösteriyor ve sorun formunu rapor kimliği doldurulmuş
-  olarak açıyor. Yeni bir sorun formu, *Intel GPU'm için destek*, yeni bir kartın gerektirdiği Linux ve macOS
-  raporlarını istiyor; `--acpi` DSDT/SSDT tablolarını ekliyor (Windows lisansını taşıyan tabloları asla).
-  `tools/clbench` aynı OpenCL çekirdeklerini Windows, macOS ve Linux'ta ölçüyor.
+  uygulamanın Rapor sayfası raporu oluşturuyor (kullanıcı olarak ya da yönetici kipinde), çalışırken adımı ve geçen
+  süreyi, sonra bulduklarını gösteriyor ve sorun formunu rapor kimliği doldurulmuş olarak açıyor (test makinesinde
+  yaklaşık 16 sn). Yeni bir sorun formu, *Intel GPU'm için destek*, yeni bir kartın gerektirdiği Linux ve macOS
+  raporlarını istiyor; `--acpi` DSDT/SSDT tablolarını ekliyor (Windows lisansını taşıyan tabloları asla). macOS 26 bu
+  tabloları artık yayımlamıyor; orada macOS raporunun `--acpi`'si hiçbir şey toplamıyor ve uygulama seçeneği griye
+  çeviriyor; Linux raporunda tablolar var. `tools/clbench` aynı OpenCL çekirdeklerini Windows, macOS ve Linux'ta
+  ölçüyor.
 
 ### Performans
 
@@ -85,7 +99,8 @@ veriyordu); farklı günlerin sayılarını değil, bir tablonun sütunlarını 
   işlemci güç yönetimi bu işlemcilerin P çekirdeklerini sınırlıyor ve tam yüklü çekirdekleri 800 MHz'de tutabiliyor;
   GPU sürücüsü komut arabelleği başına çok CPU işi yaptığı için GPU da yavaş görünüyor. Test makinesinde (i7-14700K)
   tek bir CPU iş parçacığı iki kattan fazla hızlandı, Geekbench'in GPU skorları yaklaşık üçte bir arttı. İsteğe bağlı;
-  `-efi.zip`'te ve macOS paketinde; işlemci gerektiriyorsa uygulamanın EFI sayfası ve `efi.sh` onu 4. aşamada ekliyor.
+  `-efi.zip`'te ve macOS paketinde; işlemci gerektiriyorsa uygulamanın EFI sayfası, `efi.sh` ve Windows EFI aracı onu
+  4. aşamada ekliyor (masaüstü ve dizüstü modelleri, U ve P modelleri de).
   Bir Lilu eklentisi (Lilu pakette yok); Core Ultra'ya, E çekirdeği olmayan ve daha eski işlemcilere
   dokunmuyor (yalnız nedenini günlüğe yazıyor). Paketteki `hpmstat` çekirdek başına saatleri ve paket gücünü gösteriyor.
 
@@ -112,12 +127,12 @@ ve [depoda](https://github.com/yusufklncc/intel-gpu-macos-driver/blob/v0.1.4/rel
    `sudo ./efi.sh --apply`, Windows'ta `IntelXe-EFI.ps1` ya da elle; `config.plist` girdisi olduğu gibi kalır). B570'in
    kimliğini, GPU saati ve sıcaklık okumalarını, uygulamanın Güç sayfasının yazdığı ayarları ve doğrudan gönderimi
    getiriyor.
-3. **Hibrit Intel işlemci mi (E çekirdekli 12-14. nesil)?** Uygulamanın EFI sayfası ve `efi.sh`, 2. adımda
-   `HybridPM.kext`'i ekliyor; `Kernel > Add` girdisi **`Lilu.kext`'in altına** giriyor. HybridPM Lilu gerektirir, bu
+3. **Hibrit Intel işlemci mi (E çekirdekli 12-14. nesil)?** Uygulamanın EFI sayfası, `efi.sh` ve `IntelXe-EFI.ps1`,
+   2. adımda `HybridPM.kext`'i ekliyor; `Kernel > Add` girdisi **`Lilu.kext`'in altına** giriyor. `IntelXe-EFI.ps1`
+   çalıştığı bilgisayarın işlemcisine bakıyor: onu EFI'yi açacak bilgisayarda çalıştırın. HybridPM Lilu gerektirir, bu
    sürümde Lilu yok: çoğu EFI'de VirtualSMC için zaten var; yoksa
-   [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases)'dan alıp 2. adımı yeniden yapın. `IntelXe-EFI.ps1`
-   onu henüz eklemiyor; elle eklemek için kılavuzun *Hibrit Intel işlemciler* bölümünde girdisi ve nasıl denetleneceği
-   (`sysctl debug.hybridpm.why`) var.
+   [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases)'dan alıp 2. adımı yeniden yapın. Elle eklemek için
+   kılavuzun *Hibrit Intel işlemciler* bölümünde girdisi ve nasıl denetleneceği (`sysctl debug.hybridpm.why`) var.
 4. Safari için sistem birimi kopyasını kurduysanız bu paketinkini de kurun (uygulamanın Sürücü sayfası, *Safari ve
    WebKit*; ya da `sudo ./system-volume/ssv-install.sh --apply`), Safari yeni Metal sürücüsünü alsın.
 5. Yeniden başlatın.
@@ -134,33 +149,64 @@ neden kapalı olduğu Bilinen sorunlar'da.
   her kartta "Resizable BAR yok" diyordu; artık Windows'un atadığı aralıkları okuyor. Özeti bir şey toplanamadığında
   bozuluyordu, `dxdiag` de hiç zamanında bitmiyordu.
 - macOS raporu Metal sürücüsünü yalnız 0.1.2 öncesindeki adıyla arıyor, kurulu olanı görmüyordu.
+- Root olarak çalışan macOS raporu, OpenCore'un açılışta kirli (dirty) olarak bıraktığı bir EFI bölümünden
+  `config.plist` toplamıyordu (macOS böyle bir bölümü yalnız okuma-yazma bağlıyor, salt okunur bağlama başarısız
+  oluyordu); artık onu `mount_msdos` ile salt okunur bağlıyor ve sonra ayırıyor.
 
 ### Geliştiriciler için
 
 - GuC bir bağlamı sıfırladığında ya da bir iş hiç başlamadığında `IntelXe.kext` hata yazmaçlarını, her render/compute
   motorunun halka durumunu ve bekleyen işi olan kuyrukları G2H günlüğüne yazıyor; takılan bir motoru zamanlama
-  yapmayan bir GuC'den ayırmak için.
+  yapmayan bir GuC'den ayırmak için. Artık BAR penceresine girip çıkan BO taşımalarını, TLB geçersizlemelerini (ve
+  birinin sürüp sürmediğini) ve hata veren kuyruğun VM'sini de yazıyor: son unbind, remap ve bind'ı, sayfa
+  tablolarının kuyruğun son geçersizlemesinden sonra değişip değişmediğini.
+- **Platform tanımları**, Linux `xe_pci.c`'deki gibi (`kernel/IntelXe/xe_platform.*`): her aygıt kimliği listesi için
+  IP sürümleri, bayraklar, motorlar, yazılım (firmware) adları ve sürücünün o aile için hâlâ eksikleriyle bir girdi.
+  `IntelXe.kext` platformunu açılışta bir kez buluyor ve günlükte adını veriyor (`IntelXe: 8086:e20b: BMG-G21, graphics
+  20.01, media 13.01, discrete`); yalnız BMG-G21 (B580, B570) destekleniyor, oradaki diğer 17 girdi (Gen12'den Panther
+  Lake'e, bir de BMG-G31) tek bir günlük satırıyla reddediliyor. XeProbe aynı tabloyu okuyor. Bu satır dışında B580
+  eskisi gibi çalışıyor. Diğer ailelerin her birinin hâlâ neye ihtiyacı olduğu: `docs/design/DESIGN-platforms.md`.
+- **Kullanıcı çitleri (user fences)**, `xe`'deki gibi: exec ve VM_BIND'da `DRM_XE_SYNC_TYPE_USER_FENCE` ve
+  `DRM_IOCTL_XE_WAIT_USER_FENCE`; Intel'in compute runtime'ı ikisini de gerektiriyor (önceden reddediliyorlardı). Bir
+  bind'ın kullanıcı çiti bind tamamlandığında, geç tamamlansa da yazılıyor. `GEM_CREATE` uzantı zinciri `xe_bo.c`'nin
+  denetlediği gibi denetleniyor. Mesa'nın Vulkan sürücüsü kullanıcı çitlerini kullanmıyor; Metal, Vulkan ve OpenGL
+  etkilenmiyor. uAPI eşdeğerlik tablosu (`docs/parity/`) artık 182 xe uAPI ögesinin 99'unu ve 16 ioctl'in 13'ünü
+  sayıyor (önce 77 ve 11); compute runtime için kalan ögeler 35'ten 24'e indi.
 - `debug.intelxe.jobtime` (varsayılan kapalı): her işin aşamaları GPU zaman damgalarıyla. `debug.intelxe.sensors`:
   GT saati, paket ve VRAM sıcaklıkları, herkes okuyabilir.
 - Çevirici, gevşek (relaxed) bir threadgroup atomiğini (add, min, max, and, or, xor) gevşek olarak yazıyor; Mesa artık
   her birinin çevresinde paylaşılan yerel belleği çitlemiyor (clbench `hist256` döngüsü artık IGC'ninkiyle aynı).
 - Testler: `mtl_order_stress` (kuyruklar ve iş parçacıkları arasında komut arabelleği sırası), `direct_lat`,
-  `mtl_lat split`.
+  `mtl_lat split`, `ufence` (GPU'da kullanıcı çitleri: her motor, bekleme işlemleri, maskeler ve zaman aşımları, bind
+  çitleri); platform tablosu (`kernel/IntelXe/tests/platform_test.cpp`) ve uAPI argüman denetimleri
+  (`kernel/IntelXe/tests/uapi_test.cpp`) için GPU'suz ana makine testleri. Çeviricinin birim ve tümleşik testleri
+  geçiyor (bir düzeltme: adres uzayı bozuk bir tipli işaretçi genel diye okunmuyor, reddediliyor); `xlate_check` bir
+  girdiyi `newFunctionWithName:`'in yaptığı gibi çeviriyor.
+- `release/release.sh` bir sürümü yayımlanmadan önce denetliyor (sürüm, etiket, paketler ve sağlama toplamları,
+  içlerindeki sürümler, notlar, kimlik taraması) ve yalnız `--publish` ile yayımlıyor.
 
 ### Bilinen sorunlar
 
 - **Uzun boşta kalmadan sonra GPU hataları (nedeni açık).** GuC düşük gecikme ipucu açıkken, uzun bir boşta kalmanın
   ardından gelen ilk ağır çalışma 6 test koşusunun 3'ünde bir `MEMORY_CAT_ERROR`, bir GT sıfırlaması ve yeniden
   oynatılan bir WindowServer kuyruğuyla bitti; ipucu kapalıyken 4 koşunun 0'ında. Bu yüzden ipucu varsayılan olarak
-  kapalı. Nedeni henüz bilinmiyor; yeni motor dökümü onu bulmak için. Görürseniz lütfen bir rapor gönderin.
+  kapalı. Nedeni henüz bilinmiyor; artık hatadan önceki BO taşımalarını, TLB geçersizlemelerini ve VM'nin son unbind'ını
+  da kaydeden yeni motor dökümü onu bulmak için. Görürseniz lütfen bir rapor gönderin.
 - **Doğrudan gönderim varsayılan olarak kapalı**; daha uzun gözetimsiz çalışmalardan (güç, boşta kalma, uyku) sonra
   açılacak. Yalnız bir sysctl, bu yüzden bir sonraki yeniden başlatmada kapanır.
 - **Geekbench'in Background Blur ve Super Resolution testleri** GPU saatine duyarlı: ipucu kapalıyken açık olduğundan
   düşük puan alıyorlar.
-- **Windows EFI aracı `HybridPM.kext`'i henüz eklemiyor**; Windows'ta elle ekleyin.
+- **Windows EFI aracının yeni adımları** (`HybridPM.kext`, başka bir yola uyarlanan SSDT-ARCOFF) macOS'ta `efi.sh`'e
+  karşı bayt bayt denendi ama henüz Windows'ta çalışmadı; araç henüz ardından bir bilgisayarın açıldığı bir EFI de
+  hazırlamadı. Her planı onaylamadan önce okuyun.
 - **B570 test edilmedi**, yukarıdaki gibi.
-- **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel ve uygulama başına: bütün uygulamalar için
-  bir anahtar yok; IOSurface'e çizim (tarayıcılar) ve CGL pbuffer'ları henüz desteklenmiyor.
+- **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel: IOSurface'e çizim (tarayıcılar) ve CGL
+  pbuffer'ları henüz desteklenmiyor.
+<!-- decision pending: ship the global switch in 0.1.4? -->
+- **Bütün OpenGL uygulamaları için anahtar** (`install.sh --global-gl on`) deneysel, varsayılan olarak kapalı ve B580'de
+  henüz test edilmedi. Oturumun başlattığı her uygulamaya bir kütüphane ekliyor: `/Library/IntelXe/GL`'yi elle
+  silmeden önce kapatın (`sudo ./install.sh --global-gl off`), çünkü eklenen kütüphane eksikse hiçbir uygulama
+  açılmaz.
 - Giriş ekranında ve kilit ekranında macOS parola alanının imlecini ve cam malzemesini her karede yeniden çiziyor; 180
   Hz bir monitörde saniyede yaklaşık 140 kare. Bu macOS'un kendi animasyonu; GPU zamanını yalnız o ekran açıkken
   harcıyor (ölçümleri oturum açıkken yapın).

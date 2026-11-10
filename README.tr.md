@@ -57,8 +57,8 @@ rehber [`release/README-INSTALL.tr.md`](release/README-INSTALL.tr.md)'de (her pa
 4. EFI'ye `IntelXe.kext`'i ve kartınızın ACPI yoluna göre uyarlanmış ACPI tablosunu ekleyin, sonra monitör karta
    bağlıyken yeniden başlatın. Bunu bilgisayardaki macOS'tan uygulamanın EFI sayfası ya da `efi.sh` (tabloyu kartınızın
    ACPI yoluna kendisi uyarlar; 12.-14. nesil hibrit bir Intel işlemcide `HybridPM.kext`'i de Lilu'nun altına ekler),
-   Windows'tan `-efi.zip`'teki `IntelXe-EFI.ps1` (HybridPM'i henüz eklemiyor) gösterdiğiniz EFI'de yapar; hepsi önce
-   EFI'yi yedekler ve yalnızca sürücünün ihtiyacı olanı değiştirir.
+   Windows'tan `-efi.zip`'teki `IntelXe-EFI.ps1` (aynı değişiklikler; HybridPM ve tablo adımları şimdilik yalnızca macOS'ta denendi)
+   gösterdiğiniz EFI'de yapar; hepsi önce EFI'yi yedekler ve yalnızca sürücünün ihtiyacı olanı değiştirir.
 
 IntelXe Manager uygulamasının kurulum yardımcısı bu adımları, macOS'un temiz kurulumundan test edilmiş bir sürücüye
 kadar sırayla yaptırır.
@@ -78,7 +78,8 @@ Her şeyi kendiniz derlemek isterseniz: [Kaynaktan derleme](#kaynaktan-derleme).
 - **OpenGL ve OpenCL:** varsayılan olarak Apple'ın Metal üzerinde çalışan GL ve OpenCL'i ile. OpenGL, bağlamını
   GLFW/EGL ile açan uygulamalarda (Minecraft gibi LWJGL 3 oyunları) Mesa'nın Zink'iyle de çalışıyor: isteğe bağlı
   `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)). Deneysel: CGL/NSOpenGL kullanan yerel uygulamalar da tek tek Zink'e
-  geçebiliyor (`cglzink-app.sh`; GZDoom MAP01 sınırsız ~1910 fps, Apple'ın OpenGL'inde ~1600).
+  geçebiliyor (`cglzink-app.sh`; GZDoom MAP01 sınırsız ~1910 fps, Apple'ın OpenGL'inde ~1600). Hepsini birden geçiren
+  bir anahtar (`zink-gl/install.sh --global-gl on`, varsayılan kapalı) depoda var, B580'de henüz test edilmedi.
 - **Safari** isteğe bağlı sistem diski kopyasıyla GPU'da çalışıyor (Safari'nin GPU süreci yalnızca oradan kod
   yükleyebiliyor); masaüstü widget'ları ve Dock simgeleri de GPU'da.
 - **Video:** VideoToolbox üzerinden H.264, HEVC, AV1 ve VP9 çözücüler; H.264, HEVC ve AV1 kodlayıcılar. Hepsi GPU'da;
@@ -223,7 +224,9 @@ bağlantısı yok.
 
 **Arc A serisi kartım, başka bir B serisi kart ya da işlemcinin kendi grafiği çalışır mı?** Arc B570 dışında henüz değil
 (B570 0.1.4'ten beri destekleniyor, bizim tarafımızda test edilmedi). Yalnızca B580 ve B570 destekleniyor;
-[durum tablosu](#projenin-durumu) diğer kartların bunlarla ne kadar kodu paylaştığını gösteriyor.
+[durum tablosu](#projenin-durumu) diğer kartların bunlarla ne kadar kodu paylaştığını gösteriyor. Kext diğer aileleri
+Linux `xe_pci.c` gibi tanımlıyor ve açılışta tek bir günlük satırıyla reddediyor; her birinin hâlâ neye ihtiyacı
+olduğu [DESIGN-platforms.md](docs/design/DESIGN-platforms.md)'de.
 
 **Güvenli mi?** Mac'in açılışını değiştiriyor ve gevşetilmiş güvenlikle çalışıyor. Önyükleme yapabilen bir USB EFI'si
 tutun; geri dönmek için `./install.sh --undo` var.
