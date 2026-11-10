@@ -233,8 +233,10 @@ Bütün seçenekler için yalnızca `./efi.sh`. IntelXe Manager uygulamasının 
 **Windows'ta** `-efi.zip`'teki `IntelXe-EFI.ps1` 1. ve 3. maddeleri (*Driver: plan*, *Driver: apply*) seçtiğiniz EFI
 klasöründe, yedek ve geri alma ile yapar. Windows, ACPI yolunu `efi.sh`'in macOS'ta yaptığı gibi denetleyemez; bu
 yüzden `SSDT-ARCOFF.aml`'ı yalnızca kutusunu işaretleyip 2. maddedeki kart yolunuzu yazdığınızda ekler (Windows kartın
-takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur). `HybridPM.kext`'i henüz eklemiyor. Zip'teki
-`README-Windows.md`'ye bakın.
+takılı olduğu bilgisayarda çalışıyorsa yolu Aygıt Yöneticisi'nden okur); paketteki tablonunkinden farklı bir yolda,
+`efi.sh` gibi tablonun bir kopyasını uyarlar. 12.-14. nesil hibrit bir Intel işlemcide `HybridPM.kext`'i de ekler;
+çalıştığı bilgisayarın işlemcisine bakar, bu yüzden onu EFI'yi açacak bilgisayarda çalıştırın. Bu iki adım macOS'ta
+`efi.sh`'e karşı denendi ama henüz Windows'ta çalışmadı. Zip'teki `README-Windows.md`'ye bakın.
 
 1. `IntelXe.kext`'i `EFI/OC/Kexts/` klasörüne kopyalayın ve `Kernel > Add` altına ekleyin: `BundlePath IntelXe.kext`,
    `ExecutablePath Contents/MacOS/IntelXe`, `PlistPath Contents/Info.plist`, `Enabled true`. GPU sürücüsü bu (GuC/HuC yazılımları
@@ -277,7 +279,8 @@ işlemcilere de dokunmuyor (yalnızca nedenini günlüğe yazıyor). Model liste
 **Eklemek:** kurulacak bilgisayarda 4. aşama bunu yapıyor: `efi.sh --plan` / `sudo ./efi.sh --apply` ve uygulamanın EFI
 sayfası, işlemcinin adı bunlardan biriyse `HybridPM.kext`'i `IntelXe.kext` ile birlikte kopyalıyor ve kaydını `Lilu.kext`'in
 kaydının hemen altına ekliyor (var olan kayıt açılıyor; aynı adlı eski bir derleme değiştiriliyor). EFI Lilu yüklemiyorsa bir
-notla dışarıda bırakıyor. Windows'taki `IntelXe-EFI.ps1` henüz eklemiyor. Elle:
+notla dışarıda bırakıyor. Windows'taki `IntelXe-EFI.ps1` de, çalıştığı bilgisayarın işlemcisine bakarak aynısını
+yapıyor (henüz Windows'ta çalışmadı). Elle:
 
 1. Bir Lilu eklentisi. Çoğu OpenCore EFI'sinde VirtualSMC için `Lilu.kext` zaten var; sizinkinde yoksa
    [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases)'dan ekleyin (test makinesinde 1.7.2). Bu paket Lilu
@@ -384,7 +387,7 @@ de modları kapatır (anahtar NVRAM değişkenidir).
 düzeltmesi, B570'in kimliği, GPU saati ve sıcaklık okumaları, doğrudan gönderim); Mesa ve video kodekleri 0.1.3'ünkiler.
 Paketi kurun (uygulamada *v0.1.4 sürümünü indir*, sonra *Bu paketi kur*; ya da `sudo ./install.sh --apply`), sonra
 yeniden başlatmadan önce EFI'deki `IntelXe.kext`'i değiştirin (macOS'ta uygulamanın EFI sayfası ya da
-`sudo ./efi.sh --apply`, ikisi de hibrit bir Intel işlemcide `HybridPM.kext`'i de ekler; Windows'ta `IntelXe-EFI.ps1`;
+`sudo ./efi.sh --apply`, Windows'ta `IntelXe-EFI.ps1`; üçü de hibrit bir Intel işlemcide `HybridPM.kext`'i de ekler;
 ya da elle; `config.plist` kaydı olduğu gibi kalır). Sistem diski kopyasını kurduysanız (3.3) bu paketinkini de kurun
 (Sürücü sayfasında *Safari ve WebKit* ya da `sudo ./system-volume/ssv-install.sh --apply`); Safari yeni Metal
 sürücüsünü böyle alır. Uygulamalar için GPU saatini yüksek tutan GuC düşük gecikme ipucu 0.1.4'ten beri varsayılan

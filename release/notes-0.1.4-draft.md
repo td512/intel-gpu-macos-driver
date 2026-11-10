@@ -1,6 +1,7 @@
-<!-- DRAFT for 0.1.4 (9 Nov 2026). Check before publishing: the package list against package.sh's output, the upgrade
-steps against release/README-INSTALL.md's "Upgrading" section, that the B570 lines still say "untested", and the
-Windows EFI tool's HybridPM line (another branch adds it). -->
+<!-- DRAFT for 0.1.4 (9 Nov 2026, brought up to date with main on 10 Nov). Check before publishing: the package list
+against package.sh's output, the upgrade steps against release/README-INSTALL.md's "Upgrading" section, that the B570
+lines still say "untested", that the packaged IntelXe.kext is built from main after 10 Nov (platform layer, user
+fences) and ran on the B580, and the Windows EFI tool's HybridPM / SSDT-ARCOFF lines once it has run on Windows. -->
 The faster-compute release: Metal and OpenCL work goes through the driver with less locking per command buffer, and a
 translator fix doubles a matrix kernel's speed. Also: the **Arc B570**, a contributed device ID (untested by us),
 **HybridPM** for 12th-14th gen hybrid Intel CPUs, and a redesigned **IntelXe Manager** with a setup assistant from a
@@ -41,14 +42,25 @@ fresh macOS install to a verified driver.
   the system-volume copy.
 - **Native OpenGL apps through Zink, one at a time (experimental).** `cglzink-app.sh` in the Zink package makes
   `~/Applications/X (zink).app`, which starts a CGL/NSOpenGL application with its OpenGL on Zink: GZDoom (MAP01,
-  uncapped) ~1910 fps against ~1600 on Apple's OpenGL. There is no switch for every application.
-- **SSDT-ARCOFF adapts itself to your board.** When the card's ACPI path is not the shipped table's, `efi.sh` and the
-  app write your path into a copy of the table: no `.dsl` to edit, no `iasl`.
+  uncapped) ~1910 fps against ~1600 on Apple's OpenGL.
+  <!-- decision pending: ship the global switch in 0.1.4? -->
+  - **Every native OpenGL application at once (experimental, off by default):** `sudo ./install.sh --global-gl on`
+    in the Zink package. A LaunchAgent puts the small `libcglzink-boot.dylib` into `DYLD_INSERT_LIBRARIES` of the login
+    session (macOS passes it on because the driver's setup turns AMFI off), and in each process it decides once whether
+    to load cglzink: application bundles only, not Apple's (Chess excepted), browsers, Electron/Chromium apps, video
+    players or IntelXe Manager. `/Library/IntelXe/GL/cglzink-global.txt` refuses (`-bundle.id`) or allows
+    (`+bundle.id`) one application. `sudo ./install.sh --global-gl off` turns it off, `--undo` turns it off first. Not
+    yet tested on the B580.
+- **SSDT-ARCOFF adapts itself to your board.** When the card's ACPI path is not the shipped table's, `efi.sh`, the
+  app and the Windows EFI tool write your path into a copy of the table (the same bytes from all three): no `.dsl` to
+  edit, no `iasl`.
 - **Reports that say what is wrong.** The diagnostics report starts with warnings and what to do about each, and the
-  app's Report page creates it, shows what it found and opens the issue form with the report ID filled in. A new issue
-  form, *Support for my Intel GPU*, asks for the Linux and macOS reports a new GPU needs; `--acpi` adds the DSDT/SSDT
-  tables (never the ones that carry the Windows licence). `tools/clbench` times the same OpenCL kernels on Windows,
-  macOS and Linux.
+  app's Report page creates it (as the user or in administrator mode), shows the step and the elapsed time while it
+  runs, then what it found, and opens the issue form with the report ID filled in (about 16 s on the test machine). A
+  new issue form, *Support for my Intel GPU*, asks for the Linux and macOS reports a new GPU needs; `--acpi` adds the
+  DSDT/SSDT tables (never the ones that carry the Windows licence). macOS 26 no longer publishes those tables, so there
+  the macOS report's `--acpi` collects nothing and the app greys the option out; the Linux report has them.
+  `tools/clbench` times the same OpenCL kernels on Windows, macOS and Linux.
 
 ### Performance
 
@@ -80,7 +92,8 @@ November); compare the columns of one table, not numbers from different days.
   management caps the P-cores of these CPUs and can hold busy cores at 800 MHz; the GPU driver does a lot of CPU work
   per command buffer, so the GPU looks slow too. On the test machine (i7-14700K) one CPU thread ran more than twice as
   fast and Geekbench's GPU scores were about a third higher. Optional, in the `-efi.zip` and the macOS package; the
-  app's EFI page and `efi.sh` add it at stage 4 when the CPU needs it. It is a Lilu plugin (Lilu is not included); it leaves Core Ultra, CPUs without E-cores and older CPUs alone (it only logs why). `hpmstat` in the
+  app's EFI page, `efi.sh` and the Windows EFI tool add it at stage 4 when the CPU needs it (desktop and laptop models,
+  the U and P models included). It is a Lilu plugin (Lilu is not included); it leaves Core Ultra, CPUs without E-cores and older CPUs alone (it only logs why). `hpmstat` in the
   package shows per-core clocks and package power.
 
 ### Packages
@@ -105,12 +118,12 @@ Checksums: `intel-gpu-macos-driver-0.1.4.sha256`. Install guide: `README-INSTALL
 2. **Replace `IntelXe.kext` in the EFI** before you restart (the app's EFI page, `sudo ./efi.sh --apply` on macOS,
    `IntelXe-EFI.ps1` on Windows, or by hand; its `config.plist` entry stays as it is). It brings the B570's ID, the GPU
    clock and temperature readings, the settings the app's Power page writes and direct submission.
-3. **Hybrid Intel CPU (12th-14th gen with E-cores)?** The app's EFI page and `efi.sh` add `HybridPM.kext` in step 2,
-   with its `Kernel > Add` entry **below `Lilu.kext`**. HybridPM needs Lilu, which this release does not include: most
-   EFIs already have it for VirtualSMC; otherwise take it from
-   [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases), then run step 2 again. `IntelXe-EFI.ps1` does not
-   add it yet; by hand, the guide's *Hybrid Intel CPUs* section has the entry and how to check it
-   (`sysctl debug.hybridpm.why`).
+3. **Hybrid Intel CPU (12th-14th gen with E-cores)?** The app's EFI page, `efi.sh` and `IntelXe-EFI.ps1` add
+   `HybridPM.kext` in step 2, with its `Kernel > Add` entry **below `Lilu.kext`**. `IntelXe-EFI.ps1` goes by the CPU of
+   the PC it runs on: run it on the PC that boots the EFI. HybridPM needs Lilu, which this release does not include:
+   most EFIs already have it for VirtualSMC; otherwise take it from
+   [acidanthera/Lilu](https://github.com/acidanthera/Lilu/releases), then run step 2 again. By hand, the guide's
+   *Hybrid Intel CPUs* section has the entry and how to check it (`sysctl debug.hybridpm.why`).
 4. If you installed the system-volume copy for Safari, install this package's too (the app's Driver page, *Safari and
    WebKit*; or `sudo ./system-volume/ssv-install.sh --apply`), so Safari gets the new Metal driver.
 5. Restart.
@@ -127,32 +140,64 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   that has it; it now reads the ranges Windows assigned. Its summary broke whenever something was not collected, and
   `dxdiag` never finished in time.
 - The macOS report listed the Metal driver under its pre-0.1.2 name only, so it did not see the installed one.
+- Run as root, the macOS report collected no `config.plist` from an EFI partition that OpenCore had left marked dirty at
+  boot (macOS mounts such a partition read-write only, so the read-only mount failed); it now mounts it read-only with
+  `mount_msdos` and unmounts it afterwards.
 
 ### For developers
 
 - When the GuC resets a context or a job never starts, `IntelXe.kext` writes the fault registers, each render/compute
   engine's ring state and the queues with pending work to its G2H log, to tell a stuck engine from a GuC that does not
-  schedule.
+  schedule. It now also writes the BO moves in and out of the BAR window, the TLB invalidations (and whether one is
+  in flight), and the faulting queue's VM: its last unbind, remap and bind, and whether the page tables changed after
+  the queue's last invalidation.
+- **Platform descriptors**, as Linux `xe_pci.c` has them (`kernel/IntelXe/xe_platform.*`): one entry per device-ID
+  list with its IP versions, flags, engines, firmware names and what the driver still lacks for it. `IntelXe.kext` looks
+  its platform up once at start and names it in the log (`IntelXe: 8086:e20b: BMG-G21, graphics 20.01, media 13.01,
+  discrete`); only BMG-G21 (B580, B570) is supported, and the 17 other entries there (Gen12 to Panther Lake, and
+  BMG-G31) are refused with one log line. XeProbe reads the same table. Apart from that line the B580 behaves as
+  before. What each other family still needs: `docs/design/DESIGN-platforms.md`.
+- **User fences** as `xe` has them: `DRM_XE_SYNC_TYPE_USER_FENCE` on exec and VM_BIND, and
+  `DRM_IOCTL_XE_WAIT_USER_FENCE`, which Intel's compute runtime needs (they were refused before). A bind's user fence
+  is written when the bind completes, also when that happens late. The `GEM_CREATE` extension chain is checked as
+  `xe_bo.c` checks it. Mesa's Vulkan driver does not use user fences, so Metal, Vulkan and OpenGL are unaffected. The
+  uAPI parity table (`docs/parity/`) now counts 99 of 182 xe uAPI items and 13 of 16 ioctls (was 77 and 11); the
+  compute-runtime items left went from 35 to 24.
 - `debug.intelxe.jobtime` (off by default): each job's stages in GPU timestamps. `debug.intelxe.sensors`: the GT clock
   and the package and VRAM temperatures, readable by anyone.
 - The translator emits a relaxed threadgroup atomic (add, min, max, and, or, xor) as relaxed, so Mesa no longer
   fences shared local memory around each one (clbench `hist256`'s loop now matches IGC's code).
-- Tests: `mtl_order_stress` (command buffer ordering across queues and threads), `direct_lat`, `mtl_lat split`.
+- Tests: `mtl_order_stress` (command buffer ordering across queues and threads), `direct_lat`, `mtl_lat split`,
+  `ufence` (user fences on the GPU: every engine, wait ops, masks and timeouts, bind fences); host tests without a GPU
+  for the platform table (`kernel/IntelXe/tests/platform_test.cpp`) and the uAPI argument checks
+  (`kernel/IntelXe/tests/uapi_test.cpp`). The translator's unit and integration tests pass (one fix: a typed
+  pointer with a malformed address space is refused instead of read as generic), and `xlate_check` translates an
+  entry the way `newFunctionWithName:` does.
+- `release/release.sh` checks a release before it is published (version, tag, packages and their checksums, the
+  versions inside, the notes, the identity scan) and publishes it only with `--publish`.
 
 ### Known issues
 
 - **GPU faults after a long idle (cause open).** With the GuC low-latency hint on, the first heavy run after a long
   idle ended in a `MEMORY_CAT_ERROR`, a GT reset and a replayed WindowServer queue in 3 of 6 test runs, against 0 of 4
-  without it. The hint is therefore off by default. The cause is not known yet; the new engine dump is there to find it.
-  If you see it, please send a report.
+  without it. The hint is therefore off by default. The cause is not known yet; the new engine dump, which now also
+  records the BO moves, TLB invalidations and the VM's last unbind before the fault, is there to find it. If you see
+  it, please send a report.
 - **Direct submission is off by default** until it has run unattended for longer (power, idle, sleep). It is a sysctl
   only, so it ends at the next restart.
 - **Geekbench's Background Blur and Super Resolution** depend on the GPU clock: with the hint off they score lower
   than with it on.
-- **The Windows EFI tool does not add HybridPM.kext yet**; on Windows, add it by hand.
+- **The Windows EFI tool's new steps** (`HybridPM.kext`, SSDT-ARCOFF adapted to another port) are checked on macOS
+  against `efi.sh`, byte for byte, but have not run on Windows yet, and the tool has not yet prepared an EFI that a PC
+  then booted. Read each plan before you confirm it.
 - **The B570 is untested**, as above.
-- **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental and per application: no switch for every
-  application, and no IOSurface drawing (browsers) or CGL pbuffers yet.
+- **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental: no IOSurface drawing (browsers) or CGL
+  pbuffers yet.
+<!-- decision pending: ship the global switch in 0.1.4? -->
+- **The switch for every OpenGL application** (`install.sh --global-gl on`) is experimental, off by default and not yet
+  tested on the B580. It inserts a library into every application the session starts: turn it off
+  (`sudo ./install.sh --global-gl off`) before you delete `/Library/IntelXe/GL` by hand, because a missing inserted
+  library stops every application from starting.
 - At the login window and the lock screen macOS redraws the password field's cursor and its glass material for every
   frame, about 140 frames a second on a 180 Hz monitor. It is macOS's own animation; it costs GPU time only while that
   screen is up (run benchmarks logged in).

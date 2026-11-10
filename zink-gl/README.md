@@ -77,6 +77,7 @@ off first).
 | `vulkan/icd.d/intel_icd.x86_64.json` | ICD manifest → `/Library/GPUBundles/nvmtl/libvulkan_intel.dylib` | `user/vulkan-loader/` |
 | `bin/zink-gl-selftest` | the `--test` program | `src/egltri.c` |
 | `lib/libcglzink.dylib` | CGL/NSOpenGL contexts through zink (optional) | `cgl/` (`cgl/build.sh x86_64 OUT`) |
+| `lib/libcglzink-boot.dylib` | the experimental switch for every application (`--global-gl`): loads `libcglzink.dylib` where it may (optional) | `cgl/boot.c` (same build) |
 
 `src/mesa-zink.diff` is the whole difference of the built tree from upstream. Its patches are in `mesa/patches`
 (`0071`, `0072`, `0073` are the zink part). zink talks to ANV only through the Vulkan API, so it does not have to come

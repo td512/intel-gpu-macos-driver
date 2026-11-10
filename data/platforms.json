@@ -443,32 +443,32 @@
    ],
    "bmg": [
     "notyet",
-    "B570 (8086:E20C): matched since 0.1.4 (kernel/IntelXe/build.py IOPCIMatch 0xe20b8086 0xe20c8086, PR #2), not run on hardware; other BMG IDs: not matched",
+    "B570 (8086:E20C): matched since 0.1.4 (kernel/IntelXe/build.py IOPCIMatch 0xe20b8086 0xe20c8086, PR #2), not run on hardware; other BMG-G21 IDs: in the supported descriptor (kernel/IntelXe/xe_platform.cpp), not matched; BMG-G31 (E220-E223): described, refused at start",
     ""
    ],
    "lnl": [
     "notyet",
-    "no kernel support; XeProbe has its device IDs",
+    "no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line",
     ""
    ],
    "ptl": [
     "notyet",
-    "no kernel support; XeProbe has its device IDs",
+    "no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line",
     ""
    ],
    "mtl": [
     "notyet",
-    "no kernel support; XeProbe has its device IDs",
+    "no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line",
     ""
    ],
    "dg2": [
     "notyet",
-    "no kernel support; XeProbe has its device IDs",
+    "no kernel support; described in kernel/IntelXe/xe_platform.cpp (IP versions, firmware, what is missing), refused at start with a log line",
     ""
    ],
    "gen12": [
     "notyet",
-    "no kernel support; XeProbe stage 1 ran on RPL-S (row below)",
+    "no kernel support; described in kernel/IntelXe/xe_platform.cpp, refused at start with a log line; XeProbe stage 1 ran on RPL-S (row below)",
     ""
    ]
   },
@@ -480,27 +480,27 @@
    ],
    "bmg": [
     "same",
-    "family table entry BMG; not run on another BMG ID",
+    "platform descriptor BMG; not run on another BMG ID",
     ""
    ],
    "lnl": [
     "same",
-    "family table entry LNL (GuC image lnl); not run",
+    "platform descriptor LNL (GuC image lnl); not run",
     ""
    ],
    "ptl": [
     "same",
-    "family table entry PTL/WCL (GuC image ptl); not run",
+    "platform descriptor PTL/WCL (GuC image ptl); not run",
     ""
    ],
    "mtl": [
     "same",
-    "family table entry MTL/ARL (GuC image mtl); not run; media GT store test not in v1",
+    "platform descriptor MTL/ARL (GuC image mtl); not run; media GT store test not in v1",
     ""
    ],
    "dg2": [
     "same",
-    "family table entry DG2/ATS-M (GuC image dg2); not run",
+    "platform descriptor DG2/ATS-M (GuC image dg2); not run",
     ""
    ],
    "gen12": [

@@ -5,6 +5,12 @@
 A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e20b`) and, since 0.1.4, the Arc B570
 (the same chip with fewer Xe-cores, `8086:e20c`; untested on hardware). It follows Linux `drivers/gpu/drm/xe` closely.
 
+- **Platforms:** `xe_platform.h`/`xe_platform.cpp` hold one descriptor per device-ID list, as Linux `xe_pci.c` does (IP
+  versions, flags, engine mask, WOPCM, PAT entries, MOCS index, firmware names). Start looks the device up once and
+  logs it (`IntelXe: 8086:e20b: BMG-G21, graphics 20.01, media 13.01, discrete`); only BMG-G21 is supported, every
+  other entry stops start with one log line. The Battlemage constants of the code read the descriptor. Design and what
+  the other families need: [DESIGN-platforms.md](../docs/design/DESIGN-platforms.md).
+
 - **Bring-up:**
   - pcode init status, forcewake;
   - PAT/MOCS tables (xe2), GT and engine workarounds and tunings;
@@ -18,11 +24,15 @@ A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e2
   - a CPU-visible BAR2 window, with buffers spilling to system memory when it is full;
   - userptr, including read-only imports.
 - **uAPI:** the xe uAPI that Mesa's ANV uses (`uapi/xe_drm.h`), over an IOUserClient (`IOAccelIntelXeClient`):
-  - queries, GEM create/mmap, VM bind (async), exec queues on GuC submission;
-  - DRM syncobjs (binary and timeline).
+  - queries, GEM create/mmap (the `GEM_CREATE` extension chain checked as `xe_bo.c` does, in `xe_uapi_args.cpp`),
+    VM bind (async), exec queues on GuC submission;
+  - DRM syncobjs (binary and timeline);
+  - user fences: `DRM_XE_SYNC_TYPE_USER_FENCE` on exec (written by the ring after the batch) and VM_BIND (written once
+    the bind's fence signals), and `DRM_IOCTL_XE_WAIT_USER_FENCE`, as Intel's compute runtime uses them.
   - `uapi/intelxe_drm.h` adds IOSurface implicit fences (the dma-resv model) and scan-out pinning for the display side.
 - **Robustness:** job watchdog / TDR, GT reset, shutdown quiesce, sleep/wake (`intelxePowerEvent`); an engine and
-  fault-register dump in the G2H log when the GuC resets a context or a job never starts.
+  fault-register dump in the G2H log when the GuC resets a context or a job never starts, with the BO moves, TLB
+  invalidations and the faulting VM's last unbind/remap/bind.
 - **Direct submission** (opt-in, `debug.intelxe.direct`, default 0): an application's render or compute queue keeps an
   armed slot on its ring, so a job starts without a GuC round trip ([design](../docs/design/DESIGN-direct-submission.md)).
 - **Settings and readings:** the GPU power profile and clock range from NVRAM (`intelxe-gpu-profile`,
@@ -30,7 +40,7 @@ A plain IOKit kext, without Lilu, for the Arc B580 (Battlemage BMG-G21, `8086:e2
   readable by anyone); `debug.intelxe.jobtime` (each job's stages in GPU timestamps, off by default).
 
 **Version:** since 0.1.2 the kext carries the number of the release that last rebuilt it (0.1.4 here). 0.1.0 to 0.1.3
-shipped `rb7u` (renamed to IntelXe; tested on macOS 26.7.1); 0.1.4 adds the B570's ID, the NVRAM settings, the sensors and job-timing sysctls, the engine dump and direct submission. `rb7u` is
+shipped `rb7u` (renamed to IntelXe; tested on macOS 26.7.1); 0.1.4 adds the B570's ID, the NVRAM settings, the sensors and job-timing sysctls, the engine dump and direct submission (the 9 Nov test build), and since 10 Nov in this tree the platform descriptors, user fences and the wider CAT-fault dump. `rb7u` is
 `rb7t` (VRAM-shared IOSurfaces fixed at boot, purgeable BOs, shared BOs, external fds behind `debug.intelxe.fds`)
 plus `rb7u` (macOS 26 starts drivers while the card is still leaving its reset: wait for config space, read the VRAM
 size again). The earlier steps, each a separate patch in the development tree:
@@ -106,3 +116,14 @@ python3 kernel/HybridPM/build.py --lilu /path/to/Lilu.kext   # -> build/HybridPM
 ```
 
 Built on an Apple Silicon Mac with the Command Line Tools (x86_64 kext target).
+
+Host tests (no GPU, any Mac), from `kernel/IntelXe/tests/`:
+
+```sh
+c++ -std=c++17 -Wall -Wextra -I.. -o platform_test platform_test.cpp ../xe_platform.cpp && ./platform_test
+c++ -std=c++17 -Wall -Wextra -I.. -o uapi_test uapi_test.cpp ../xe_uapi_args.cpp && ./uapi_test
+```
+
+`platform_test` checks the descriptor table against the constants the code used and XeProbe's former family table;
+`uapi_test` checks the sync, user-fence wait and `GEM_CREATE` extension argument handling against Linux xe. The GPU test
+for user fences is `user/tests/kernel/ufence.c`.

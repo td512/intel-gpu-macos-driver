@@ -14,7 +14,7 @@ body:
            sudo sh collect-linux.sh --acpi --bench
            ```
            This is the important one: it records what Linux's own driver finds and programs on your GPU. `--acpi` adds only the DSDT and SSDT tables, never the ones with your Windows licence. Copy the file off the live USB before you reboot.
-        2. **macOS** (if it boots on this machine, with any graphics): `sh collect-macos.sh --probe --acpi`.
+        2. **macOS** (if it boots on this machine, with any graphics): `sh collect-macos.sh --probe --acpi` (on macOS 26 and later `--acpi` finds no tables, as macOS no longer publishes them; the Linux report has them).
 
         A Windows report is welcome too if you dual-boot: `powershell -ExecutionPolicy Bypass -File collect-windows.ps1 -Acpi`.
   - type: input

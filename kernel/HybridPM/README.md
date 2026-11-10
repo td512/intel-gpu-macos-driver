@@ -75,8 +75,9 @@ does not hide it.
 It ships in the release's `-efi.zip` and macOS package (`EFI/OC/Kexts/HybridPM.kext`, with `hpmstat`). On macOS,
 stage 4 of the install guide adds it: `efi.sh` and IntelXe Manager's EFI page copy it and put its `Kernel > Add` entry
 right below `Lilu.kext`'s when the CPU's name is one of these models, and leave it out with a note when the EFI does
-not load Lilu (Lilu is required and not shipped here). The Windows EFI tool (`IntelXe-EFI.ps1`) does not add it yet;
-by hand, see the install guide's *Hybrid Intel CPUs* section.
+not load Lilu (Lilu is required and not shipped here). The Windows EFI tool (`IntelXe-EFI.ps1`) does the same, by the
+name of the CPU of the PC it runs on (checked on macOS against `efi.sh`, not yet run on Windows). By hand, see the
+install guide's *Hybrid Intel CPUs* section.
 
 ## Controls
 

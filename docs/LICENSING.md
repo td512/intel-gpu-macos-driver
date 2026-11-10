@@ -38,7 +38,7 @@ The `SPDX-License-Identifier` header at the top of each file names its licence. 
 | `IntelXeFB.kext` | IntelXeFB.cpp (PolyForm NC) + IntelXeLink (MIT, Intel material) | Noncommercial use only. Pass on the PolyForm terms or their URL and the Required Notice line. |
 | `HybridPM.kext` | our code (MIT) + Lilu's `plugin_start.cpp` (BSD-3-Clause, acidanthera) | Keep the MIT notice and Lilu's BSD-3-Clause notice (in the bundle's `Contents/Resources/LICENSE-Lilu.txt` and the package's `LICENSES/`). It needs Lilu.kext at run time, which is not shipped. |
 | `hpmstat` | our code (MIT) | Keep the MIT notice. |
-| `IntelXe Manager.app`, `libcglzink.dylib` (optional, Zink package) | our code (MIT) | Keep the MIT notice. |
+| `IntelXe Manager.app`, `libcglzink.dylib` and `libcglzink-boot.dylib` (optional, Zink package) | our code (MIT) | Keep the MIT notice. |
 | `NMXAccel.kext`, `NMXAGDC.kext`, `NVMTLDriver` (plugin) | nullmoth code (PolyForm NC) | as above |
 | `libnvmtl_translate.dylib` | translator (LGPL-3.0-or-later) | Provide the source of the translator (including our changes) to anyone who gets the binary, and allow relinking. It is a separate dylib loaded by the plugin, which satisfies that. |
 | `air-runtime` (libLLVM, libzstd) | fetched from nullmoth's release package, not built here | LLVM is Apache-2.0 with LLVM exceptions; Zstandard is BSD-3-Clause. Their licence texts ship in the bundle's `Resources/air-runtime`. |
