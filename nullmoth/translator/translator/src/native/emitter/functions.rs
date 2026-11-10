@@ -228,7 +228,7 @@ pub(in crate::native::emitter) fn is_air_texture_operation(callee: &str) -> bool
         || callee.starts_with("air.fence_texture")
 }
 
-fn sampler_operand_values(function: &LlFunction) -> HashSet<String> {
+pub(in crate::native) fn sampler_operand_values(function: &LlFunction) -> HashSet<String> {
     let mut out = HashSet::default();
     for instruction in function.carrier_insts() {
         let Some(call) = instruction.call().as_deref() else {
