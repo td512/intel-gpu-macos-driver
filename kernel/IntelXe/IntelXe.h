@@ -12,6 +12,7 @@
 #include <IOKit/pci/IOPCIDevice.h>
 #include "xe_platform.h"
 #include "xe_pmt.h"
+#include "xe_pcode.h"   // PCODE_MAILBOX, PCODE_DATA0/1, PCODE_READY, DGFX_*, the power-limit words
 
 #define LOG(fmt, ...) IOLog("IntelXe: " fmt "\n", ##__VA_ARGS__)
 
@@ -49,16 +50,11 @@ static constexpr uint32_t GSMBASE = 0x108100;
 static constexpr uint32_t STOLEN_RESERVED = 0x1082c0;
 static constexpr uint32_t SG_TILE_ADDR_RANGE0 = 0x1083a0;  // size GB 17:8, offset GB 7:1
 static constexpr uint32_t FORCEWAKE_ACK_GT = 0x130044;
-static constexpr uint32_t PCODE_MAILBOX = 0x138124;        // READY bit 31, error 7:0
-static constexpr uint32_t PCODE_DATA0 = 0x138128;
-static constexpr uint32_t PCODE_DATA1 = 0x13812c;
 static constexpr uint32_t BMG_FAN_1_SPEED = 0x138140;
 static constexpr uint32_t BMG_VRAM_TEMPERATURE = 0x1382c0;
 static constexpr uint32_t PCODE_SCRATCH0 = 0x138320;       // BOOT_STATUS 3:1 (4 critical, 7 non-critical failure)
 static constexpr uint32_t BMG_PCIE_CAP = 0x138340;
 static constexpr uint32_t BMG_PACKAGE_TEMPERATURE = 0x138434;
-static constexpr uint32_t PCODE_READY = 1u << 31;
-static constexpr uint32_t DGFX_PCODE_STATUS = 0x7e, DGFX_GET_INIT_STATUS = 0, DGFX_INIT_STATUS_COMPLETE = 1;
 
 struct XeClientState;
 struct IntelXeDpaRun { uint64_t dpa, len; };   // intelxeScanoutPin v2: one physically contiguous piece of a scan-out range
@@ -105,6 +101,9 @@ public:
 	void mediaDown() { mCtOn = mHucOn = mSlpcOn = false; }   // after suspend: reloaded by mediaUp on next use
 	int sensorsString(char *buf, size_t len);   // debug.intelxe.sensors: GT clock, temperatures, energy and power
 	XeEnergyMeter energy;   // card and package energy sums and average power (xe_pmt.h), under gPmtLock
+	// xe_pcode.c xe_pcode_read: one mailbox read under gPcodeLock, PCODE_DEFAULT_TIMEOUT_MS; ENODATA while asleep
+	int pcodeRead(uint32_t mbox, uint32_t *val0, uint32_t *val1);
+	void powerLimitsRead(XePowerLimits *out);   // the power limits for debug.intelxe.sensors (cached 1 s), read only
 private:
 	IOBufferMemoryDescriptor *mHucMem {nullptr}, *mSlpcMem {nullptr};
 	bool mHucOn {false}, mSlpcOn {false};
@@ -113,7 +112,12 @@ private:
 	bool waitFor(uint32_t off, uint32_t mask, uint32_t val, uint32_t us, uint32_t *last = nullptr);
 	bool mapBar0();
 	int probe();
-	int pcodeInitStatus();
+	int pcodeInitStatus();         // takes gPcodeLock
+	int pcodeInitStatusLocked();   // caller holds gPcodeLock
+	int pcodeReadLocked(uint32_t mbox, uint32_t *val0, uint32_t *val1);   // caller holds gPcodeLock
+	XePowerLimits plCache;   // powerLimitsRead's last reading and its time, under gPcodeLock
+	uint64_t plNs {0};
+	bool plLogged {false};
 	int pmtTelemRead(uint32_t guid, uint32_t userOffset, uint64_t *data);   // xe_vsec.c xe_pmt_telem_read, 8 bytes
 	int waitDeviceReady();
 	void publishVram();

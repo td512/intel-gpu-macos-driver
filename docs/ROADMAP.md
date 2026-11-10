@@ -106,8 +106,13 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 
 ### Idle power (PCIe ASPM)
 - **Done (10 Nov):** card and package energy and average power in `debug.intelxe.sensors`, from the BMG PMT telemetry
-  as Linux `xe_hwmon` reads it (host test `pmt_test`). Power limits are left out until the kext has a pcode mailbox
-  helper.
+  as Linux `xe_hwmon` reads it (host test `pmt_test`).
+- **In this tree, untested on hardware (branch `power-limits`):** a pcode mailbox read helper modelled on Linux
+  `xe_pcode.c` (`xe_pcode.h`, host test `pcode_test`), and through it the card and package PL1/PL2 and the card's I1
+  in `debug.intelxe.sensors`, read only (`READ_PL_FROM_FW`, as xe before it writes the limits back; nothing is
+  written). A power window whose package power exceeds the card's by more than a quarter plus 10 W, or either above
+  600 W, is reported n/a and counted ("power windows rejected"): right after a boot the B580 once read package 85 W
+  and then 152 W against a card 37 W.
 - Measured on 10 Nov 2026 through the same PMT registers (read-only reads): idle card power 36.2 W (package
   19.6 W), light load 40.4 W (package 23.3 W). Intel's documentation for Arc B-series ties low idle power to PCIe ASPM L1 on the card's
   path (root port, the card's own switch, the GPU); Windows with ASPM idles far lower.

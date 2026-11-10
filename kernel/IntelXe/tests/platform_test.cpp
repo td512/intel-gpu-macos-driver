@@ -5,6 +5,7 @@
 //      carries the reason it is refused
 //   3. the BMG-G21 values equal the constants the code used before the descriptor (2026-11-10, b17eac9)
 //   4. XeProbe's former family table (copied below as it was) gives the same family and values per id and per name
+//   5. the BMG ids equal Linux pciids.h INTEL_BMG_G21_IDS / INTEL_BMG_IDS, by subplatform
 // c++ -std=c++17 -Wall -Wextra -I.. -o platform_test platform_test.cpp ../xe_platform.cpp && ./platform_test
 #include <stdio.h>
 #include <string.h>
@@ -133,6 +134,19 @@ int main() {
 	}
 	const XePlatformDesc *g31 = xePlatformFind(0xe221);
 	CHECK(g31 && g31 != b && !g31->supported && g31->platform == XE_BATTLEMAGE, "BMG-G31 entry");
+	// 5. the BMG ids against Linux include/drm/intel/pciids.h:852-868 (tree abf8c33): INTEL_BMG_G21_IDS in the supported
+	// G21 entry (the Pro B60 e211 and Pro B50 e212 among them: described, matched only once build.py IOPCIMatch lists
+	// them), the rest of INTEL_BMG_IDS (G31) in the refused entry. Mesa's iris_pci_ids.h also names 0xe215, which
+	// Linux does not list: no entry, as xe would not bind it either.
+	static const uint16_t kLinuxG21[] = {0xe202, 0xe209, 0xe20b, 0xe20c, 0xe20d, 0xe210, 0xe211, 0xe212, 0xe216};
+	static const uint16_t kLinuxG31[] = {0xe220, 0xe221, 0xe222, 0xe223};
+	for (uint16_t id : kLinuxG21)
+		CHECK(xePlatformFind(id) == b, "8086:%04x: Linux INTEL_BMG_G21_IDS, not in the G21 entry", id);
+	for (uint16_t id : kLinuxG31)
+		CHECK(xePlatformFind(id) == g31, "8086:%04x: Linux INTEL_BMG_IDS (G31), not in the G31 entry", id);
+	CHECK(b && b->nIds == sizeof kLinuxG21 / sizeof kLinuxG21[0] && g31 && g31->nIds == sizeof kLinuxG31 / sizeof kLinuxG31[0],
+		"BMG entries hold ids Linux does not list");
+	CHECK(!xePlatformFind(0xe215), "8086:e215 (Mesa only) has no entry");
 
 	printf("%s: %d checks, %d failed (%u ids, %u entries)\n", fails ? "FAIL" : "PASS", checks, fails, ids, kXePlatformCount);
 	return fails ? 1 : 0;
