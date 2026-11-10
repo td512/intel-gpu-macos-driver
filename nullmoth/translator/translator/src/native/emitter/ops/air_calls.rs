@@ -90,7 +90,12 @@ impl Emitter {
                         return Ok(true);
                     }
                     if self.unmodeled_pointers.contains(name) {
-                        return Ok(true);
+                        // WAS: the store was dropped; refused as a plain store through such a pointer is
+                        return Err(format!(
+                            "native emitter: {} through {name}, an unmodeled pointer placeholder that \
+                             addresses nothing; the write would be lost",
+                            call.callee
+                        ));
                     }
                 }
                 let ptr = self.value_id_in(&ptr_arg.value, &ptr_arg.ty, instructions)?;
@@ -300,14 +305,12 @@ impl Emitter {
                         return Ok(true);
                     }
                     if self.unmodeled_pointers.contains(ptr_name) {
-                        let zero = self.const_null(&result_ty)?;
-                        instructions.push(Self::inst(
-                            Op::CopyObject,
-                            Some(result_type),
-                            Some(result),
-                            vec![Operand::IdRef(zero)],
+                        // WAS: a constant zero; a read that addresses nothing is refused (emit_load_resolved)
+                        return Err(format!(
+                            "native emitter: {} {name} through {ptr_name}, an unmodeled pointer placeholder \
+                             that addresses nothing; the value read would be a constant zero",
+                            call.callee
                         ));
-                        return Ok(true);
                     }
                 }
                 let ptr = self.value_id_in(&ptr_arg.value, &ptr_arg.ty, instructions)?;

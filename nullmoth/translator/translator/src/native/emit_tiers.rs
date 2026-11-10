@@ -522,13 +522,15 @@ pub(super) fn requires_device_address_model(parsed: &LlModule) -> bool {
                 _ => None,
             })
             .collect::<HashSet<_>>();
+        // a buffer pointer read out of a buffer: an argument buffer's field, in constant or (WAS: not counted, its
+        // reads were constant zeros) device memory
         let mut argument_buffer_addresses = function
             .carrier_insts()
             .filter(|inst| matches!(inst.result_ty.as_ref(), Some(LlType::Ptr(1 | 2))))
             .filter(|inst| {
                 inst.load()
                     .as_deref()
-                    .is_some_and(|load| matches!(load.ptr.ty, LlType::Ptr(2)))
+                    .is_some_and(|load| matches!(load.ptr.ty, LlType::Ptr(1 | 2)))
             })
             .filter_map(|inst| inst.result.clone())
             .collect::<HashSet<_>>();
@@ -785,6 +787,22 @@ pub fn emit_vulkan_spirv_all_buffers_raw(san_ll: &str) -> Result<Vec<u8>, String
     .into_bytes())
 }
 
+/// The raw constructions take the device-address model for a module that needs it and reads a buffer pointer out of a
+/// buffer (a pointer-typed load from device or constant memory): that pointer is a device address in every binding
+/// model, and the raw form has no other way to read through it.
+fn raw_construction_needs_device_addresses(parsed: &LlModule) -> bool {
+    let holds_buffer_pointers = parsed.functions.iter().any(|function| {
+        function.carrier_insts().any(|inst| {
+            matches!(inst.result_ty.as_ref(), Some(LlType::Ptr(1 | 2)))
+                && inst
+                    .load()
+                    .as_deref()
+                    .is_some_and(|load| matches!(load.ptr.ty, LlType::Ptr(1 | 2)))
+        })
+    });
+    holds_buffer_pointers && requires_device_address_model(parsed)
+}
+
 pub(crate) fn emit_vulkan_spirv_all_buffers_raw_with_sidecar(
     san_ll: &str,
     kern: Option<&meta::KernMeta>,
@@ -795,15 +813,21 @@ pub(crate) fn emit_vulkan_spirv_all_buffers_raw_with_sidecar(
 ) -> Result<crate::emit_sidecar::EmittedSpirv, String> {
     let san_ll = vec_scalar_merge::lower_vector_scalar_pointer_merge(san_ll);
     let mut parsed = LlModule::parse_with_stage_meta(&san_ll, kern, entry_name)?;
+    // A buffer pointer read out of a buffer (an argument buffer's field) holds a device address however that buffer is
+    // bound, so a module that dereferences one keeps the device-address model here, as in the primary construction.
+    // WAS: never, so such a field became an unmodeled placeholder and every read through it a constant zero (Safari's
+    // WebGPU fragment shaders: `fragCoord.xy / uniform` divided by zero). A module that needs device addresses for
+    // another reason keeps its raw form, as before.
+    let requires_device_addresses = raw_construction_needs_device_addresses(&parsed);
     mark_all_device_buffers_raw(&mut parsed, false);
-    finalize_all_buffers_raw_emission(
-        Emitter::new(parsed).with_known_plan_rejections(
-            known_ordinary_plan_rejections,
-            known_ownership_plan_rejections,
-        ),
-        buffer_layouts,
-        &san_ll,
-    )
+    let mut emitter = Emitter::new(parsed).with_known_plan_rejections(
+        known_ordinary_plan_rejections,
+        known_ownership_plan_rejections,
+    );
+    if requires_device_addresses {
+        emitter = emitter.with_bda_device_pointers();
+    }
+    finalize_all_buffers_raw_emission(emitter, buffer_layouts, &san_ll)
 }
 
 pub fn emit_vulkan_spirv_all_buffers_raw_with_workgroup(san_ll: &str) -> Result<Vec<u8>, String> {
@@ -830,15 +854,17 @@ pub(crate) fn emit_vulkan_spirv_all_buffers_raw_with_workgroup_sidecar(
 ) -> Result<crate::emit_sidecar::EmittedSpirv, String> {
     let san_ll = vec_scalar_merge::lower_vector_scalar_pointer_merge(san_ll);
     let mut parsed = LlModule::parse_with_stage_meta(&san_ll, kern, entry_name)?;
+    // device addresses as in emit_vulkan_spirv_all_buffers_raw_with_sidecar
+    let requires_device_addresses = raw_construction_needs_device_addresses(&parsed);
     mark_all_device_buffers_raw(&mut parsed, true);
-    finalize_all_buffers_raw_emission(
-        Emitter::new(parsed).with_known_plan_rejections(
-            known_ordinary_plan_rejections,
-            known_ownership_plan_rejections,
-        ),
-        buffer_layouts,
-        &san_ll,
-    )
+    let mut emitter = Emitter::new(parsed).with_known_plan_rejections(
+        known_ordinary_plan_rejections,
+        known_ownership_plan_rejections,
+    );
+    if requires_device_addresses {
+        emitter = emitter.with_bda_device_pointers();
+    }
+    finalize_all_buffers_raw_emission(emitter, buffer_layouts, &san_ll)
 }
 
 pub fn emit_vulkan_spirv_all_buffers_raw_relooper_feed(san_ll: &str) -> Result<Vec<u8>, String> {

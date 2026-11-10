@@ -2333,18 +2333,20 @@ impl Emitter {
                 return Ok(());
             }
             if self.unmodeled_pointers.contains(ptr_name) {
+                // A pointer read through an unmodeled pointer stays a placeholder: it fails only where a value is
+                // read through it (below) or stored through it (emit_store_resolved).
                 if let LlType::Ptr(addrspace) = result_ty {
                     self.define_unmodeled_byte_pointer_value(&name, addrspace)?;
-                } else {
-                    let zero = self.const_null(&result_ty)?;
-                    instructions.push(Self::inst(
-                        Op::CopyObject,
-                        Some(result_type),
-                        Some(result),
-                        vec![Operand::IdRef(zero)],
-                    ));
+                    return Ok(());
                 }
-                return Ok(());
+                // WAS: OpCopyObject of OpConstantNull. A buffer pointer read out of a bound argument buffer by a
+                // construction without device addresses landed here, and Safari's WebGPU fragment shaders divided
+                // by that zero (`fragCoord.xy / uniform`): every three.js example drew only its background. A read
+                // that addresses nothing is refused, as the store through such a pointer is.
+                return Err(format!(
+                    "native emitter: load {name} through {ptr_name}, an unmodeled pointer placeholder that \
+                     addresses nothing; the value read would be a constant zero"
+                ));
             }
         }
         if self.emit_pointer_from_local_dynamic_field_load(
