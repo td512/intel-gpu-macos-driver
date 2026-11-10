@@ -212,7 +212,12 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
     **Off unless `NVMTL_METAL4=1`** (on upstream; not yet run on the B580); while off, `-gpuAddress` does not touch the
     Metal 4 address table. Counter heaps resolve through this copy's counter sample buffers (stage-boundary sampling,
     ef58dc9), so `queryTimestampFrequency` is 1 GHz (samples are host-clock nanoseconds) when timestamps are offered.
-    MetalFX/DLSS hooks are not carried;
+    MetalFX/DLSS hooks are not carried. The device's Metal 4 entry points (newMTL4CommandQueue, newCompilerWithDescriptor:,
+    newCounterHeapWithDescriptor:, queryTimestampFrequency and the others Metal's `_MTLDevice` already answers) live on a
+    holder class and are copied onto NVMTLDevice only with `NVMTL_METAL4=1` (`nvmtl_m4_install`). Upstream defines them
+    as a device category, which replaced Metal's own answers in every process even with the layer off; on the B580 the
+    first merged build drew WindowServer's desktop white with icons as empty boxes. `user/tests/metal/mtl_m4_inherit.m`
+    (no GPU needed) fails on that build and passes on this one and on the plugin before the merge;
   - the out-of-process AIR decoder is `nvmtl-air-dis` (`air_dis.c`, ac5579d), built beside the plugin by
     `build-intelxe.sh` on the same air-runtime libLLVM, run with an empty environment. The plugin looked for the Metal
     toolchain's `air-opt` in `/Library/GPUBundles/nvmtl`, which this project never shipped, so a library too large for

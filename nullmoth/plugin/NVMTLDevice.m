@@ -1014,6 +1014,7 @@ static const nvmtl_pcie_place *nvmtl_pcie_place_of(mach_port_t accel) {
 }
 static BOOL nvmtl_m4_enabled(void);   // NVMTLMetal4.m (nm29), later in this translation unit
 void nvmtl_m4_note_buffer(id buf, uint64_t addr, uint64_t length);
+void nvmtl_m4_install(Class device);
 int nvmtl_m4_note_current(_Atomic uint64_t note[3], uint64_t addr, uint64_t length);
 void nvmtl_m4_note_buffer_cached(id buf, uint64_t addr, uint64_t length, _Atomic uint64_t note[3]);
 
@@ -1072,6 +1073,7 @@ static void nvmtl_install_hw_resource_pools(id dev)
     if (!nvmtl_process_is_allowed()) { nvlog("  not allow-listed: no device for %s", getprogname()); return nil; }
     nvlog("MTLIOAccelDevice's initWithAcceleratorPort: -> %p", (__bridge void *)self);
     gNVMTLMainDevice = self;
+    nvmtl_m4_install([NVMTLDevice class]);   // Metal 4 entry points only with NVMTL_METAL4=1; otherwise Metal's own stay
     nvmtl_install_hw_resource_pools(self);
     [self nvmtlProbeGPUPass];
     if (nvmtl_vk_init()) {
@@ -2364,11 +2366,6 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
 }
 - (BOOL)areBarycentricCoordsSupported { return YES; }
 - (BOOL)supportsPrimitiveMotionBlur { return NO; }
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunguarded-availability-new"
-- (NSUInteger)sizeOfCounterHeapEntry:(MTL4CounterHeapType)type { return (NSUInteger)nvmtl_heap_entry_size((int)type); }   // macOS 26; the build targets 15
-#pragma clang diagnostic pop
-- (uint64_t)queryTimestampFrequency { return nvmtl_vk_timestamp_frequency(); }   // nm29 (nullmoth f8c5bfb)
 - (NSMutableDictionary *)copyIOSurfaceSharedTextureProperties:(MTLTextureDescriptor *)d {
     const char *why = NULL; uint32_t vkf = 0, bpp = 0; int a8 = 0; MTLPixelFormat f = d ? d.pixelFormat : MTLPixelFormatInvalid;
     if (!d) why = "no descriptor";
