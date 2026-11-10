@@ -202,6 +202,21 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Next:** that switch on the B580; drawing into IOSurfaces (browsers) and CGL pbuffers.
 - The LaunchAgent sets `JAVA_TOOL_OPTIONS` at login, after apps that macOS reopens at login may already have started.
 
+### Native Vulkan for games (after 0.1.4)
+Applications that speak Vulkan reach the GPU today only through MoltenVK -> Metal -> our Metal driver -> ANV, two
+translations deep. ANV is already on the machine (Zink uses it directly). The idea, as the NVIDIA fork
+[HighDelay/nvidia-macos-driver-nvk](https://github.com/HighDelay/nvidia-macos-driver-nvk) does it on NVK
+(same licences: PolyForm Noncommercial, LGPL translator, MIT Mesa):
+- **Wine / CrossOver with DXVK (D3D11) and vkd3d-proton (D3D12) on ANV**, bypassing MoltenVK and the Metal translation:
+  a Vulkan provider under `/Library/GPUBundles/nvmtl/wine`, a Khronos loader built from pinned source, presentation
+  through `VK_EXT_metal_surface` (GPU copies into Metal drawables, macOS composition). Likely the largest gain for
+  Windows games on the B580.
+- **Minecraft's official Vulkan renderer (Minecraft 26.3, Java 25)** on ANV through a small bridge mod, as the fork's
+  `minecraft-nvk`; Minecraft stays our benchmark (general path, no game-specific driver code).
+- **Other Vulkan applications** (MPV and apps that let one choose the Vulkan library).
+- First step: a research report: what of the fork's loader, provider layout, surface path and Wine guide we can reuse,
+  what ANV on macOS lacks for DXVK/vkd3d (extensions, `VK_EXT_metal_surface`, external memory), and a test plan.
+
 ### IntelXe Manager (the app)
 - **Released from 0.1.2:** `app/`, shows the system and the GPU, compares the installed driver with the latest
   release, runs `install.sh` (check, install, repair, undo, uninstall), Zink's script, and `efi.sh` for stages 2 and 4
