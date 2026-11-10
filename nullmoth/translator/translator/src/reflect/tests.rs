@@ -655,6 +655,118 @@ declare { <4 x float>, i8 } @air.sample_texture_cube.v4f32(ptr addrspace(1), ptr
     assert_eq!(state.raw_words, [0; 2]);
 }
 
+// The plugin reflects through reflect_sanitized (nvmtl_reflect, nvmtl_reflect_fc), not through a translation: the
+// synthesized read sampler a sampled-cube texel read samples with must be there too, at the binding the module declares,
+// or the plugin leaves the dummy sampler (linear, maxLod 0.25) in its slot (B580 2026-11-10: levels 1-2 read level 0).
+#[test]
+fn the_reflection_only_entry_reports_the_synthesized_read_sampler_of_a_cube_texel_read() {
+    let constexpr_and_read = r#"
+target triple = "spirv-unknown-vulkan1.2"
+
+@__air_sampler_state.1 = internal addrspace(2) constant i64 -9188470239253738862, align 8
+
+define void @k(ptr addrspace(1) %tex, ptr addrspace(1) %out, i32 %gid) {
+entry:
+  %read = tail call { <4 x float>, i8 } @air.read_texture_cube.v4f32(ptr addrspace(1) %tex, <2 x i32> zeroinitializer, i32 0, i32 0, i32 1)
+  %fetched = extractvalue { <4 x float>, i8 } %read, 0
+  %sample = tail call { <4 x float>, i8 } @air.sample_texture_cube.v4f32(ptr addrspace(1) %tex, ptr addrspace(2) @__air_sampler_state.1, <3 x float> <float 1.000000e+00, float 0.000000e+00, float 0.000000e+00>, i1 true, float 0.000000e+00, float 0.000000e+00, i32 0)
+  %sampled = extractvalue { <4 x float>, i8 } %sample, 0
+  %value = fadd <4 x float> %fetched, %sampled
+  store <4 x float> %value, ptr addrspace(1) %out, align 16
+  ret void
+}
+
+declare { <4 x float>, i8 } @air.read_texture_cube.v4f32(ptr addrspace(1), <2 x i32>, i32, i32, i32)
+declare { <4 x float>, i8 } @air.sample_texture_cube.v4f32(ptr addrspace(1), ptr addrspace(2), <3 x float>, i1, float, float, i32)
+
+!air.kernel = !{!0}
+!air.sampler_states = !{!6}
+!0 = !{ptr @k, !1, !2}
+!1 = !{}
+!2 = !{!3, !4, !5}
+!3 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.sample", !"air.arg_type_name", !"texturecube<float>"}
+!4 = !{i32 1, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"float4", !"air.arg_name", !"out"}
+!5 = !{i32 2, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint", !"air.arg_name", !"gid"}
+!6 = !{!"air.sampler_state", ptr addrspace(2) @__air_sampler_state.1}
+"#;
+    // Apple's front end (metalfe-32023.921) on mtl_cube_read.m's rd_cube: texturecube<float, read>, read(g.xy, face, lod)
+    let front_end = include_str!("../../tests/fixtures/texcube/rd_cube_read_lod.ll");
+    let tmp = std::env::temp_dir().join(format!(
+        "metal2vulkan_reflect_only_read_sampler_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::create_dir_all(&tmp);
+    for (name, ll) in [("constexpr + read", constexpr_and_read), ("rd_cube", front_end)] {
+        let reflected = crate::reflect_sanitized(
+            ll,
+            crate::passes::Stage::Kernel,
+            crate::passes::TransformOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{name}: reflect: {e}"));
+        let (spv, translated) = crate::translate_sanitized_native_reflected(
+            ll,
+            crate::passes::Stage::Kernel,
+            &tmp,
+            crate::passes::TransformOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{name}: translate: {e}"));
+        let read_sampler = |reflection: &ShaderReflection| {
+            let found = reflection
+                .bindings
+                .iter()
+                .filter(|binding| binding.kind == ResourceKind::SynthesizedReadSampler)
+                .collect::<Vec<_>>();
+            assert_eq!(found.len(), 1, "{name}: one synthesized read sampler");
+            found[0].clone()
+        };
+        let only = read_sampler(&reflected);
+        let full = read_sampler(&translated);
+        let at = only.descriptor.expect("the read sampler has a descriptor binding");
+        assert_eq!(Some(at), full.descriptor, "{name}: the reflection-only binding is the translation's");
+        assert_eq!(at.set, reflected.descriptor_layout.set);
+        assert!(
+            reflected.descriptor_layout.samplers.start <= at.binding
+                && at.binding < reflected.descriptor_layout.samplers.end,
+            "{name}: the read sampler sits in the sampler band (the plugin's slot is its offset into it)"
+        );
+        assert_eq!(only.static_sampler, Some(StaticSamplerState::synthesized_read_sampler()));
+        // the module samples through a sampler variable at exactly that binding
+        let words = spv
+            .chunks_exact(4)
+            .map(|w| u32::from_le_bytes(w.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        let (mut sets, mut bindings, mut samplers, mut pointers, mut variables) =
+            (vec![], vec![], vec![], vec![], vec![]);
+        let mut i = 5;
+        while i < words.len() {
+            let (count, op) = ((words[i] >> 16) as usize, words[i] & 0xffff);
+            let w = &words[i..i + count];
+            match op {
+                71 if w[2] == 34 => sets.push((w[1], w[3])),
+                71 if w[2] == 33 => bindings.push((w[1], w[3])),
+                26 => samplers.push(w[1]),
+                32 => pointers.push((w[1], w[3])),
+                59 => variables.push((w[2], w[1])),
+                _ => {}
+            }
+            i += count;
+        }
+        let sampler_at_binding = variables.iter().any(|&(variable, pointer)| {
+            bindings.contains(&(variable, at.binding))
+                && sets.contains(&(variable, at.set))
+                && pointers
+                    .iter()
+                    .any(|&(p, pointee)| p == pointer && samplers.contains(&pointee))
+        });
+        assert!(sampler_at_binding, "{name}: the SPIR-V declares a sampler at set {} binding {}", at.set, at.binding);
+        // a constexpr sampler keeps its own slot
+        for constexpr in reflected.bindings.iter().filter(|b| b.kind == ResourceKind::StaticSampler) {
+            assert_ne!(constexpr.descriptor.map(|d| d.binding), Some(at.binding), "{name}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(tmp);
+}
+
 #[test]
 fn an_inline_integer_sampler_reflects_as_a_static_sampler() {
     // Older Metal toolchains (here: Apple LLVM 902.14, SDK 10.15.4) write a constexpr sampler's packed state word

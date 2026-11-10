@@ -693,6 +693,13 @@ pub fn translate_reflected_with_options(
     Ok((spv, reflection))
 }
 
+// Whether lowering may call default_read_sampler (passes/stage_input/layout.rs), from the AIR text: a sampled cube texel
+// read (air.read_texture_cube*, air.read_depth_cube*: cube_fetch_as_center_sample), air.get_read_sampler (and the gathers
+// through it), or a LOD query of an integer texture (air.calculate_*lod*). A superset: a false positive costs one emission.
+fn may_synthesize_read_sampler(san_ll: &str) -> bool {
+    san_ll.contains("cube") || san_ll.contains("air.get_read_sampler") || san_ll.contains("air.calculate_")
+}
+
 pub fn reflect_sanitized(
     san_ll: &str,
     stage: passes::Stage,
@@ -701,6 +708,7 @@ pub fn reflect_sanitized(
     let lowered = lower_air_text_if_enabled(san_ll);
     let san_ll = lowered.as_ref();
     let stage_meta = parse_stage_meta(san_ll, stage);
+    let emit_options = options;
     let options = options_for_air(san_ll, options)?;
     let mut reflection = build_reflection(
         stage,
@@ -714,6 +722,19 @@ pub fn reflect_sanitized(
     reflection.function_constants = meta::parse_function_constants(san_ll);
     reflection.refine_buffer_access_from_entry(san_ll);
     reflection.add_static_samplers(san_ll)?;
+    // The synthesized read sampler (and null textures) exist only in the emitted module: a reflection without the module
+    // left them out, and the plugin, which reflects through here (nvmtl_reflect / nvmtl_reflect_fc), never bound the read
+    // sampler a sampled-cube texel read samples with, so the slot read its dummy sampler (linear, maxLod 0.25: level-0
+    // data, filtered; B580 2026-11-10). A module that can need one is emitted as the plugin's translation emits it
+    // (construct_primary_module) and its placeholders are reported from it, at the bindings it declares.
+    if may_synthesize_read_sampler(san_ll) {
+        if let Ok(finished) = construct_primary_module(san_ll, stage, &stage_meta, emit_options) {
+            reflection.report_synthesized_placeholders(
+                &finished.module,
+                &finished.placeholder_descriptor_bindings,
+            );
+        }
+    }
     if stage == passes::Stage::Kernel
         && native::requires_device_address_model_for_source(
             san_ll,
@@ -850,6 +871,17 @@ pub fn translate_native_no_retry_constructed_with_options(
     let san_ll = lowered.as_ref();
     reject_unsupported_metal_linked_functions(san_ll)?;
     let stage_meta = parse_stage_meta(san_ll, stage);
+    construct_primary_module(san_ll, stage, &stage_meta, options).map(|finished| finished.bytes)
+}
+
+// The module translate_native_no_retry_constructed_with_options emits (the plugin's translation), from AIR text that is
+// already lowered (lower_air_text_if_enabled) and whose stage metadata is parsed.
+fn construct_primary_module(
+    san_ll: &str,
+    stage: passes::Stage,
+    stage_meta: &StageMeta,
+    options: passes::TransformOptions,
+) -> Result<FinishedModule, String> {
     passes::validate_kernel_dispatch_options(stage, options)?;
     let air_data_layout = crate::layout::AirDataLayout::from_ir(san_ll)?;
     let tmp = Path::new("");
@@ -886,19 +918,18 @@ pub fn translate_native_no_retry_constructed_with_options(
     // the inlined module validated and rendered black, the raw one lit the scene as the reference GPU does
     if raw_buffers_first_on() {
         if let Ok(finished) = rc.construct_raw() {
-            return Ok(finished.bytes);
+            return Ok(finished);
         }
     }
-    let constructed = match primary {
-        Ok(finished) => finished,
+    match primary {
+        Ok(finished) => Ok(finished),
         Err(emit_err) if rc.needs_raw_construction() => {
             rc.construct_raw().map_err(|construction_error| {
                 format!("{emit_err}; raw construction failed: {construction_error}")
-            })?
+            })
         }
-        Err(emit_err) => return Err(emit_err),
-    };
-    Ok(constructed.bytes)
+        Err(emit_err) => Err(emit_err),
+    }
 }
 
 fn translate_native_no_retry_with_meta(
