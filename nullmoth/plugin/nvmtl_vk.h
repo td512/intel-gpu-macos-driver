@@ -388,11 +388,14 @@ int  nvmtl_vk_image_create_ex(uint32_t w, uint32_t h, uint32_t vkfmt, uint32_t b
 int  nvmtl_vk_image_create_ex2(uint32_t w, uint32_t h, uint32_t vkfmt, uint32_t bpp, int a8, uint32_t mips, int storage, nvk_image *out);
 int  nvmtl_vk_format_is_storage(uint32_t vkfmt);
 int  nvmtl_vk_format_mip_blit(uint32_t vkfmt);
+int  nvmtl_vk_formats_filter_linear(const uint32_t *vkfmts, int n);
+int  nvmtl_vk_formats_msaa(const uint32_t *vkfmts, int n, uint32_t samples);
 int  nvmtl_vk_bind_storage_view(nvk_cmdbuf *c, uint32_t set, uint32_t index, void *view);
 uint32_t nvmtl_vk_bindless_put(void *view);
 void nvmtl_vk_bindless_put_storage(uint32_t slot, void *view);
 uint32_t nvmtl_vk_bindless_put_texel(void *bufview, int storage);
 uint32_t nvmtl_vk_bindless_sampler_slot(void *vksampler);
+uint32_t nvmtl_vk_bindless_sampler_capacity(void);
 void     nvmtl_vk_bindless_drop(uint32_t slot);
 int  nvmtl_vk_pipeline_create_ex(const void *vs, size_t vn, const void *fs, size_t fn, uint32_t vkfmt, int hasDepth, nvk_pipeline *out);
 int  nvmtl_vk_image_view_create_ex(nvk_image *img, uint32_t vkfmt, int a8, uint32_t baseLevel, uint32_t levelCount, void **out_view);

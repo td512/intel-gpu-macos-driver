@@ -222,6 +222,25 @@ static void nvmtl_alloc_failed(const char *what) {
 }
 @interface MTLIOAccelDevice : NSObject
 - (instancetype)initWithAcceleratorPort:(mach_port_t)port;
+- (mach_port_t)acceleratorPort;
+// MTLDevice properties that Metal's MTLIOAccelDevice (or its superclass _MTLDevice) answers for this device, declared
+// here so the compiler knows the superclass implements them (read from Metal.framework, x86_64, macOS 27.0.1):
+// registryID is IORegistryEntryGetRegistryEntryID of the accelerator port the device was made on (NMXAccel/NVAccel);
+// lowPower, headless and removable are bits of the accelerator's config (the kext's populateAccelConfig); the peer
+// values come from IOAccelDeviceGetPeerInfo, which reports a device outside any peer group as 0/0/0 (an M1 answers
+// the same); locationNumber is the first number in an "AAPL,slot-name" above the accelerator, else 0; location and
+// maxTransferRate are refined by NVMTLDevice; sparseTileSizeInBytes is _MTLDevice's 16384 (no sparse textures here).
+@property (readonly) uint64_t registryID;
+@property (readonly, getter=isLowPower) BOOL lowPower;
+@property (readonly, getter=isHeadless) BOOL headless;
+@property (readonly, getter=isRemovable) BOOL removable;
+@property (readonly) uint64_t peerGroupID;
+@property (readonly) uint32_t peerIndex;
+@property (readonly) uint32_t peerCount;
+@property (readonly) MTLDeviceLocation location;
+@property (readonly) NSUInteger locationNumber;
+@property (readonly) uint64_t maxTransferRate;
+@property (readonly) NSUInteger sparseTileSizeInBytes;
 @end
 @protocol MTLDeviceSPI <NSObject> @end
 @interface NVMTLDevice : MTLIOAccelDevice <MTLDevice, MTLDeviceSPI>
@@ -922,6 +941,64 @@ static bool nvmtl_process_is_allowed(void)
     // refusal and could not tell an empty or replaced list from a deny rule
     else nvlog("  no rule in nvmtl-allow.txt matches %s: no device (the list was read; it needs a '*' or '%s' line)", me, me);
     return ok;
+}
+
+/* Where the GPU sits on PCI Express, for -location and -maxTransferRate. Metal's MTLIOAccelDevice calls a GPU slotted
+   only when an "AAPL,slot-name" is published above the accelerator (a PC's firmware publishes none unless the boot
+   loader injects one; this repository's EFI does not), and takes the
+   transfer rate from the first IOPCIExpressLinkStatus above the accelerator, the GPU function's own link. An Arc card
+   puts the GPU behind a PCIe switch on the card (B580: E20B behind E2FF/E2F0), so that link is the switch's internal
+   one and says nothing about the slot. Here the walk goes from the accelerator up to the PCIe root port, reading what
+   IOPCIFamily publishes for each IOPCIDevice: a downstream port (root port, type 4, or switch downstream port, type 6)
+   whose PCI Express Capabilities register (IOPCIExpressCapabilities) has Slot Implemented (bit 8) puts the GPU in a
+   slot, a tunnelled device (IOPCITunnelled, Thunderbolt) puts it outside the computer, and the root port's link
+   (IOPCIExpressLinkStatus: speed in bits 0-3, width in bits 4-9) is the one every transfer between system memory and
+   VRAM crosses. Read once per process; a property a sandbox does not let the process read counts as absent. */
+typedef struct { int pci, slot, tunnelled; uint32_t rootLink, gpuLink; uint64_t rate; } nvmtl_pcie_place;
+static int nvmtl_registry_u32(io_registry_entry_t e, CFStringRef key, uint32_t *out) {
+    CFTypeRef v = IORegistryEntryCreateCFProperty(e, key, kCFAllocatorDefault, 0);
+    long long n = 0; int ok = v && CFGetTypeID(v) == CFNumberGetTypeID() && CFNumberGetValue(v, kCFNumberLongLongType, &n);
+    if (v) CFRelease(v);
+    if (ok) *out = (uint32_t)n;
+    return ok;
+}
+// Bytes per second per lane for 2.5, 5, 8, 16 and 32 GT/s: the table Metal's getSlottedGPUProperties:transferRate:
+// multiplies the link width by (read from Metal.framework), so a rate here reads the same as Apple's for the same link.
+static uint64_t nvmtl_pcie_link_rate(uint32_t linkStatus) {
+    static const uint64_t perLane[5] = { 250000000ull, 500000000ull, 984615384ull, 1969230769ull, 3938461538ull };
+    const uint32_t speed = linkStatus & 0xF, width = (linkStatus >> 4) & 0x3F;
+    if (linkStatus == 0xFFFF || speed < 1 || speed > 5 || width < 1) return 0;   // unknown speed, no link, or a dead function
+    return perLane[speed - 1] * width;
+}
+static const nvmtl_pcie_place *nvmtl_pcie_place_of(mach_port_t accel) {
+    static nvmtl_pcie_place p; static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        io_registry_entry_t e = accel;
+        if (e) IOObjectRetain(e);
+        for (int depth = 0; e && depth < 64; depth++) {
+            if (IOObjectConformsTo(e, "IOPCIDevice")) {
+                uint32_t caps = 0, link = 0;
+                CFTypeRef t = IORegistryEntryCreateCFProperty(e, CFSTR("IOPCITunnelled"), kCFAllocatorDefault, 0);
+                if (t && CFGetTypeID(t) == CFBooleanGetTypeID() && CFBooleanGetValue(t)) p.tunnelled = 1;
+                if (t) CFRelease(t);
+                const int hasLink = nvmtl_registry_u32(e, CFSTR("IOPCIExpressLinkStatus"), &link);
+                if (!p.pci++ && hasLink) p.gpuLink = link;
+                if (nvmtl_registry_u32(e, CFSTR("IOPCIExpressCapabilities"), &caps)) {
+                    const uint32_t type = (caps >> 4) & 0xF;
+                    if ((type == 4 || type == 6) && (caps & 0x100)) p.slot = 1;
+                    if (type == 4) { if (hasLink) { p.rootLink = link; p.rate = nvmtl_pcie_link_rate(link); } break; }
+                }
+            }
+            io_registry_entry_t up = 0;
+            const kern_return_t kr = IORegistryEntryGetParentEntry(e, kIOServicePlane, &up);
+            IOObjectRelease(e);
+            e = kr == KERN_SUCCESS ? up : 0;
+        }
+        if (e) IOObjectRelease(e);
+        nvlog("pcie: %d PCI function(s) up to the root port, slot %d, tunnelled %d, GPU link 0x%x, root port link 0x%x -> %llu MB/s",
+              p.pci, p.slot, p.tunnelled, p.gpuLink, p.rootLink, (unsigned long long)(p.rate / 1000000));
+    });
+    return &p;
 }
 
 @implementation NVMTLDevice
@@ -2570,6 +2647,68 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
 - (BOOL)hasUnifiedMemory { return NO; }
 - (uint64_t)dedicatedMemorySize { return nvmtl_vk_vram_bytes(); }
 
+// Metal's own answer when it has one (an "AAPL,slot-name" above the accelerator, or a GPU the kext calls removable);
+// otherwise the PCIe topology (nvmtl_pcie_place_of): a tunnelled GPU is external, one below a port with a slot is in a
+// slot. A GPU with neither (soldered to the board, or a sandbox that hides the registry) keeps Metal's answer.
+- (MTLDeviceLocation)location {
+    const MTLDeviceLocation s = [super location];
+    if (s == MTLDeviceLocationSlot || s == MTLDeviceLocationExternal) return s;
+    const nvmtl_pcie_place *p = nvmtl_pcie_place_of([self acceleratorPort]);
+    if (p->tunnelled) return MTLDeviceLocationExternal;
+    if (p->slot) return MTLDeviceLocationSlot;
+    return s;
+}
+// For a GPU in a slot: the root port's link (see nvmtl_pcie_place_of; an Arc card's own function sits behind the
+// card's switch, so Metal's answer from it is the switch's internal link). Metal's answer otherwise: an external GPU's
+// rate comes from its Thunderbolt link, and a built-in GPU's is 0 by Apple's definition.
+- (uint64_t)maxTransferRate {
+    const nvmtl_pcie_place *p = nvmtl_pcie_place_of([self acceleratorPort]);
+    if (p->rate && [self location] == MTLDeviceLocationSlot) return p->rate;
+    return [super maxTransferRate];
+}
+// The getter isDepth24Stencil8PixelFormatSupported is in the Contract category (NVMTLDevice_contract.m).
+@dynamic depth24Stencil8PixelFormatSupported;
+// R32Float, RG32Float and RGBA32Float sampled through a linear filter, as the Vulkan driver reports it for those
+// formats (Xe2 filters 32-bit floats: Mesa's isl_format.c lists filtering for them from gen 5). Metal's _MTLDevice
+// answers this from the feature table -initFeatureQueries builds, which MTLIOAccelDevice's initializer does not build
+// and this plugin never asks for, so for this device it said NO (Metal.framework of macOS 27.0.1, x86_64).
+- (BOOL)supports32BitFloatFiltering {
+    static int v = -1;
+    if (v < 0) {
+        const uint32_t f[] = { VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT };
+        v = nvmtl_vk_formats_filter_linear(f, 3);
+        nvlog("supports32BitFloatFiltering -> %s (Vulkan linear filtering of R32/RG32/RGBA32 float)", v ? "YES" : "NO");
+    }
+    return v ? YES : NO;
+}
+// Apple's definition: multisampled R32, RG32 and RGBA32 Uint and Sint textures can be made, and multisampled R32,
+// RG32 and RGBA32 Float textures can be resolved. Asked of the Vulkan driver as 4x (the count every Metal GPU offers)
+// 2D colour attachments that are also sampled, for all nine formats; a colour resolve needs nothing more of a format
+// than being a multisampled colour attachment. NO from _MTLDevice before, for the reason above.
+- (BOOL)supports32BitMSAA {
+    static int v = -1;
+    if (v < 0) {
+        const uint32_t f[] = { VK_FORMAT_R32_UINT, VK_FORMAT_R32_SINT, VK_FORMAT_R32G32_UINT, VK_FORMAT_R32G32_SINT,
+                               VK_FORMAT_R32G32B32A32_UINT, VK_FORMAT_R32G32B32A32_SINT,
+                               VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT };
+        v = nvmtl_vk_formats_msaa(f, 9, VK_SAMPLE_COUNT_4_BIT);
+        nvlog("supports32BitMSAA -> %s (Vulkan 4x colour attachments of the 32-bit integer and float formats)", v ? "YES" : "NO");
+    }
+    return v ? YES : NO;
+}
+// calculate_clamped_lod and calculate_unclamped_lod: the translator lowers them for a non-array 2D texture only
+// (passes/air_calls/dispatch_texture.rs refuses array, cube and 3D textures, and pixel-coordinate samplers), so YES
+// would let a shader that uses them on another texture type fail to build. NO, as _MTLDevice answered before.
+- (BOOL)supportsQueryTextureLOD { return NO; }
+// interpolant<T, P> (interpolate_at_center/centroid/sample/offset): the translator has no lowering for it.
+- (BOOL)supportsPullModelInterpolation { return NO; }
+// Placement sparse resources (macOS 26.4): not built here, as no sparse resource is (sparseBufferTier and
+// sparseTextureTier None, no resourceStateCommandEncoder).
+- (BOOL)supportsPlacementSparse { return NO; }
+// The heap's sampler slots less the dummy (2047). _MTLDevice answered 2048 from its feature-profile table, one more
+// than the heap holds: the 2048th distinct sampler would read the default sampler.
+- (NSUInteger)maxArgumentBufferSamplerCount { return nvmtl_vk_bindless_sampler_capacity(); }
+
 - (BOOL)nvmtlSampleCountOK:(NSUInteger)n {
     if (n == 0 || (n & (n - 1)) != 0 || n > 64) return NO;
     uint32_t col = 0, dep = 0; nvmtl_vk_pubcaps(&col, &dep, NULL, NULL);
@@ -2614,6 +2753,12 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
 - (void)setShouldMaximizeConcurrentCompilation:(BOOL)v {
     objc_setAssociatedObject(self, @selector(shouldMaximizeConcurrentCompilation), @(v ? YES : NO), OBJC_ASSOCIATION_RETAIN);
     nvlog("setShouldMaximizeConcurrentCompilation:%d - recorded; the translator path is still serialised", v ? 1 : 0);
+}
+// The pipeline builds that run at once: the width of the plugin's own compile pool (nvmtl_pipeline_compile_queue).
+// _MTLDevice answered with the number of MTLCompilerService processes, which this plugin does not use (it translates
+// in-process). The pool does not grow with shouldMaximizeConcurrentCompilation, so the answer is the same either way.
+- (NSUInteger)maximumConcurrentCompilationTaskCount {
+    return (NSUInteger)nvmtl_pipeline_compile_queue().maxConcurrentOperationCount;
 }
 
 - (id<MTLCommandQueue>)newCommandQueueWithDescriptor:(MTLCommandQueueDescriptor *)d {
