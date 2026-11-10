@@ -617,11 +617,10 @@ pub extern "C" fn nvmtl_translate_fc_spec2(
     }
     if ndefined > 0 && defined.is_null() { return -1; }
     let defined: Vec<u32> = (0..ndefined).map(|i| unsafe { *defined.add(i) }).collect();
-    // nm29: the baking runs with the other constants unknown too. Since nullmoth b2b597b it also folds the struct a static
-    // initializer fills from function constants, and an unbaked constant's `undef` initializer read as 0 there would
-    // freeze every field copied from it to 0 in the shared module (the material bug's class: every variant drawn as the
-    // all-zero one). Unknown, only the fields copied from baked constants are folded.
-    let specialized = match metal2vulkan::meta::with_function_constants_unknown(|| metal2vulkan::specialize_air_function_constants(ll, &values)) {
+    // Baked: the structural constants. Defined: every constant the variant supplies. The config-struct fold runs after
+    // the defined set is marked and with the unbaked constants unknown (specialize_air_function_constants_for_spec);
+    // folding first replaced every field guarded by is_function_constant_defined with its default (nm29: white desktop).
+    let specialized = match metal2vulkan::specialize_air_function_constants_for_spec(ll, &values, &defined) {
         Ok(v) => v,
         Err(e) => { set_err(&format!("AIR specialization: {e}")); return -1; }
     };

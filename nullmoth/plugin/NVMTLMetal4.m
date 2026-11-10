@@ -812,11 +812,21 @@ static void nvmtl_m4_convert_attachments(MTL4RenderPipelineColorAttachmentDescri
 // ---- the device's Metal 4 entry points ----------------------------------------------------------------------------------
 // Signatures use plain `id` (the Metal 4 protocol types do not exist on macOS 15, which this plugin also loads on) and every
 // body is guarded; with the knob off or on an older OS each answers nil, as a device without Metal 4 does.
-@implementation NVMTLDevice (NVMTLMetal4)
+// The device's Metal 4 entry points. NVMTLDevice is a subclass of Metal's MTLIOAccelDevice, whose superclass _MTLDevice
+// already answers every one of these selectors (newMTL4CommandQueue, newCommandAllocator, newCommandBuffer,
+// newArgumentTableWithDescriptor:error:, newCompilerWithDescriptor:error:, newArchiveWithURL:error:,
+// newCounterHeapWithDescriptor:error:, sizeOfCounterHeapEntry:, queryTimestampFrequency) with Metal's own layer over the
+// driver's Metal 3 objects. Upstream defines them as a category on the device, which replaces Metal's answers in every
+// process even while this layer is off (they then returned nil): on macOS 26 WindowServer (Core Animation / RenderBox)
+// asks the device for a Metal 4 compiler and queue, and with nil it drew the desktop white, icons as empty boxes (nm29 on
+// the B580; the plugin before the merge inherited Metal's implementations). They are therefore kept on a holder class and
+// copied onto NVMTLDevice only when NVMTL_METAL4=1 (nvmtl_m4_install); off, the device answers exactly as before.
+@interface NVMTL4DeviceMethods : NSObject @end   // its methods run with an NVMTLDevice as self (nvmtl_m4_install)
+@implementation NVMTL4DeviceMethods
 - (id)newMTL4CommandQueue {
     if (@available(macOS 26.0, *)) {
-        if (!nvmtl_m4_enabled() || !nvmtl_m4_hidden_queue(self)) return nil;
-        NVMTL4Queue *q = [NVMTL4Queue new]; q->_dev = self; nvlog("Metal 4: newMTL4CommandQueue -> %p", (__bridge void *)q); return q;
+        if (!nvmtl_m4_enabled() || !nvmtl_m4_hidden_queue((id)self)) return nil;
+        NVMTL4Queue *q = [NVMTL4Queue new]; q->_dev = (id)self; nvlog("Metal 4: newMTL4CommandQueue -> %p", (__bridge void *)q); return q;
     }
     return nil;
 }
@@ -831,7 +841,7 @@ static void nvmtl_m4_convert_attachments(MTL4RenderPipelineColorAttachmentDescri
     return nil;
 }
 - (id)newCommandAllocator {
-    if (@available(macOS 26.0, *)) { if (!nvmtl_m4_enabled()) return nil; NVMTL4Allocator *a = [NVMTL4Allocator new]; a->_dev = self; return a; }
+    if (@available(macOS 26.0, *)) { if (!nvmtl_m4_enabled()) return nil; NVMTL4Allocator *a = [NVMTL4Allocator new]; a->_dev = (id)self; return a; }
     return nil;
 }
 - (id)newCommandAllocatorWithDescriptor:(id)descriptor error:(NSError **)err {
@@ -844,13 +854,13 @@ static void nvmtl_m4_convert_attachments(MTL4RenderPipelineColorAttachmentDescri
     return nil;
 }
 - (id)newCommandBuffer {
-    if (@available(macOS 26.0, *)) { if (!nvmtl_m4_enabled()) return nil; NVMTL4CommandBuffer *c = [NVMTL4CommandBuffer new]; c->_dev = self; return c; }
+    if (@available(macOS 26.0, *)) { if (!nvmtl_m4_enabled()) return nil; NVMTL4CommandBuffer *c = [NVMTL4CommandBuffer new]; c->_dev = (id)self; return c; }
     return nil;
 }
 - (id)newArgumentTableWithDescriptor:(id)descriptor error:(NSError **)err {
     if (@available(macOS 26.0, *)) {
         if (!nvmtl_m4_enabled()) return nil;
-        return [[NVMTL4ArgumentTable alloc] initWithDescriptor:descriptor device:self];
+        return [[NVMTL4ArgumentTable alloc] initWithDescriptor:descriptor device:(id)self];
     }
     return nil;
 }
@@ -858,7 +868,7 @@ static void nvmtl_m4_convert_attachments(MTL4RenderPipelineColorAttachmentDescri
     if (@available(macOS 26.0, *)) {
         MTL4CompilerDescriptor *d = descriptor;
         if (!nvmtl_m4_enabled()) return nil;
-        NVMTL4Compiler *c = [NVMTL4Compiler new]; c->_dev = self; c->_label = [d.label copy]; c->_ser = d.pipelineDataSetSerializer; return c;
+        NVMTL4Compiler *c = [NVMTL4Compiler new]; c->_dev = (id)self; c->_label = [d.label copy]; c->_ser = d.pipelineDataSetSerializer; return c;
     }
     return nil;
 }
@@ -866,6 +876,11 @@ static void nvmtl_m4_convert_attachments(MTL4RenderPipelineColorAttachmentDescri
     if (err) *err = [NSError errorWithDomain:MTLLibraryErrorDomain code:MTLLibraryErrorUnsupported userInfo:@{ NSLocalizedDescriptionKey: @"Metal 4: pipeline archives are not implemented" }];
     return nil;
 }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
+- (NSUInteger)sizeOfCounterHeapEntry:(MTL4CounterHeapType)type { return (NSUInteger)nvmtl_heap_entry_size((int)type); }
+#pragma clang diagnostic pop
+- (uint64_t)queryTimestampFrequency { return nvmtl_vk_timestamp_frequency(); }   // nullmoth f8c5bfb: our samples are host nanoseconds
 - (id)newCounterHeapWithDescriptor:(id)descriptor error:(NSError **)err {
     if (@available(macOS 26.0, *)) {
     MTL4CounterHeapDescriptor *d = descriptor;
@@ -890,4 +905,17 @@ static void nvmtl_m4_convert_attachments(MTL4RenderPipelineColorAttachmentDescri
 }
 
 @end
+// Copies the holder's methods onto NVMTLDevice, once, when NVMTL_METAL4=1 (called from the device's initializer, after the
+// conf file has set the process's knobs). Nothing is installed otherwise, so Metal's own _MTLDevice answers stay.
+void nvmtl_m4_install(Class device)
+{
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if (!nvmtl_m4_enabled() || !device) return;
+        unsigned n = 0; Method *ms = class_copyMethodList([NVMTL4DeviceMethods class], &n);
+        for (unsigned i = 0; i < n; i++) class_replaceMethod(device, method_getName(ms[i]), method_getImplementation(ms[i]), method_getTypeEncoding(ms[i]));
+        free(ms);
+        nvlog("Metal 4: %u device entry points installed (NVMTL_METAL4=1)", n);
+    });
+}
 #pragma clang attribute pop

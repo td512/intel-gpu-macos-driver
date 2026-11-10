@@ -212,7 +212,12 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
     **Off unless `NVMTL_METAL4=1`** (on upstream; not yet run on the B580); while off, `-gpuAddress` does not touch the
     Metal 4 address table. Counter heaps resolve through this copy's counter sample buffers (stage-boundary sampling,
     ef58dc9), so `queryTimestampFrequency` is 1 GHz (samples are host-clock nanoseconds) when timestamps are offered.
-    MetalFX/DLSS hooks are not carried;
+    MetalFX/DLSS hooks are not carried. The device's Metal 4 entry points (newMTL4CommandQueue, newCompilerWithDescriptor:,
+    newCounterHeapWithDescriptor:, queryTimestampFrequency and the others Metal's `_MTLDevice` already answers) live on a
+    holder class and are copied onto NVMTLDevice only with `NVMTL_METAL4=1` (`nvmtl_m4_install`). Upstream defines them
+    as a device category, which replaced Metal's own answers in every process even with the layer off; on the B580 the
+    first merged build drew WindowServer's desktop white with icons as empty boxes. `user/tests/metal/mtl_m4_inherit.m`
+    (no GPU needed) fails on that build and passes on this one and on the plugin before the merge;
   - the out-of-process AIR decoder is `nvmtl-air-dis` (`air_dis.c`, ac5579d), built beside the plugin by
     `build-intelxe.sh` on the same air-runtime libLLVM, run with an empty environment. The plugin looked for the Metal
     toolchain's `air-opt` in `/Library/GPUBundles/nvmtl`, which this project never shipped, so a library too large for
@@ -292,9 +297,16 @@ Note: `kexts/NVRM/accel/iofam/`, `kexts/NVRM/accel/re/` and `kexts/NVRMAGDC/Appl
   passed it through: every offset read half a pixel up and to the left); `interpolate_at_center` (an offset of 0, 0);
   half interpolants, interpolated at 32 bits as half varyings travel and converted (upstream refused any fragment
   function with a half interpolant). The struct-wrapped scalar-array load (14c19f3) came to upstream from WatchAndyTW's
-  DaVinci Resolve report. `nvmtl_translate_fc_spec2` bakes its structural constants with the others unknown, so the
-  config-struct fold reads only baked values (checked: every specialization constant of QuartzCore's `fixed_frag` stays
-  referenced; the module shrinks from ~700 KB to 23-26 KB for five of six sets).
+  DaVinci Resolve report. In `nvmtl_translate_fc_spec2` (this copy's fc-spec path) the config-struct fold runs only
+  after every defined constant is marked defined and with the unbaked ones unknown
+  (`specialize_air_function_constants_for_spec`): its evaluator reads a remaining `air.is_function_constant_defined` as
+  false, and the first merged build folded each field the initializer guards with `is_function_constant_defined(c) ?
+  c : default` to its default for every constant left to a specialization constant. Core Animation's `fixed_frag` reads
+  its image functions that way: WindowServer drew a white desktop, every textured and glyph draw empty, on the B580,
+  while every SPIR-V corpus stayed byte-identical (the whole-variant path, which bakes every value, was right). The
+  fc-spec module keeps those fields as the module before the merge did (530-590 KB for fixed_frag; whole variants fold to
+  20-37 KB). Tests: three `fc_air_specialize` unit tests, and `tools/xlate-compare` (the frozen fc-spec module keeps at
+  least the whole translation's texture operations on fixed_frag: the first merged build lost them in 3 of 8 sets).
   - **LOD queries on every shape (ours):** `calculate_clamped_lod` / `calculate_unclamped_lod` on 2D array, 3D, cube and
     cube array textures and on the depth forms lower to `OpImageQueryLod` (an array coordinate carries no layer); only
     the 2D form translated before, here and upstream. Tests: `tests/lod_query_and_pull_shapes.rs` on AIR compiled on this
