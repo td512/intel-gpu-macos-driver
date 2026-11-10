@@ -324,7 +324,7 @@ list_stages() {
 	cat <<EOF
 quick:
   kext        kmutil showloaded: IntelXe (+ IntelXeFB, NMXAccel, NMXAGDC, HybridPM) loaded, versions
-  platform    /usr/bin/log, this boot: the "IntelXe: 8086:xxxx: <platform> ..." start line
+  platform    the kext's "IntelXePlatform" registry property (0.1.4+: the start line), else this boot's log
   sensors     debug.intelxe.sensors twice: power fields present, card power $POWER_MIN..$POWER_MAX W, temperatures
   ufence      \$BIN/ufence: "N checks, 0 failed"
   metal       \$BIN/mtl_smoke: compute fill, 0 values wrong
@@ -417,6 +417,8 @@ fi
 if want platform; then
 	tbox 90 /usr/bin/log show --last boot --style compact \
 		--predicate 'processID == 0 AND eventMessage BEGINSWITH "IntelXe: 8086:"' >"$RUN/platform.log" 2>&1
+	# the kext publishes the same line in the registry ("IntelXePlatform"): the boot log rarely keeps it
+	ioreg -r -c IntelXe -d 1 -l 2>/dev/null | sed -n 's/.*"IntelXePlatform" = "\(.*\)".*/IntelXe: \1/p' >>"$RUN/platform.log"
 	result platform "$(check_platform "$RUN/platform.log")"
 fi
 
