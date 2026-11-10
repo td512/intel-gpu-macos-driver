@@ -1055,6 +1055,7 @@ pub(in crate::passes) fn apply_bindings(
     if !workgroup_vars.is_empty() {
         for var in &workgroup_vars {
             rewrite_workgroup_root_access(ctx, entry_idx, *var, defs);
+            rewrite_workgroup_root_null_stores(ctx, entry_idx, *var, defs);
         }
         rewrite_pointer_storage(
             ctx,

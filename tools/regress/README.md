@@ -47,7 +47,7 @@ you pass `--force`. Safari may reopen the test tabs at its next launch.
 | `vtdec_h264`, `vtdec_hevc` | quick | `vtdec <clip> 60 --md5` runs twice. Both runs use the hardware decoder, report 0 errors and give the same per-frame md5s. The numbers include a 12-digit digest of the set of md5s. With `--save-ref` that digest becomes the reference, and later runs must match it |
 | `stats` | quick | the `debug.intelxe.stats` counters at the start and end of the run. A new GT reset, GuC context reset, watchdog ban, dead H2G channel, TLB timeout or WEDGED gives a FAIL. Other bans, page faults, leaked queues, FAST_REQUEST failures and failed BO moves give a WARN |
 | `vcbench:<set>` | full | each Video Codec Test set. `vcbench` runs Apple's hardware decoder in its own output format, then Apple's software decoder asked for that same format, both with `VCB_PS=1 VCB_SUM=1`, decoding every sample once. Every picture's checksum must match. The numbers add 3 s of single-session hardware throughput |
-| `webgpu:tri`, `webgpu:sample`, `webgpu:three` | full | Safari opens each page from `pages/`, served by `srv` on 127.0.0.1. The page posts its result block to `/log`. See [Pages](#pages) |
+| `webgpu:tri`, `webgpu:sample`, `webgpu:three`, `webgpu:sweep` | full | Safari opens each page from `pages/`, served by `srv` on 127.0.0.1. The page posts its result block to `/log`. See [Pages](#pages) |
 | `gb_metal`, `gb_opencl` | full | the Geekbench 7 CLI (`--gpu Metal` / `--gpu OpenCL`) prints a score. A score below the configured minimum gives a WARN, not a FAIL, because scores are noisy. The numbers give the score, the result URL, the time taken and the indexers' CPU use at the start |
 
 The result is one of PASS, FAIL, WARN or SKIP. A SKIP means a missing input, or a guard that refused to run the stage,
@@ -149,5 +149,15 @@ or 90 s for three.js) that reports a FAIL if the page never finishes.
   target behind the output pass with `copyTextureToBuffer`. PASS when the centre is the mesh colour (in linear or sRGB
   encoding) and the corner is the background. A fall-back to WebGL2 is a FAIL.
 
-All three pages pass on the Apple GPU of an M1 Mac in headless Chrome (tri 24, sample 12, three 4 checks). They have
-not yet run in Safari on the B580.
+- `sweep.html`: one small check per WebGPU feature the other pages do not reach: compute (workgroup memory, atomics),
+  `dispatchWorkgroupsIndirect`, `drawIndirect` / `drawIndexedIndirect`, render bundles with draw and drawIndexed
+  (Safari runs these through a GPU-encoded Metal indirect command buffer), per-instance vertex buffers and
+  `firstInstance`, dynamic offsets, depth and stencil, 4x MSAA with resolve, blending, storage textures, rgba16float /
+  r32float / sRGB / BC1 sampling, mip levels, cube and 3D textures, comparison samplers, the copy commands, occlusion
+  queries, and `timestamp-query` and `shader-f16` when the adapter offers them (41 checks with both). A case that throws
+  fails that case and the page goes on.
+
+The pages pass on the Apple GPU of an M1 Mac in headless Chrome (tri 24, sample 12, three 4, sweep 41 checks) and tri,
+sample and three in Safari on the B580. sweep in Safari on the B580 (11 Nov): 39 of 41 before the translator fix for
+zeroed workgroup variables (every WGSL compute shader with a `var<workgroup>` was refused: WebKit zeroes them byte by byte). 40 of 40 after it (timestamp-query is an INFO line: Safari does not
+offer it on Intel GPUs).

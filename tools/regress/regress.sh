@@ -29,7 +29,7 @@ VCT=${REGRESS_VCT:-/Applications/Video Codec Test.app/Contents/Resources}
 VCT_SETS=${REGRESS_VCT_SETS:-}                            # space-separated set names; empty: every folder with a desc.*
 PORT=${REGRESS_PORT:-8765}
 PAGES=${REGRESS_PAGES:-$SELF_DIR/pages}
-WEBGPU_PAGES=${REGRESS_WEBGPU_PAGES:-tri sample three}   # three needs the network (three.js from the CDN)
+WEBGPU_PAGES=${REGRESS_WEBGPU_PAGES:-tri sample three sweep}   # three needs the network (three.js from the CDN)
 POWER_MIN=5; POWER_MAX=400                                # plausible card power, W
 TAB=$'\t'
 

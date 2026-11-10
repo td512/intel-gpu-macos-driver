@@ -12,6 +12,8 @@ mod vector_subword;
 pub(in crate::passes) use vector_subword::*;
 mod workgroup;
 pub(in crate::passes) use workgroup::*;
+mod workgroup_bytes;
+pub(in crate::passes) use workgroup_bytes::*;
 mod byte_aggregate;
 pub(in crate::passes) use byte_aggregate::*;
 mod dynamic_reinterpret;

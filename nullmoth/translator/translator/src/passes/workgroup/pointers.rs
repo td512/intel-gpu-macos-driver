@@ -169,6 +169,77 @@ pub(in crate::passes) fn rewrite_workgroup_root_access(
     }
 }
 
+/// A threadgroup parameter becomes a Workgroup array of its pointee (stage_input), whose element may be the layout type
+/// the kernel's metadata describes rather than the emitted struct of the same shape: `threadgroup S &s` with `s = S{}`
+/// (an llvm.memset of the whole S; WebKit zero-initialises WGSL workgroup variables this way) then stores an S null
+/// straight into the array, which rewrite_workgroup_root_access cannot route when S is not on the array's member-0
+/// path. A null stored through the root is the zero of element 0: it is stored as the null of the element type there.
+/// WAS: left as is, so the module broke the Store contract and every such kernel was refused (Safari: any WGSL compute
+/// shader with a var<workgroup> failed createComputePipeline on the B580, tools/regress/pages/sweep.html, 11 Nov 2026).
+pub(in crate::passes) fn rewrite_workgroup_root_null_stores(
+    ctx: &mut Ctx,
+    entry_idx: usize,
+    var: Word,
+    defs: &HashMap<Word, Instruction>,
+) {
+    let types = combined_type_defs(ctx, defs);
+    let value_types = combined_value_types(ctx, entry_idx);
+    let Some(array_ty) = value_types.get(&var).and_then(|t| ptr_pointee(&types, *t)) else {
+        return;
+    };
+    let Some(element) = types
+        .get(&array_ty)
+        .filter(|d| d.class.opcode == Op::TypeArray)
+        .and_then(member0_type)
+    else {
+        return;
+    };
+    let is_null = |id: Word| types.get(&id).is_some_and(|d| d.class.opcode == Op::ConstantNull);
+    let wanted = ctx.module.functions[entry_idx].blocks.iter().any(|blk| {
+        blk.instructions.iter().any(|inst| {
+            inst.class.opcode == Op::Store
+                && inst.operands.first() == Some(&Operand::IdRef(var))
+                && matches!(inst.operands.get(1), Some(Operand::IdRef(o))
+                    if is_null(*o) && value_types.get(o) != Some(&array_ty))
+        })
+    });
+    if !wanted {
+        return;
+    }
+    let u0 = ctx.const_uint(0);
+    let ptr_ty = ctx.ty_ptr(StorageClass::Workgroup, element);
+    let zero = ctx.const_null(element);
+    let chain = ctx.module.fresh_id();
+    for blk in &mut ctx.module.functions[entry_idx].blocks {
+        for inst in &mut blk.instructions {
+            if inst.class.opcode == Op::Store
+                && inst.operands.first() == Some(&Operand::IdRef(var))
+                && matches!(inst.operands.get(1), Some(Operand::IdRef(o))
+                    if is_null(*o) && value_types.get(o) != Some(&array_ty))
+            {
+                inst.operands[0] = Operand::IdRef(chain);
+                inst.operands[1] = Operand::IdRef(zero);
+            }
+        }
+    }
+    if let Some(first) = ctx.module.functions[entry_idx].blocks.first_mut() {
+        let at = first
+            .instructions
+            .iter()
+            .position(|i| i.class.opcode != Op::Variable)
+            .unwrap_or(first.instructions.len());
+        first.instructions.insert(
+            at,
+            Instruction::new(
+                Op::InBoundsAccessChain,
+                Some(ptr_ty),
+                Some(chain),
+                vec![Operand::IdRef(var), Operand::IdRef(u0)],
+            ),
+        );
+    }
+}
+
 pub(in crate::passes) fn rewrite_collapsed_buffer(
     ctx: &mut Ctx,
     entry_idx: usize,

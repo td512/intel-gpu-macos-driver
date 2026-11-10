@@ -49,7 +49,11 @@ fresh macOS install to a verified driver.
   environment maps, instancing, compute, shadows); its output pass read a uniform through a pointer kept in an argument
   buffer, which the translator turned into zero. WebGPU render bundles that WebKit validates on the GPU now work: a
   shader that encodes draws into an indirect command buffer (`render_command`, WebKit's `vsICB`) is translated, and the
-  draws run from per-slot records with `vkCmdDraw*Indirect`. Metal's GPU timestamps (counter sampling at stage
+  draws run from per-slot records with `vkCmdDraw*Indirect` (one indirect draw per slot, records in VRAM: an indexed
+  slot costs about 2.6 µs of GPU time, down from 11 µs). WGSL compute shaders with a `var<workgroup>` failed
+  `createComputePipeline` in Safari: WebKit zeroes workgroup memory one byte at a time through a byte pointer into
+  each 32-bit word, which Vulkan cannot express; the translator now writes each byte as a read-modify-write of its
+  word (and a Metal `threadgroup` struct parameter zeroed whole, `s = S{}`, was refused for a related reason). Metal's GPU timestamps (counter sampling at stage
   boundaries, in nanoseconds) are new for applications; Safari does not offer WebGPU's `timestamp-query` on Intel GPUs
   (WebKit's choice, see Known issues).
 - **Safari keeps its compiled shaders.** WebKit's GPU process may not `fsync`, so every store of the Metal driver's
@@ -238,9 +242,11 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   binaries, now holds only what a Zink-only build compiles (it still carried ANV changes from before the IntelXe rename).
 - Since the afternoon of 10 November: `mtl_timestamps` (counter sampling at every boundary, against the command
   buffer's GPU time), `mtl_gpu_icb` (draws a kernel and a vertex shader encode into an indirect command buffer; 6/6 on
-  the B580 and on Apple's GPU), `mtl_dirty_stress` (bindings across object destroys), `vtencq` (encode quality),
+  the B580 and on Apple's GPU), `mtl_icb_cost` (GPU time per indirect-command-buffer slot, against direct draws),
+  `mtl_dirty_stress` (bindings across object destroys), `vtencq` (encode quality),
   the host test `pcode_test` (power-limit decoding). **`tools/regress`** runs the hardware checks on the test machine in
-  one command (`regress.sh`, `--full` adds the WebGPU pages in Safari and Geekbench) and ends in one table; its
+  one command (`regress.sh`, `--full` adds the WebGPU pages in Safari and Geekbench; the `sweep` page checks 18 WebGPU
+  features the other pages do not reach) and ends in one table; its
   `selftest.sh` checks every verdict against recorded output. The kext publishes its platform start line as the
   `IntelXePlatform` registry property.
 - Tools: `vcbench` crashed when run inside an HEVC set (it looked for an H.264 description); fixed, and `VCB_DUMP=<dir>`
@@ -274,7 +280,10 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   `createQuerySet` without the feature and stop drawing (several threejs.org WebGPU examples, such as Backdrop Water);
   WebKit makes the same choice for every Intel GPU, Apple's own drivers included.
 - **GPU-encoded indexed draws** must point into the index buffer the CPU encoded for that slot, with its primitive type
-  (core Vulkan takes neither from GPU memory); others are skipped and logged. WebKit's validation shader always does.
+  (core Vulkan takes neither from GPU memory), and a slot the CPU encoded as an indexed draw takes only indexed draws
+  from a shader; others are skipped and logged. WebKit's validation shader always meets these. Each slot of an indirect
+  command buffer a shader can write still costs about 2 µs of GPU time (ANV reads each indirect parameter with its own
+  register load), so large GPU-encoded command buffers are slow.
 - **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental: no IOSurface drawing (browsers) or CGL
   pbuffers yet.
 <!-- decision pending: ship the global switch in 0.1.4? -->

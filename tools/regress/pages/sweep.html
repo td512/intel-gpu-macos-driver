@@ -1,0 +1,466 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- sweep.html (regress.sh WebGPU stage): one small check per WebGPU feature the other pages do not reach, no framework.
+     Each case renders or computes something tiny and reads back the value it must give:
+       compute        workgroup-shared reduction plus atomicAdd over 4096 values
+       dispatch-ind   dispatchWorkgroupsIndirect
+       draw-ind       drawIndirect and drawIndexedIndirect from a GPU buffer
+       bundle         render bundles with draw and drawIndexed (Safari encodes these into a Metal indirect command
+                      buffer and validates indexed draws with a GPU pass: the GPU-ICB path of the plugin)
+       instance       per-instance vertex buffer and firstInstance
+       dyn-offset     a uniform buffer bound with dynamic offsets
+       depth          depth24plus and depth32float test (less), depth-stencil stencil test
+       msaa           4x MSAA render with resolve
+       blend          alpha blending
+       storage-tex    a compute shader writing an rgba8unorm storage texture
+       formats        sampling rgba16float, r32float (textureLoad), rgba8unorm-srgb, and bc1 when the adapter has it
+       mip            rendering into mip level 1 and sampling it with textureSampleLevel
+       cube / 3d      a cube face and a 3D texture slice through samplers
+       compare        a comparison sampler on a depth texture (textureSampleCompare)
+       copy           copyBufferToTexture at an offset, copyTextureToTexture, copyBufferToBuffer
+       occlusion      an occlusion query (a visible and a hidden quad)
+       timestamp      timestamp queries when the adapter offers them (WebKit hides them on Intel GPUs: INFO only)
+       shader-f16     an f16 computation when the adapter offers it
+     A case that throws is a FAIL of that case; the page goes on to the next one. -->
+<html><head><meta charset="utf-8"><title>regress sweep</title>
+<style>body{background:#fff;color:#000;font:13px Menlo,monospace;margin:8px} pre{white-space:pre-wrap}</style></head>
+<body><pre id="o"></pre>
+<script type="module">
+import { say, finish, guard, device, readPixels, pixel, check } from './common.js';
+guard(60000);
+
+let dev;
+const U = GPUBufferUsage, T = GPUTextureUsage;
+const W = 16, H = 16;
+const mod = (code) => dev.createShaderModule({ code });
+const target = (format = 'rgba8unorm', extra = {}) =>
+  dev.createTexture({ size: [W, H], format, usage: T.RENDER_ATTACHMENT | T.COPY_SRC | T.TEXTURE_BINDING, ...extra });
+const bufWith = (data, usage) => {
+  const b = dev.createBuffer({ size: (data.byteLength + 3) & ~3, usage, mappedAtCreation: true });
+  new data.constructor(b.getMappedRange()).set(data);
+  b.unmap();
+  return b;
+};
+async function readBuf(src, size) {
+  const b = dev.createBuffer({ size, usage: U.MAP_READ | U.COPY_DST });
+  const e = dev.createCommandEncoder();
+  e.copyBufferToBuffer(src, 0, b, 0, size);
+  dev.queue.submit([e.finish()]);
+  await b.mapAsync(GPUMapMode.READ);
+  const out = b.getMappedRange().slice(0);
+  b.unmap(); b.destroy();
+  return out;
+}
+const pass = (enc, view, extra = {}) => enc.beginRenderPass({
+  colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }], ...extra });
+const centre = async (tex) => pixel(await readPixels(dev, tex, W, H), W, W / 2, H / 2);
+const eq = (name, got, want) => {
+  const ok = got === want;
+  say(`${ok ? 'PASS' : 'FAIL'} ${name}: got ${got} want ${want}`);
+  return ok;
+};
+
+// a full-target quad from vertex_index, colour from a uniform-free constant or the given WGSL expression
+const QUAD = `
+const P = array<vec2f, 6>(vec2f(-1,-1), vec2f(1,-1), vec2f(-1,1), vec2f(-1,1), vec2f(1,-1), vec2f(1,1));`;
+const solid = (rgba, format = 'rgba8unorm', extra = {}) => dev.createRenderPipeline({
+  layout: 'auto',
+  vertex: { module: mod(QUAD + `@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { return vec4f(P[i], 0.5, 1); }`), entryPoint: 'vs' },
+  fragment: { module: mod(`@fragment fn fs() -> @location(0) vec4f { return vec4f(${rgba.join(',')}); }`), entryPoint: 'fs', targets: [{ format, ...(extra.blend ? { blend: extra.blend } : {}) }] },
+  primitive: { topology: 'triangle-list' },
+  ...(extra.depthStencil ? { depthStencil: extra.depthStencil } : {}),
+  ...(extra.multisample ? { multisample: extra.multisample } : {}),
+});
+
+const cases = {
+  async compute() {
+    const N = 4096;
+    const data = new Uint32Array(N).map((_, i) => i);
+    const src = bufWith(data, U.STORAGE);
+    const out = bufWith(new Uint32Array([0]), U.STORAGE | U.COPY_SRC);
+    const p = dev.createComputePipeline({ layout: 'auto', compute: { module: mod(`
+@group(0) @binding(0) var<storage, read> a: array<u32>;
+@group(0) @binding(1) var<storage, read_write> s: atomic<u32>;
+var<workgroup> part: array<u32, 64>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) g: vec3u, @builtin(local_invocation_index) l: u32) {
+  part[l] = a[g.x];
+  workgroupBarrier();
+  for (var k = 32u; k > 0u; k = k / 2u) { if (l < k) { part[l] += part[l + k]; } workgroupBarrier(); }
+  if (l == 0u) { atomicAdd(&s, part[0]); }
+}`), entryPoint: 'main' } });
+    const bg = dev.createBindGroup({ layout: p.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: src } }, { binding: 1, resource: { buffer: out } }] });
+    const e = dev.createCommandEncoder(); const c = e.beginComputePass();
+    c.setPipeline(p); c.setBindGroup(0, bg); c.dispatchWorkgroups(N / 64); c.end();
+    dev.queue.submit([e.finish()]);
+    eq('compute reduction+atomicAdd', new Uint32Array(await readBuf(out, 4))[0], N * (N - 1) / 2);
+  },
+
+  async 'dispatch-ind'() {
+    const out = dev.createBuffer({ size: 4 * 256, usage: U.STORAGE | U.COPY_SRC });
+    const args = bufWith(new Uint32Array([3, 2, 1]), U.INDIRECT);
+    const p = dev.createComputePipeline({ layout: 'auto', compute: { module: mod(`
+@group(0) @binding(0) var<storage, read_write> o: array<atomic<u32>>;
+@compute @workgroup_size(4) fn main(@builtin(workgroup_id) w: vec3u) { atomicAdd(&o[0], 1u); atomicMax(&o[1], w.x * 10u + w.y); }`), entryPoint: 'main' } });
+    const bg = dev.createBindGroup({ layout: p.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: out } }] });
+    const e = dev.createCommandEncoder(); const c = e.beginComputePass();
+    c.setPipeline(p); c.setBindGroup(0, bg); c.dispatchWorkgroupsIndirect(args, 0); c.end();
+    dev.queue.submit([e.finish()]);
+    const r = new Uint32Array(await readBuf(out, 8));
+    eq('dispatchWorkgroupsIndirect invocations', r[0], 3 * 2 * 4);
+    eq('dispatchWorkgroupsIndirect last group', r[1], 21);
+  },
+
+  async 'draw-ind'() {
+    const pipe = solid([0, 1, 0, 1]);
+    for (const indexed of [false, true]) {
+      const tex = target();
+      const ib = bufWith(new Uint32Array([0, 1, 2, 3, 4, 5]), U.INDEX);
+      // VkDraw(Indexed)IndirectCommand layouts: draw {count, instances, first, firstInstance},
+      // drawIndexed {count, instances, firstIndex, baseVertex, firstInstance}
+      const args = bufWith(indexed ? new Uint32Array([6, 1, 0, 0, 0]) : new Uint32Array([6, 1, 0, 0]), U.INDIRECT);
+      const e = dev.createCommandEncoder(); const r = pass(e, tex.createView());
+      r.setPipeline(pipe);
+      if (indexed) { r.setIndexBuffer(ib, 'uint32'); r.drawIndexedIndirect(args, 0); } else r.drawIndirect(args, 0);
+      r.end(); dev.queue.submit([e.finish()]);
+      check(indexed ? 'drawIndexedIndirect' : 'drawIndirect', await centre(tex), [0, 255, 0, 255], 2);
+    }
+  },
+
+  async bundle() {
+    // two bundles: a plain draw and indexed draws (uint16 and uint32), each colouring its own quarter by firstInstance
+    const m = mod(QUAD + `
+struct O { @builtin(position) p: vec4f, @location(0) @interpolate(flat) i: u32 };
+@vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) i: u32) -> O {
+  let q = vec2f(f32(i % 2u), f32(i / 2u)) - 1.0;
+  return O(vec4f(q + (P[v % 6u] * 0.5 + 0.5), 0.5, 1), i);
+}
+@fragment fn fs(o: O) -> @location(0) vec4f { return vec4f(select(0.0, 1.0, o.i == 0u || o.i == 3u), select(0.0, 1.0, o.i >= 1u), select(0.0, 1.0, o.i == 2u), 1); }`);
+    const pipe = dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' },
+      fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-list' } });
+    const i16 = bufWith(new Uint16Array([0, 1, 2, 3, 4, 5, 0, 0]), U.INDEX);
+    const i32 = bufWith(new Uint32Array([9, 9, 0, 1, 2, 3, 4, 5]), U.INDEX);
+    const be = dev.createRenderBundleEncoder({ colorFormats: ['rgba8unorm'] });
+    be.setPipeline(pipe);
+    be.draw(6, 1, 0, 0);                                   // quarter 0 (bottom left): red
+    be.setIndexBuffer(i16, 'uint16'); be.drawIndexed(6, 1, 0, 0, 1);   // quarter 1 (bottom right): green
+    be.setIndexBuffer(i32, 'uint32'); be.drawIndexed(6, 1, 2, 0, 2);   // quarter 2 (top left, first index 2): cyan
+    be.drawIndexed(6, 1, 2, 0, 3);                                     // quarter 3 (top right): yellow
+    const b = be.finish();
+    for (let run = 0; run < 2; run++) {   // a bundle executes again with the same result
+      const tex = target();
+      const e = dev.createCommandEncoder(); const r = pass(e, tex.createView());
+      r.executeBundles([b]); r.end(); dev.queue.submit([e.finish()]);
+      const px = await readPixels(dev, tex, W, H);
+      const want = [[4, 12, [255, 0, 0, 255]], [12, 12, [0, 255, 0, 255]], [4, 4, [0, 255, 255, 255]], [12, 4, [255, 255, 0, 255]]];
+      const names = ['draw', 'drawIndexed u16', 'drawIndexed u32 firstIndex 2', 'drawIndexed u32 again'];
+      want.forEach(([x, y, c], k) => check(`bundle run ${run} ${names[k]}`, pixel(px, W, x, y), c, 2));
+    }
+  },
+
+  async instance() {
+    const m = mod(QUAD + `
+struct O { @builtin(position) p: vec4f, @location(0) c: vec4f };
+@vertex fn vs(@builtin(vertex_index) v: u32, @location(0) c: vec4f) -> O { return O(vec4f(P[v], 0.5, 1), c); }
+@fragment fn fs(o: O) -> @location(0) vec4f { return o.c; }`);
+    const pipe = dev.createRenderPipeline({ layout: 'auto',
+      vertex: { module: m, entryPoint: 'vs', buffers: [{ arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }] },
+      fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] } });
+    const cols = bufWith(new Float32Array([1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1]), U.VERTEX);
+    const tex = target();
+    const e = dev.createCommandEncoder(); const r = pass(e, tex.createView());
+    r.setPipeline(pipe); r.setVertexBuffer(0, cols); r.draw(6, 1, 0, 2);   // the third instance colour: magenta
+    r.end(); dev.queue.submit([e.finish()]);
+    check('instance step mode + firstInstance', await centre(tex), [255, 0, 255, 255], 2);
+  },
+
+  async 'dyn-offset'() {
+    const m = mod(QUAD + `
+@group(0) @binding(0) var<uniform> c: vec4f;
+@vertex fn vs(@builtin(vertex_index) v: u32) -> @builtin(position) vec4f { return vec4f(P[v], 0.5, 1); }
+@fragment fn fs() -> @location(0) vec4f { return c; }`);
+    const bgl = dev.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true } }] });
+    const pipe = dev.createRenderPipeline({ layout: dev.createPipelineLayout({ bindGroupLayouts: [bgl] }),
+      vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] } });
+    const ub = new Float32Array(128); ub.set([1, 0, 0, 1], 0); ub.set([0, 0, 1, 1], 64);   // offsets 0 and 256
+    const buf = bufWith(ub, U.UNIFORM);
+    const bg = dev.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: buf, size: 16 } }] });
+    const tex = target();
+    const e = dev.createCommandEncoder(); const r = pass(e, tex.createView());
+    r.setPipeline(pipe); r.setBindGroup(0, bg, [256]); r.draw(6); r.end(); dev.queue.submit([e.finish()]);
+    check('dynamic offset 256', await centre(tex), [0, 0, 255, 255], 2);
+  },
+
+  async depth() {
+    const m = mod(`
+@group(0) @binding(0) var<uniform> z: vec4f;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = array<vec2f, 6>(vec2f(-1,-1), vec2f(1,-1), vec2f(-1,1), vec2f(-1,1), vec2f(1,-1), vec2f(1,1));
+  return vec4f(p[i], z.x, 1);
+}
+@fragment fn fs() -> @location(0) vec4f { return vec4f(z.yzw, 1); }`);
+    for (const fmt of ['depth24plus', 'depth32float', 'depth24plus-stencil8']) {
+      const stencil = fmt.includes('stencil');
+      const pipe = dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' },
+        fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+        depthStencil: { format: fmt, depthWriteEnabled: true, depthCompare: 'less',
+          ...(stencil ? { stencilFront: { compare: 'equal', passOp: 'increment-clamp' }, stencilBack: { compare: 'equal', passOp: 'increment-clamp' } } : {}) } });
+      const ub = (v) => bufWith(new Float32Array(v), U.UNIFORM);
+      const near = ub([0.25, 0, 1, 0]), far = ub([0.75, 1, 0, 0]);
+      const bgs = [near, far].map((b) => dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: b } }] }));
+      const tex = target();
+      const dt = dev.createTexture({ size: [W, H], format: fmt, usage: T.RENDER_ATTACHMENT });
+      const e = dev.createCommandEncoder();
+      const r = pass(e, tex.createView(), { depthStencilAttachment: { view: dt.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store',
+        ...(stencil ? { stencilClearValue: 0, stencilLoadOp: 'clear', stencilStoreOp: 'store' } : {}) } });
+      r.setPipeline(pipe);
+      if (stencil) r.setStencilReference(0);
+      r.setBindGroup(0, bgs[0]); r.draw(6);   // near, green
+      r.setBindGroup(0, bgs[1]); r.draw(6);   // far, red: depth-rejected (and with stencil: stencil is 1 now, ref 0 fails too)
+      r.end(); dev.queue.submit([e.finish()]);
+      check(`${fmt} less keeps the near quad`, await centre(tex), [0, 255, 0, 255], 2);
+    }
+  },
+
+  async msaa() {
+    const pipe = dev.createRenderPipeline({ layout: 'auto',
+      vertex: { module: mod(`@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+        let p = array<vec2f, 3>(vec2f(-1,-1), vec2f(1,-1), vec2f(-1,1)); return vec4f(p[i], 0.5, 1); }`), entryPoint: 'vs' },
+      fragment: { module: mod(`@fragment fn fs() -> @location(0) vec4f { return vec4f(1, 1, 1, 1); }`), entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+      multisample: { count: 4 } });
+    const ms = dev.createTexture({ size: [W, H], format: 'rgba8unorm', sampleCount: 4, usage: T.RENDER_ATTACHMENT });
+    const res = target();
+    const e = dev.createCommandEncoder();
+    const r = e.beginRenderPass({ colorAttachments: [{ view: ms.createView(), resolveTarget: res.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 1] }] });
+    r.setPipeline(pipe); r.draw(3); r.end(); dev.queue.submit([e.finish()]);
+    const px = await readPixels(dev, res, W, H);
+    check('msaa resolve inside', pixel(px, W, 2, 12), [255, 255, 255, 255], 2);
+    check('msaa resolve outside', pixel(px, W, 13, 2), [0, 0, 0, 255], 2);
+    // a pixel on the diagonal edge has some samples covered: strictly between the two colours
+    let mid = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = pixel(px, W, x, y)[0]; if (v > 20 && v < 235) mid++; }
+    const ok = mid >= 4;
+    say(`${ok ? 'PASS' : 'FAIL'} msaa edge pixels partly covered: ${mid}`);
+  },
+
+  async blend() {
+    const pipe = solid([1, 0, 0, 0.25], 'rgba8unorm', { blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'zero' } } });
+    const tex = target();
+    const e = dev.createCommandEncoder();
+    const r = e.beginRenderPass({ colorAttachments: [{ view: tex.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 1, 1] }] });
+    r.setPipeline(pipe); r.draw(6); r.end(); dev.queue.submit([e.finish()]);
+    check('alpha blend 0.25 red over blue', await centre(tex), [64, 0, 191, 64], 2);
+  },
+
+  async 'storage-tex'() {
+    const tex = dev.createTexture({ size: [W, H], format: 'rgba8unorm', usage: T.STORAGE_BINDING | T.COPY_SRC });
+    const p = dev.createComputePipeline({ layout: 'auto', compute: { module: mod(`
+@group(0) @binding(0) var t: texture_storage_2d<rgba8unorm, write>;
+@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) g: vec3u) {
+  textureStore(t, g.xy, vec4f(f32(g.x) / 15.0, f32(g.y) / 15.0, 0.5, 1));
+}`), entryPoint: 'main' } });
+    const bg = dev.createBindGroup({ layout: p.getBindGroupLayout(0), entries: [{ binding: 0, resource: tex.createView() }] });
+    const e = dev.createCommandEncoder(); const c = e.beginComputePass();
+    c.setPipeline(p); c.setBindGroup(0, bg); c.dispatchWorkgroups(2, 2); c.end(); dev.queue.submit([e.finish()]);
+    const px = await readPixels(dev, tex, W, H);
+    check('storage texture (15,0)', pixel(px, W, 15, 0), [255, 0, 128, 255], 2);
+    check('storage texture (0,15)', pixel(px, W, 0, 15), [0, 255, 128, 255], 2);
+  },
+
+  async formats() {
+    // each source is 4x4 of one colour, sampled at its centre (textureLoad for r32float: unfilterable)
+    const show = async (name, fmt, data, bytesPerRow, wgslType, read, want, tol) => {
+      const src = dev.createTexture({ size: [4, 4], format: fmt, usage: T.TEXTURE_BINDING | T.COPY_DST });
+      dev.queue.writeTexture({ texture: src }, data, { bytesPerRow }, { width: 4, height: 4 });
+      const m = mod(QUAD + `
+@group(0) @binding(0) var t: ${wgslType};
+@group(0) @binding(1) var s: sampler;
+@vertex fn vs(@builtin(vertex_index) v: u32) -> @builtin(position) vec4f { return vec4f(P[v], 0.5, 1); }
+@fragment fn fs() -> @location(0) vec4f { return ${read}; }`);
+      const pipe = dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] } });
+      const entries = [{ binding: 0, resource: src.createView() }];
+      if (read.includes('textureSample')) entries.push({ binding: 1, resource: dev.createSampler() });
+      const bg = dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries });
+      const tex = target();
+      const e = dev.createCommandEncoder(); const r = pass(e, tex.createView());
+      r.setPipeline(pipe); r.setBindGroup(0, bg); r.draw(6); r.end(); dev.queue.submit([e.finish()]);
+      check(name, await centre(tex), want, tol);
+    };
+    const half = (v) => { const f = new Float32Array([v]); const i = new Uint32Array(f.buffer)[0];
+      return ((i >> 16) & 0x8000) | ((((i >> 23) & 0xff) - 112) << 10) | ((i >> 13) & 0x3ff); };
+    const h16 = new Uint16Array(64); for (let k = 0; k < 16; k++) h16.set([half(0.25), half(0.5), half(1), half(1)], k * 4);
+    await show('rgba16float sampled', 'rgba16float', h16, 32, 'texture_2d<f32>', 'textureSample(t, s, vec2f(0.5))', [64, 128, 255, 255], 2);
+    const f32 = new Float32Array(16).fill(0.75);
+    await show('r32float textureLoad', 'r32float', f32, 16, 'texture_2d<f32>', 'vec4f(textureLoad(t, vec2i(1, 1), 0).r, 0, 0, 1)', [191, 0, 0, 255], 2);
+    const srgb = new Uint8Array(64); for (let k = 0; k < 16; k++) srgb.set([188, 188, 188, 255], k * 4);   // sRGB 188 = linear 0.5
+    await show('rgba8unorm-srgb decoded', 'rgba8unorm-srgb', srgb, 16, 'texture_2d<f32>', 'textureSample(t, s, vec2f(0.5))', [128, 128, 128, 255], 3);
+    if (dev.features.has('texture-compression-bc')) {
+      // one BC1 block: colour0 = colour1 = pure green (RGB565 0x07e0), every index 0
+      const bc = new Uint8Array([0xe0, 0x07, 0xe0, 0x07, 0, 0, 0, 0]);
+      await show('bc1-rgba-unorm sampled', 'bc1-rgba-unorm', bc, 8, 'texture_2d<f32>', 'textureSample(t, s, vec2f(0.5))', [0, 255, 0, 255], 3);
+    } else say('SKIP bc1: the adapter has no texture-compression-bc');
+  },
+
+  async mip() {
+    const tex = dev.createTexture({ size: [W, H], format: 'rgba8unorm', mipLevelCount: 2, usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
+    const e = dev.createCommandEncoder();
+    for (const [lvl, c] of [[0, [1, 0, 0, 1]], [1, [0, 0, 1, 1]]]) {
+      const r = e.beginRenderPass({ colorAttachments: [{ view: tex.createView({ baseMipLevel: lvl, mipLevelCount: 1 }), loadOp: 'clear', storeOp: 'store', clearValue: c }] });
+      r.end();
+    }
+    const m = mod(QUAD + `
+@group(0) @binding(0) var t: texture_2d<f32>;
+@group(0) @binding(1) var s: sampler;
+@vertex fn vs(@builtin(vertex_index) v: u32) -> @builtin(position) vec4f { return vec4f(P[v], 0.5, 1); }
+@fragment fn fs() -> @location(0) vec4f { return textureSampleLevel(t, s, vec2f(0.5), 1.0); }`);
+    const pipe = dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] } });
+    const bg = dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: tex.createView() }, { binding: 1, resource: dev.createSampler({ mipmapFilter: 'nearest' }) }] });
+    const out = target();
+    const r = pass(e, out.createView()); r.setPipeline(pipe); r.setBindGroup(0, bg); r.draw(6); r.end();
+    dev.queue.submit([e.finish()]);
+    check('render to mip 1, textureSampleLevel 1', await centre(out), [0, 0, 255, 255], 2);
+  },
+
+  async cube() {
+    // cube faces cleared to six colours; sample +X (face 0) and -Z (face 5)
+    const cols = [[1, 0, 0, 1], [0, 1, 0, 1], [0, 0, 1, 1], [1, 1, 0, 1], [0, 1, 1, 1], [1, 0, 1, 1]];
+    const cubeTex = dev.createTexture({ size: [4, 4, 6], format: 'rgba8unorm', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
+    const vol = dev.createTexture({ size: [4, 4, 4], dimension: '3d', format: 'rgba8unorm', usage: T.TEXTURE_BINDING | T.COPY_DST });
+    const vd = new Uint8Array(4 * 4 * 4 * 4);
+    for (let z = 0; z < 4; z++) for (let k = 0; k < 16; k++) vd.set([z * 80, 255 - z * 80, 0, 255], (z * 16 + k) * 4);
+    dev.queue.writeTexture({ texture: vol }, vd, { bytesPerRow: 16, rowsPerImage: 4 }, [4, 4, 4]);
+    const e = dev.createCommandEncoder();
+    cols.forEach((c, f) => e.beginRenderPass({ colorAttachments: [{ view: cubeTex.createView({ dimension: '2d', baseArrayLayer: f, arrayLayerCount: 1 }), loadOp: 'clear', storeOp: 'store', clearValue: c }] }).end());
+    const m = mod(QUAD + `
+@group(0) @binding(0) var c: texture_cube<f32>;
+@group(0) @binding(1) var v: texture_3d<f32>;
+@group(0) @binding(2) var s: sampler;
+@group(0) @binding(3) var<uniform> which: vec4u;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { return vec4f(P[i], 0.5, 1); }
+@fragment fn fs() -> @location(0) vec4f {
+  if (which.x == 0u) { return textureSample(c, s, vec3f(1, 0, 0)); }
+  if (which.x == 1u) { return textureSample(c, s, vec3f(0, 0, -1)); }
+  return textureSample(v, s, vec3f(0.5, 0.5, 2.5 / 4.0));
+}`);
+    const pipe = dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] } });
+    dev.queue.submit([e.finish()]);
+    const names = ['cube +X face', 'cube -Z face', '3d slice 2'];
+    const wants = [[255, 0, 0, 255], [255, 0, 255, 255], [160, 95, 0, 255]];
+    for (let k = 0; k < 3; k++) {
+      const u = bufWith(new Uint32Array([k, 0, 0, 0]), U.UNIFORM);
+      const bg = dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
+        { binding: 0, resource: cubeTex.createView({ dimension: 'cube' }) }, { binding: 1, resource: vol.createView() },
+        { binding: 2, resource: dev.createSampler() }, { binding: 3, resource: { buffer: u } }] });
+      const out = target();
+      const e2 = dev.createCommandEncoder(); const r = pass(e2, out.createView());
+      r.setPipeline(pipe); r.setBindGroup(0, bg); r.draw(6); r.end(); dev.queue.submit([e2.finish()]);
+      check(names[k], await centre(out), wants[k], 3);
+    }
+  },
+
+  async compare() {
+    // a depth32float texture cleared to 0.5, compared 'less' against 0.25 (pass: 1) and 0.75 (fail: 0)
+    const dt = dev.createTexture({ size: [4, 4], format: 'depth32float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
+    const e = dev.createCommandEncoder();
+    e.beginRenderPass({ colorAttachments: [], depthStencilAttachment: { view: dt.createView(), depthClearValue: 0.5, depthLoadOp: 'clear', depthStoreOp: 'store' } }).end();
+    dev.queue.submit([e.finish()]);
+    const m = mod(QUAD + `
+@group(0) @binding(0) var d: texture_depth_2d;
+@group(0) @binding(1) var s: sampler_comparison;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { return vec4f(P[i], 0.5, 1); }
+@fragment fn fs() -> @location(0) vec4f {
+  return vec4f(textureSampleCompare(d, s, vec2f(0.5), 0.25), textureSampleCompare(d, s, vec2f(0.5), 0.75), 0, 1);
+}`);
+    const pipe = dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] } });
+    const bg = dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: dt.createView() }, { binding: 1, resource: dev.createSampler({ compare: 'less' }) }] });
+    const out = target();
+    const e2 = dev.createCommandEncoder(); const r = pass(e2, out.createView());
+    r.setPipeline(pipe); r.setBindGroup(0, bg); r.draw(6); r.end(); dev.queue.submit([e2.finish()]);
+    check('textureSampleCompare less (0.25 pass, 0.75 fail)', await centre(out), [255, 0, 0, 255], 2);
+  },
+
+  async copy() {
+    // copyBufferToTexture from offset 256 into a 4x4 region at (8,8); copyTextureToTexture to a second texture; then
+    // copyBufferToBuffer of a range
+    const data = new Uint8Array(256 + 256 * 4);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) data.set([10, 20, 30, 255], 256 + y * 256 + x * 4);
+    const src = bufWith(data, U.COPY_SRC);
+    const a = dev.createTexture({ size: [W, H], format: 'rgba8unorm', usage: T.COPY_DST | T.COPY_SRC });
+    const b = dev.createTexture({ size: [W, H], format: 'rgba8unorm', usage: T.COPY_DST | T.COPY_SRC });
+    const e = dev.createCommandEncoder();
+    e.copyBufferToTexture({ buffer: src, offset: 256, bytesPerRow: 256 }, { texture: a, origin: [8, 8] }, [4, 4]);
+    e.copyTextureToTexture({ texture: a, origin: [8, 8] }, { texture: b, origin: [2, 3] }, [4, 4]);
+    const bb = dev.createBuffer({ size: 64, usage: U.COPY_DST | U.COPY_SRC });
+    e.copyBufferToBuffer(src, 256 + 256, bb, 16, 16);
+    dev.queue.submit([e.finish()]);
+    const pa = await readPixels(dev, a, W, H), pb = await readPixels(dev, b, W, H);
+    check('copyBufferToTexture at offset 256 -> (9,9)', pixel(pa, W, 9, 9), [10, 20, 30, 255], 0);
+    check('copyTextureToTexture -> (3,4)', pixel(pb, W, 3, 4), [10, 20, 30, 255], 0);
+    check('copyTextureToTexture leaves (1,1)', pixel(pb, W, 1, 1), [0, 0, 0, 0], 0);
+    const r = new Uint8Array(await readBuf(bb, 64));
+    check('copyBufferToBuffer range', Array.from(r.subarray(16, 20)), [10, 20, 30, 255], 0);
+  },
+
+  async occlusion() {
+    const qs = dev.createQuerySet({ type: 'occlusion', count: 2 });
+    const res = dev.createBuffer({ size: 16, usage: U.QUERY_RESOLVE | U.COPY_SRC });
+    const pipe = solid([1, 1, 1, 1], 'rgba8unorm', { depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' } });
+    const tex = target();
+    const dt = dev.createTexture({ size: [W, H], format: 'depth24plus', usage: T.RENDER_ATTACHMENT });
+    const e = dev.createCommandEncoder();
+    const r = pass(e, tex.createView(), { occlusionQuerySet: qs,
+      depthStencilAttachment: { view: dt.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' } });
+    r.setPipeline(pipe);
+    r.beginOcclusionQuery(0); r.draw(6); r.endOcclusionQuery();   // visible: depth 0.5 < 1
+    r.beginOcclusionQuery(1); r.draw(6); r.endOcclusionQuery();   // hidden: 0.5 is not < 0.5
+    r.end();
+    e.resolveQuerySet(qs, 0, 2, res, 0);
+    dev.queue.submit([e.finish()]);
+    const v = new BigUint64Array(await readBuf(res, 16));
+    say(`${v[0] > 0n ? 'PASS' : 'FAIL'} occlusion visible quad: ${v[0]} samples`);
+    eq('occlusion hidden quad samples', Number(v[1]), 0);
+  },
+
+  async timestamp() {
+    if (!dev.features.has('timestamp-query')) { say('INFO timestamp-query: not offered by this adapter (WebKit hides it on Intel GPUs)'); return; }
+    const qs = dev.createQuerySet({ type: 'timestamp', count: 2 });
+    const res = dev.createBuffer({ size: 16, usage: U.QUERY_RESOLVE | U.COPY_SRC });
+    const e = dev.createCommandEncoder();
+    const c = e.beginComputePass({ timestampWrites: { querySet: qs, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } });
+    c.end(); e.resolveQuerySet(qs, 0, 2, res, 0); dev.queue.submit([e.finish()]);
+    const v = new BigUint64Array(await readBuf(res, 16));
+    say(`${v[1] >= v[0] ? 'PASS' : 'FAIL'} timestamp-query end >= begin: ${v[0]} .. ${v[1]}`);
+  },
+
+  async 'shader-f16'() {
+    if (!dev.features.has('shader-f16')) { say('INFO shader-f16: not offered by this adapter'); return; }
+    const out = dev.createBuffer({ size: 16, usage: U.STORAGE | U.COPY_SRC });
+    const p = dev.createComputePipeline({ layout: 'auto', compute: { module: mod(`enable f16;
+@group(0) @binding(0) var<storage, read_write> o: array<f32>;
+@compute @workgroup_size(1) fn main() { let h: f16 = 1.5h * 2.0h + 0.25h; o[0] = f32(h); }`), entryPoint: 'main' } });
+    const bg = dev.createBindGroup({ layout: p.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: out } }] });
+    const e = dev.createCommandEncoder(); const c = e.beginComputePass();
+    c.setPipeline(p); c.setBindGroup(0, bg); c.dispatchWorkgroups(1); c.end(); dev.queue.submit([e.finish()]);
+    eq('f16 1.5*2+0.25', new Float32Array(await readBuf(out, 4))[0], 3.25);
+  },
+};
+
+try {
+  const ad = await navigator.gpu?.requestAdapter();
+  const want = ['texture-compression-bc', 'timestamp-query', 'shader-f16'].filter((f) => ad?.features.has(f));
+  if (!ad) throw new Error('no WebGPU adapter');
+  const i = ad.info || {};
+  say('INFO adapter: ' + [i.vendor, i.architecture, i.device, i.description].filter(Boolean).join(' / '));
+  say('INFO features asked: ' + (want.join(', ') || 'none'));
+  dev = await ad.requestDevice({ requiredFeatures: want });
+  dev.onuncapturederror = (e) => say('FAIL uncaptured WebGPU error: ' + e.error.message);
+  const only = new URLSearchParams(location.search).get('only');
+  for (const [name, fn] of Object.entries(cases)) {
+    if (only && !only.split(',').includes(name)) continue;
+    try { await fn(); } catch (e) { say(`FAIL ${name}: ${e.message || e}`); }
+  }
+  await dev.queue.onSubmittedWorkDone();
+} catch (e) {
+  say('FAIL setup: ' + (e.message || e));
+}
+await finish();
+</script></body></html>

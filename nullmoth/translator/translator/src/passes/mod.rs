@@ -2958,6 +2958,10 @@ pub(crate) fn transform_with_options_and_sidecar(
             )
             .collect(),
     );
+    // first: a later pass rewrites a byte view of a workgroup word as a pointer to the word and loses the byte offset
+    for function_idx in 0..ctx.module.functions.len() {
+        access::lower_workgroup_word_byte_views(&mut ctx, function_idx);
+    }
     for function_idx in 0..ctx.module.functions.len() {
         narrow_access_chain_indices(&mut ctx, function_idx);
     }
