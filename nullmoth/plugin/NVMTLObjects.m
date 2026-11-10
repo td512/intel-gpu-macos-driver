@@ -3129,8 +3129,8 @@ NSDictionary *nvmtl_index_argument_fields(NSArray *fields) {
 - (void)setComputePipelineStates:(const id<MTLComputePipelineState> __unsafe_unretained [])p withRange:(NSRange)r {
     for (NSUInteger k = 0; k < r.length; k++) [self setComputePipelineState:p ? p[k] : nil atIndex:r.location + k]; }
 - (void)setIndirectCommandBuffer:(id<MTLIndirectCommandBuffer>)icb atIndex:(NSUInteger)index {
-    { static int said; if (icb && !said++) nvlog("argument encoder: setIndirectCommandBuffer: writes the ICB's gpuResourceID; GPU-side ICB "
-                                             "execution and encoding stay UNSUPPORTED (this ICB is a CPU replay list) (said once)"); }
+    { static int said; if (icb && !said++) nvlog("argument encoder: setIndirectCommandBuffer: writes the ICB's slot record address; shaders "
+                                             "may encode draw/drawIndexed/reset into it, other render_command calls are refused at translation (said once)"); }
     [self nvmtlPutHandle:icb ? icb.gpuResourceID._impl : 0 atIndex:index what:"IndirectCommandBuffer"];
 }
 - (void)setIndirectCommandBuffers:(const id<MTLIndirectCommandBuffer> __unsafe_unretained [])b withRange:(NSRange)r {
@@ -4460,6 +4460,7 @@ static BOOL nvmtl_bytes_ring_at(__unsafe_unretained NVMTLCommandBuffer *cb, NSUI
 - (void)executeCommandsInBuffer:(id<MTLIndirectCommandBuffer>)icb withRange:(NSRange)r {
     NVMTLIndirectCommandBuffer *b = (NVMTLIndirectCommandBuffer *)icb;
     if (!b) { nvlog("executeCommandsInBuffer: nil"); return; }
+    if (b->_rec) { [self nvmtlExecuteRecords:b range:r]; return; }
     NSUInteger n = 0;
     for (NSUInteger i = r.location; i < r.location + r.length && i < b->_cmds.count; i++) {
         NVMTLIndirectCommand *c = b->_cmds[i];
@@ -4484,6 +4485,65 @@ static BOOL nvmtl_bytes_ring_at(__unsafe_unretained NVMTLCommandBuffer *cb, NSUI
         n++;
     }
     nvlog("executeCommandsInBuffer: replayed %lu of %lu slot(s)", (unsigned long)n, (unsigned long)r.length);
+}
+// A GPU-encodable ICB (nvmtl_icb_layout.h): each slot's state is replayed as the CPU encoded it, and its draw comes from
+// its record, which the CPU (indirectRenderCommandAtIndex:) or a shader (render_command) wrote last: an indexed indirect
+// draw when the slot has an index buffer, then a plain indirect draw; the form the record does not hold has zero counts.
+// The app orders the shader's writes before this with a barrier or an encoder boundary, as Metal requires
+// (memoryBarrierWithScope: and the pass boundary are ALL_COMMANDS MEMORY_WRITE -> MEMORY_READ, which covers the
+// indirect-argument read).
+- (void)nvmtlExecuteRecords:(NVMTLIndirectCommandBuffer *)b range:(NSRange)r {
+    nvmtl_icb_record *rec = [b nvmtlRecords];
+    nvmtl_retain_resource(_cb, b); nvmtl_retain_resource(_cb, b->_rec);
+    NSUInteger n = 0;
+    const NSUInteger end = MIN(r.location + r.length, b->_cmds.count);
+    for (NSUInteger i = r.location; i < end; i++) {
+        NVMTLIndirectCommand *c = b->_cmds[i];
+        if (c->_isCompute) continue;
+        if (c->_ps) [self setRenderPipelineState:c->_ps];
+        if (c->_hasCull) [self setCullMode:c->_cull];
+        if (c->_hasWinding) [self setFrontFacingWinding:c->_winding];
+        if (c->_hasFill) [self setTriangleFillMode:c->_fill];
+        if (c->_hasClip) [self setDepthClipMode:c->_clip];
+        if (c->_ds) [self setDepthStencilState:c->_ds];
+        if (c->_hasBias) [self setDepthBias:c->_bias slopeScale:c->_slope clamp:c->_clamp];
+        for (NSArray *e in c->_vbufs) {
+            if (e.count > 3) [self setVertexBuffer:e[0] offset:[e[1] unsignedLongValue] attributeStride:[e[3] unsignedLongValue] atIndex:[e[2] unsignedLongValue]];
+            else [self setVertexBuffer:e[0] offset:[e[1] unsignedLongValue] atIndex:[e[2] unsignedLongValue]]; }
+        for (NSArray *e in c->_fbufs) [self setFragmentBuffer:e[0] offset:[e[1] unsignedLongValue] atIndex:[e[2] unsignedLongValue]];
+        if (!_begun) { nvlog("executeCommandsInBuffer: slot %lu with no pipeline set", (unsigned long)i); continue; }
+        // the topology: the CPU draw's, else the pipeline's class; written back so a later GPU encode is checked against it
+        const uint32_t prim = c->_armed ? (uint32_t)c->_type
+                                        : nvmtl_icb_prim_for_class(_ps ? (unsigned long)_ps->_descriptor.inputPrimitiveTopology : 0);
+        if (rec[i].execPrim != prim) rec[i].execPrim = prim;
+        if (![self nvmtlBindSamplerPipeline]) continue;
+        if (nvmtl_vk_cmd_set_topology(&_cb->_c, prim)) continue;
+        if ([self nvmtlVertexInputs]) continue;
+        const size_t at = i * (size_t)NVMTL_ICB_RECORD_BYTES;
+        NVMTLBuffer *ib = c->_armed && c->_indexed && [(id)c->_ibuf isKindOfClass:[NVMTLBuffer class]] ? (NVMTLBuffer *)c->_ibuf : nil;
+        if (ib && rec[i].ibShift) {
+            nvmtl_retain_resource(_cb, ib);
+            const uint32_t sh = rec[i].ibShift;
+            nvmtl_vk_cmd_draw_indexed_indirect(&_cb->_c, &ib->_b, c->_ioff & ((1u << sh) - 1u), sh == 2,
+                                               &b->_rec->_b, at + NVMTL_ICB_W_IDX * 4);
+        }
+        nvmtl_vk_cmd_draw_indirect(&_cb->_c, &b->_rec->_b, at + NVMTL_ICB_W_DRAW * 4);
+        n++;
+    }
+    { static int said; if (said++ < 8) nvlog("executeCommandsInBuffer: %lu of %lu slot(s) drawn from their records (GPU-encodable ICB)", (unsigned long)n, (unsigned long)r.length); }
+    // diagnostic: a GPU-written draw the execute could not express (nvmtl_icb_layout.h, kind REFUSED), said up to 8 times per ICB
+    if (b->_refusedSaid < 8 && end > r.location) {
+        NVMTLIndirectCommandBuffer *held = b; const NSUInteger lo = r.location;
+        [_cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
+            nvmtl_icb_record *rr = [held nvmtlRecords];
+            if (!rr || done.status != MTLCommandBufferStatusCompleted) return;
+            for (NSUInteger k = lo; k < end && held->_refusedSaid < 8; k++) if (rr[k].kind == NVMTL_ICB_REFUSED) {
+                held->_refusedSaid++;
+                nvlog("ICB %p slot %lu: a shader encoded a draw the execute cannot express (primitive %u, executed as %u; index shift bound %u) - NOT drawn",
+                      (__bridge void *)held, (unsigned long)k, rr[k].prim, rr[k].execPrim, rr[k].ibShift);
+            }
+        }];
+    }
 }
 - (void)setDepthClipMode:(MTLDepthClipMode)mode {
     if (nvmtl_vk_cmd_set_depth_clip(&_cb->_c, mode == MTLDepthClipModeClip))
@@ -5142,7 +5202,8 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
 @end
 
 @implementation NVMTLIndirectCommand
-- (void)setRenderPipelineState:(id<MTLRenderPipelineState>)ps { _ps = ps; }
+- (void)nvmtlRecordChanged { if (_owner && _owner->_rec) [_owner nvmtlWriteRecord:_slot]; }
+- (void)setRenderPipelineState:(id<MTLRenderPipelineState>)ps { _ps = ps; if (!_armed) [self nvmtlRecordChanged]; }
 - (void)setVertexBuffer:(id<MTLBuffer>)b offset:(NSUInteger)o atIndex:(NSUInteger)i {
     if (!_vbufs) _vbufs = [NSMutableArray new];
     if (b) [_vbufs addObject:@[b, @(o), @(i)]];
@@ -5158,12 +5219,14 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
 - (void)drawPrimitives:(MTLPrimitiveType)type vertexStart:(NSUInteger)s vertexCount:(NSUInteger)c
          instanceCount:(NSUInteger)n baseInstance:(NSUInteger)bi {
     _type = type; _start = s; _count = c; _instances = n; _baseInstance = bi; _indexed = NO; _armed = YES;
+    [self nvmtlRecordChanged];
 }
 - (void)drawIndexedPrimitives:(MTLPrimitiveType)type indexCount:(NSUInteger)c indexType:(MTLIndexType)it
                   indexBuffer:(id<MTLBuffer>)ib indexBufferOffset:(NSUInteger)io
                 instanceCount:(NSUInteger)n baseVertex:(NSInteger)bv baseInstance:(NSUInteger)bi {
     _type = type; _count = c; _itype = it; _ibuf = ib; _ioff = io;
     _instances = n; _baseVertex = bv; _baseInstance = bi; _indexed = YES; _armed = YES;
+    [self nvmtlRecordChanged];
 }
 - (void)setComputePipelineState:(id<MTLComputePipelineState>)ps { _cps = ps; _isCompute = YES; }
 - (void)setKernelBuffer:(id<MTLBuffer>)b offset:(NSUInteger)o atIndex:(NSUInteger)i {
@@ -5199,11 +5262,13 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
     _cull = o->_cull; _hasCull = o->_hasCull; _winding = o->_winding; _hasWinding = o->_hasWinding; _fill = o->_fill; _hasFill = o->_hasFill;
     _clip = o->_clip; _hasClip = o->_hasClip; _ds = o->_ds; _bias = o->_bias; _slope = o->_slope; _clamp = o->_clamp; _hasBias = o->_hasBias;
     _cps = o->_cps; _kbufs = [o->_kbufs mutableCopy]; _grid = o->_grid; _tg = o->_tg; _isCompute = o->_isCompute;
+    [self nvmtlRecordChanged];
 }
 - (void)reset {
     _ps = nil; [_vbufs removeAllObjects]; [_fbufs removeAllObjects]; _ibuf = nil; _armed = NO;
     _hasCull = _hasWinding = _hasFill = _hasClip = _hasBias = NO; _ds = nil;
     _cps = nil; [_kbufs removeAllObjects]; _isCompute = NO;
+    [self nvmtlRecordChanged];
 }
 @end
 
@@ -5212,8 +5277,65 @@ static NSUInteger nvmtl_compute_maxt(void) { static NSUInteger v; if (!v) v = nv
 - (NSString *)label { return _label; }
 - (void)setLabel:(NSString *)l { _label = [l copy]; }
 - (NSUInteger)size { return _cmds.count; }
-- (MTLResourceID)gpuResourceID { MTLResourceID r; r._impl = nvmtl_resid_pipe(self, &_resid); return r; }
+// A shader's command_buffer is this address (nvmtl_icb_layout.h): taking the ID makes the ICB GPU-encodable. Without a
+// record buffer (its allocation refused, logged once) the old opaque ID stays and the ICB keeps the CPU replay; a shader
+// that encodes into such an ICB writes through an address no buffer holds.
+- (MTLResourceID)gpuResourceID { MTLResourceID r; const uint64_t a = [self nvmtlRecordAddress]; r._impl = a ? a : nvmtl_resid_pipe(self, &_resid); return r; }
+- (uint64_t)nvmtlRecordAddress {
+    @synchronized (self) {
+        if (!_rec && _cmds.count) {
+            NVMTLBuffer *b = [NVMTLBuffer new];
+            const size_t bytes = _cmds.count * (size_t)NVMTL_ICB_RECORD_BYTES;
+            if (nvmtl_vk_buffer_create(bytes, 1, &b->_b) || !b->_b.map) {
+                static int said; if (!said++) nvlog("indirect command buffer: the %zu-byte slot record buffer was REFUSED - GPU-side encoding into it is unavailable, CPU replay only", bytes);
+                return 0;
+            }
+            b->_storage = MTLStorageModeShared;
+            nvmtl_icb_record *r = (nvmtl_icb_record *)b->_b.map;
+            memset(r, 0, bytes);
+            for (NSUInteger i = 0; i < _cmds.count; i++) r[i].execPrim = NVMTL_ICB_NO_PRIM;
+            _rec = b;
+            for (NSUInteger i = 0; i < _cmds.count; i++) [self nvmtlWriteRecord:i];
+            nvlog("indirect command buffer %p: %lu slot record(s) at 0x%llx - GPU-encodable, executed from the records (vkCmdDraw*Indirect)",
+                  (__bridge void *)self, (unsigned long)_cmds.count, (unsigned long long)nvmtl_vk_buffer_address(&b->_b));
+        }
+    }
+    return _rec ? nvmtl_vk_buffer_address(&_rec->_b) : 0;
+}
+- (nvmtl_icb_record *)nvmtlRecords { return _rec ? (nvmtl_icb_record *)_rec->_b.map : NULL; }
 - (MTLStorageMode)storageMode { return (MTLStorageMode)((_opts >> MTLResourceStorageModeShift) & 0xF); }
+// The record of slot i from what the CPU encoded there (indirectRenderCommandAtIndex:): the draw, its topology and its
+// index buffer. A slot without a CPU draw keeps the topology an earlier execute or its pipeline chose, so a shader that
+// encodes into it before the next execute finds one (nvmtl_icb_layout.h word 11).
+- (void)nvmtlWriteRecord:(NSUInteger)i {
+    nvmtl_icb_record *rec = [self nvmtlRecords];
+    if (!rec || i >= _cmds.count) return;
+    NVMTLIndirectCommand *c = _cmds[i];
+    nvmtl_icb_record v; memset(&v, 0, sizeof v);
+    v.execPrim = rec[i].execPrim;
+    if (c->_ps && [(id)c->_ps isKindOfClass:[NVMTLRenderPipelineState class]])
+        v.execPrim = nvmtl_icb_prim_for_class((unsigned long)((NVMTLRenderPipelineState *)c->_ps)->_descriptor.inputPrimitiveTopology);
+    if (c->_armed && !c->_isCompute) {
+        v.prim = v.execPrim = (uint32_t)c->_type;
+        if (c->_indexed) {
+            NVMTLBuffer *ib = [(id)c->_ibuf isKindOfClass:[NVMTLBuffer class]] ? (NVMTLBuffer *)c->_ibuf : nil;
+            const uint32_t sh = c->_itype == MTLIndexTypeUInt32 ? 2 : 1;
+            const size_t bindOff = c->_ioff & ((1u << sh) - 1u);   // Metal offsets are index-aligned: 0 in practice
+            const uint64_t addr = ib ? nvmtl_vk_buffer_address(&ib->_b) : 0;
+            if (addr && c->_ioff <= ib->_b.size) {
+                const uint64_t base = addr + bindOff, room = ib->_b.size - bindOff;
+                v.kind = NVMTL_ICB_INDEXED;
+                v.idx[0] = (uint32_t)c->_count; v.idx[1] = (uint32_t)c->_instances; v.idx[2] = (uint32_t)((c->_ioff - bindOff) >> sh);
+                v.idx[3] = (uint32_t)(int32_t)c->_baseVertex; v.idx[4] = (uint32_t)c->_baseInstance;
+                v.ibLo = (uint32_t)base; v.ibHi = (uint32_t)(base >> 32); v.ibLimit = room > 0xffffffffull ? 0xffffffffu : (uint32_t)room; v.ibShift = sh;
+            }
+        } else {
+            v.kind = NVMTL_ICB_DRAW;
+            v.draw[0] = (uint32_t)c->_count; v.draw[1] = (uint32_t)c->_instances; v.draw[2] = (uint32_t)c->_start; v.draw[3] = (uint32_t)c->_baseInstance;
+        }
+    }
+    memcpy(&rec[i], &v, sizeof v);
+}
 - (MTLCPUCacheMode)cpuCacheMode { return (MTLCPUCacheMode)(_opts & 0xF); }
 - (MTLHazardTrackingMode)hazardTrackingMode { return nvmtl_res_hazard(nil, _opts); }
 - (MTLResourceOptions)resourceOptions { return ((MTLResourceOptions)[self storageMode] << MTLResourceStorageModeShift) | (MTLResourceOptions)[self cpuCacheMode]
@@ -6062,8 +6184,31 @@ static NSUInteger nvmtl_texture_slice_count(NVMTLTexture *t) {
 - (void)optimizeContentsForGPUAccess:(id<MTLTexture>)t slice:(NSUInteger)s level:(NSUInteger)l {}
 - (void)optimizeContentsForCPUAccess:(id<MTLTexture>)t {}
 - (void)optimizeContentsForCPUAccess:(id<MTLTexture>)t slice:(NSUInteger)s level:(NSUInteger)l {}
+// A GPU-encodable ICB's records, slots [lo, lo + n), as the CPU state now has them, written again on the GPU timeline:
+// a shader may have written a slot earlier in this command buffer (or after the CPU encoded), and a blit reset or copy
+// happens where the blit is, not when it is encoded. The snapshot goes through a host-visible slice the command buffer holds.
+- (void)nvmtlUploadRecords:(NVMTLIndirectCommandBuffer *)b from:(NSUInteger)lo count:(NSUInteger)n {
+    nvmtl_icb_record *rec = [b nvmtlRecords];
+    if (!rec || !n) return;
+    const size_t bytes = n * (size_t)NVMTL_ICB_RECORD_BYTES;
+    size_t off = 0; NVMTLBuffer *st = nvmtl_bytes_ring(_cb, bytes, &off);
+    if (!st) {
+        st = [NVMTLBuffer new]; off = 0;
+        if (nvmtl_vk_buffer_create(bytes, 1, &st->_b) || !st->_b.map) { nvlog("blit: ICB record staging of %zu bytes REFUSED - the reset/copy reaches the records only from the CPU", bytes); return; }
+        if (!_cb->_scratch) _cb->_scratch = [NSMutableArray new];
+        [_cb->_scratch addObject:st];
+    }
+    memcpy((uint8_t *)st->_b.map + off, rec + lo, bytes);
+    nvmtl_retain_resource(_cb, b); nvmtl_retain_resource(_cb, b->_rec);
+    if (nvmtl_vk_cmd_copy_buffer(&_cb->_c, &st->_b, off, &b->_rec->_b, lo * (size_t)NVMTL_ICB_RECORD_BYTES, bytes))
+        nvlog("blit: ICB record upload FAILED");
+}
 - (void)resetCommandsInBuffer:(id<MTLIndirectCommandBuffer>)icb withRange:(NSRange)r {
-    if ([(id)icb isKindOfClass:[NVMTLIndirectCommandBuffer class]]) [(NVMTLIndirectCommandBuffer *)icb resetWithRange:r];
+    if ([(id)icb isKindOfClass:[NVMTLIndirectCommandBuffer class]]) {
+        NVMTLIndirectCommandBuffer *b = (NVMTLIndirectCommandBuffer *)icb;
+        [b resetWithRange:r];
+        if (b->_rec && r.location < b->_cmds.count) [self nvmtlUploadRecords:b from:r.location count:MIN(r.length, b->_cmds.count - r.location)];
+    }
     else nvlog("blit resetCommandsInBuffer: a %s is not our indirect command buffer — ignored", object_getClassName(icb));
 }
 - (void)copyIndirectCommandBuffer:(id<MTLIndirectCommandBuffer>)src sourceRange:(NSRange)r destination:(id<MTLIndirectCommandBuffer>)dst destinationIndex:(NSUInteger)di {
@@ -6074,6 +6219,15 @@ static NSUInteger nvmtl_texture_slice_count(NVMTLTexture *t) {
         nvlog("blit copyIndirectCommandBuffer: range [%lu,+%lu) -> %lu is outside the buffers (%lu / %lu slots) — ignored", (unsigned long)r.location,
               (unsigned long)r.length, (unsigned long)di, (unsigned long)s->_cmds.count, (unsigned long)d->_cmds.count); return; }
     for (NSUInteger k = 0; k < r.length; k++) [d->_cmds[di + k] nvmtlCopyFrom:s->_cmds[r.location + k]];
+    if (s->_rec && d->_rec && r.length) {
+        // what a shader wrote into the source slots travels with them, on the GPU timeline
+        nvmtl_retain_resource(_cb, s); nvmtl_retain_resource(_cb, s->_rec); nvmtl_retain_resource(_cb, d); nvmtl_retain_resource(_cb, d->_rec);
+        if (nvmtl_vk_cmd_copy_buffer(&_cb->_c, &s->_rec->_b, r.location * (size_t)NVMTL_ICB_RECORD_BYTES, &d->_rec->_b,
+                                     di * (size_t)NVMTL_ICB_RECORD_BYTES, r.length * (size_t)NVMTL_ICB_RECORD_BYTES))
+            nvlog("blit copyIndirectCommandBuffer: record copy FAILED");
+    } else if (d->_rec) [self nvmtlUploadRecords:d from:di count:r.length];
+    else if (s->_rec) { static int said; if (!said++) nvlog("blit copyIndirectCommandBuffer: the source is GPU-encodable and the destination is not - "
+                                                          "only what the CPU encoded is copied (said once)"); }
 }
 - (void)optimizeIndirectCommandBuffer:(id<MTLIndirectCommandBuffer>)icb withRange:(NSRange)r {}
 - (void)copyFromTexture:(id<MTLTexture>)src toTexture:(id<MTLTexture>)dst {

@@ -340,6 +340,14 @@ static inline MTLSize nvmtl_desc_size(id d, SEL sel) {
     return s;
 }
 @interface NVMTLIndirectCommandBuffer () { @public uint64_t _resid; } @end
+#include "nvmtl_icb_layout.h"
+/* GPU-encodable ICBs (nvmtl_icb_layout.h): _rec is the slot record buffer, made when the gpuResourceID is first taken
+   (the address a shader's command_buffer holds); nil for an ICB only the CPU encodes, which keeps the replay path. */
+@interface NVMTLIndirectCommandBuffer () { @public NVMTLBuffer *_rec; uint32_t _refusedSaid; }
+- (nvmtl_icb_record *)nvmtlRecords;
+- (void)nvmtlWriteRecord:(NSUInteger)i;
+@end
+@interface NVMTLIndirectCommand () { @public __unsafe_unretained NVMTLIndirectCommandBuffer *_owner; NSUInteger _slot; } @end
 @interface NVMTLIndirectCommand () - (void)nvmtlCopyFrom:(NVMTLIndirectCommand *)o; @end
 NSUInteger nvmtl_air_max_tg(NVMTLFunction *fn);
 NSUInteger nvmtl_air_static_tg(NVMTLFunction *fn);

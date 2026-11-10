@@ -64,6 +64,51 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - Open: `supportsQueryTextureLOD` is NO (the translator lowers non-array 2D only), `supportsPullModelInterpolation`
   NO (no lowering), the sparse tiers None, and a pipeline's reflection nil (no `MTL4Compiler`).
 
+### GPU-encoded indirect command buffers
+- **Done (10 Nov, branch gpu-icb, untested on the B580):** shaders that encode draws into an `MTLIndirectCommandBuffer`
+  (`render_command::draw_primitives`, `draw_indexed_primitives` with uint16 and uint32 indices, `reset`) translate and
+  run. WebKit's WebGPU index-validation helpers `vsICB` / `vsUshortICB` (render bundles, `drawIndexed`) were refused as
+  an unrecognised AIR family; they now translate and pass spirv-val. Design (`plugin/nvmtl_icb_layout.h`,
+  `translator/.../native/render_command.rs`):
+  - An ICB whose `gpuResourceID` is taken (an argument encoder's `setIndirectCommandBuffer:atIndex:`, or the app) gets
+    a host-visible record buffer, 64 bytes per slot, and the ID is its device address: the value a shader's
+    `command_buffer` holds. Words 0-10 are the draw (kind, primitive type, `VkDrawIndexedIndirectCommand`,
+    `VkDrawIndirectCommand`), written by the CPU when the app encodes the slot and by a shader when it does; words
+    11-15 are written by the CPU only: the topology the execute uses and the index buffer it binds (address, size,
+    index size).
+  - The translator lowers each call to plain stores into `address + slot * 64`; it zeroes the counts of the form the
+    call does not use.
+  - `executeCommandsInBuffer:withRange:` replays each slot's CPU state (pipeline, buffers, depth and raster state, as
+    before) and draws it with `vkCmdDrawIndexedIndirect` (when the slot has an index buffer) and `vkCmdDrawIndirect`
+    from its record. ICBs nobody took the ID of keep the CPU replay. Blit `resetCommandsInBuffer` and
+    `copyIndirectCommandBuffer` also update the records on the GPU timeline. The app orders the shader's writes before
+    the execute (render-encoder memory barrier or encoder boundary), as Metal requires; both are already
+    `ALL_COMMANDS`/`MEMORY_WRITE -> MEMORY_READ` and cover the indirect-argument read.
+  - Test: `user/tests/metal/mtl_gpu_icb.m` (a kernel encodes a draw, two indexed draws whose first index comes from
+    the index pointer, and a reset; a rasterizer-less vertex shader empties a CPU draw as `vsICB` does). Passes on the
+    Apple GPU with `--any`; not yet run on the B580.
+- **Limits (core Vulkan takes neither an index buffer address nor a topology from GPU memory).** A GPU-written indexed
+  draw must point into the index buffer the CPU encoded in that slot (same index type, inside the buffer, aligned):
+  the first index is computed from the pointer. A GPU-written draw must use the topology the execute chose (the
+  CPU draw's, otherwise the pipeline's topology class: point, line or triangle list). Anything else is written with
+  zero counts and kind 3: nothing is drawn, and the plugin logs the slot after the command buffer completes (up to 8
+  times per ICB). WebKit's `vsICB` meets both conditions (it rewrites the CPU-encoded draw with index count 0 and the
+  same buffer). The newer WebKit `vsICBIndirect*` helpers (WebKit main, not yet in Safari 26.7) encode indexed draws
+  into slots the CPU never filled: those are refused until the next step.
+- **Next:**
+  - Index buffer by address: `VK_EXT_device_generated_commands` (ANV exposes it for verx10 >= 125, so on Xe2) has
+    an index-buffer token that takes a device address from GPU memory. A slot record laid out as a DGC sequence
+    (index-buffer token + draw-indexed token) executed with `vkCmdExecuteGeneratedCommandsEXT` would remove the
+    "same index buffer" condition. Topology still cannot come from GPU memory: the execute could issue one draw per
+    topology of the pipeline's class (two per slot) with the record writing the counts only for its own.
+  - `set_pipeline_state`, `set_vertex_buffer` / `set_fragment_buffer` (also refused today): the record would hold the
+    pipeline's resource ID and the buffer addresses; buffers through the binding table's addresses (or DGC
+    vertex-buffer / push-constant tokens), pipelines through DGC indirect execution sets.
+  - `set_barrier` / `clear_barrier` render commands, and compute ICBs (`concurrent_dispatch_threadgroups`,
+    `set_kernel_buffer`, `set_compute_pipeline_state`: a `VkDispatchIndirectCommand` per slot, buffers through the
+    push-constant address table) - refused today.
+  - Run `mtl_gpu_icb` and Safari's WebGPU render-bundle samples on the B580.
+
 ### Descriptor model
 - Stage 1 (front end without per-draw atomics or retain/release, address table, bind cache): done. Stage 2, the descriptor-buffer model, is in the plugin behind `NVMTL_DESC_MODEL=buffer` and off by default until it has been soaked (`docs/design/DESCRIPTOR-MODEL.md`).
 - Pools: done (see the BAR window). A full pool set now waits for in-flight work and then fails the command buffer with a Metal error, never silently.

@@ -2606,7 +2606,7 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
     NVMTLIndirectCommandBuffer *icb = [NVMTLIndirectCommandBuffer new];
     icb->_dev = self; icb->_cmds = [NSMutableArray arrayWithCapacity:n];
     icb->_opts = o;
-    for (NSUInteger i = 0; i < n; i++) [icb->_cmds addObject:[NVMTLIndirectCommand new]];
+    for (NSUInteger i = 0; i < n; i++) { NVMTLIndirectCommand *c = [NVMTLIndirectCommand new]; c->_owner = icb; c->_slot = i; [icb->_cmds addObject:c]; }
     nvlog("newIndirectCommandBufferWithDescriptor: %lu slots -> %p", (unsigned long)n, (__bridge void *)icb);
     return icb;
 }
