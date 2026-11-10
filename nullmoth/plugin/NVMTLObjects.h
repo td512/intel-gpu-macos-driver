@@ -352,6 +352,12 @@ BOOL nvmtl_air_grid_only(NVMTLFunction *fn);
 @interface NVMTLComputeCommandEncoder () { @public NSString *_label; } @end
 @interface NVMTLBlitCommandEncoder () { @public NSString *_label; } @end
 @interface NVMTLAccelerationStructureCommandEncoder () { @public NSString *_label; } @end
+// stage-boundary GPU timestamps: the end-of-pass samples of the pass descriptor's sampleBufferAttachments, written at
+// endEncoding (sample buffer, index pairs; nil without any)
+@interface NVMTLRenderCommandEncoder () { @public NSArray *_tsEnd; } @end
+@interface NVMTLComputeCommandEncoder () { @public NSArray *_tsEnd; } @end
+@interface NVMTLBlitCommandEncoder () { @public NSArray *_tsEnd; } @end
+@interface NVMTLAccelerationStructureCommandEncoder () { @public NSArray *_tsEnd; } @end
 @interface NVMTLHeap () { @public MTLHazardTrackingMode _hazard; } @end
 @interface NVMTLIndirectCommandBuffer () { @public MTLResourceOptions _opts; } @end
 @interface NVMTLBuffer () { @public uint32_t _purge; } @end

@@ -2521,16 +2521,34 @@ static void nvmtl_log_compute_descriptor(MTLComputePipelineDescriptor *d) {
 - (id<MTLRasterizationRateMap>)newRasterizationRateMapWithDescriptor:(MTLRasterizationRateMapDescriptor *)descriptor { return nil; }
 - (BOOL)supportsInt64 { return YES; }
 - (BOOL)isQuadDataSharingSupported { return YES; }
+// GPU timestamps (nvmtl_vk.c, Metal GPU timestamps): at stage boundaries (the start and end of a pass, through its
+// descriptor's sampleBufferAttachments) and at draw, dispatch and blit boundaries (sampleCountersInBuffer:), all as
+// Vulkan timestamp queries. WebKit's WebGPU offers 'timestamp-query' only for a device that answers YES for
+// MTLCounterSamplingPointAtStageBoundary and lists the timestamp counter set (checked against WebKit on Apple's GPU).
 - (BOOL)supportsCounterSampling:(MTLCounterSamplingPoint)p {
-    return p == MTLCounterSamplingPointAtDrawBoundary || p == MTLCounterSamplingPointAtDispatchBoundary || p == MTLCounterSamplingPointAtBlitBoundary;
+    const BOOL known = p == MTLCounterSamplingPointAtStageBoundary || p == MTLCounterSamplingPointAtDrawBoundary ||
+                       p == MTLCounterSamplingPointAtDispatchBoundary || p == MTLCounterSamplingPointAtBlitBoundary;
+    const BOOL yes = known && nvmtl_vk_ts_supported();
+    static _Atomic unsigned said;
+    const unsigned bit = 1u << (p < 8 ? (unsigned)p : 8u);
+    if (!(atomic_fetch_or(&said, bit) & bit))
+        nvlog("supportsCounterSampling: %s -> %s (said once per point)", p == MTLCounterSamplingPointAtStageBoundary ? "stage boundary"
+              : p == MTLCounterSamplingPointAtDrawBoundary ? "draw boundary" : p == MTLCounterSamplingPointAtDispatchBoundary ? "dispatch boundary"
+              : p == MTLCounterSamplingPointAtBlitBoundary ? "blit boundary" : "tile dispatch boundary / unknown", yes ? "YES" : "NO");
+    return yes;
 }
-- (NSArray *)counterSets { return @[nvmtl_timestamp_counter_set()]; }
+- (NSArray *)counterSets {
+    const BOOL on = nvmtl_vk_ts_supported();
+    static int said; if (!said++) nvlog("counterSets: %s", on ? "[timestamp {timestamp}]" : "[] (no GPU timestamps)");
+    return on ? @[nvmtl_timestamp_counter_set()] : @[];
+}
 - (id<MTLCounterSampleBuffer>)newCounterSampleBufferWithDescriptor:(MTLCounterSampleBufferDescriptor *)desc error:(NSError **)err {
     const NSUInteger n = desc.sampleCount;
     NSInteger code = MTLCounterSampleBufferErrorInvalid;
     const char *why = !desc ? "no descriptor"
                     : ![desc.counterSet.name isEqualToString:MTLCommonCounterSetTimestamp] ? "a counter set this device does not offer"
-                    : (!n || n > 32768) ? "a sample count outside 1..32768" : NULL;
+                    : (!n || n > 32768) ? "a sample count outside 1..32768"
+                    : !nvmtl_vk_ts_supported() ? "no GPU timestamps on this device" : NULL;
     void *pool = why ? NULL : nvmtl_vk_ts_pool_create((uint32_t)n);
     if (!why && !pool) { why = "the query pool could not be made"; code = MTLCounterSampleBufferErrorInternal; }
     if (why) {
