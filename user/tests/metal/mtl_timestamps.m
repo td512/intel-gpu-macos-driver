@@ -307,7 +307,7 @@ int main(int argc, char **argv)
                 }
             if (OK2(S_C0) && OK2(S_C1) && OK2(S_D0) && OK2(S_D1)) {
                 const double d1 = (double)t[S_C1] - (double)t[S_C0], d4 = (double)t[S_D1] - (double)t[S_D0];
-                durN[run] = d1; dur4N[run] = d4;
+                durN[run] = d1; dur4N[run] = cbgpu > 0 ? d4 / cbgpu : 0; // share of the command buffer: the GPU clock ramps between runs
                 printf("compute: N %.3f ms, 4N %.3f ms (x%.2f)\n", d1 / 1e6, d4 / 1e6, d1 > 0 ? d4 / d1 : 0.0);
                 CHECK(d1 > 0 && d4 > 0, "a spin pass measured no time");
                 // Apple's GPU runs the N pass alongside the render and blit passes: its ratio is reported there, not checked
@@ -320,8 +320,8 @@ int main(int argc, char **argv)
             #undef OK2
         }
         if (dur4N[0] > 0 && dur4N[1] > 0)
-            CHECK(dur4N[1] / dur4N[0] > 0.5 && dur4N[1] / dur4N[0] < 2.0, "the 4N pass measured %.3f ms (CPU resolve) and %.3f ms (GPU resolve)",
-                  dur4N[0] / 1e6, dur4N[1] / 1e6);
+            CHECK(dur4N[1] / dur4N[0] > 0.5 && dur4N[1] / dur4N[0] < 2.0, "the 4N pass took %.0f%% of its command buffer (CPU resolve) and %.0f%% (GPU resolve)",
+                  dur4N[0] * 100, dur4N[1] * 100);
         printf("%s (%d failed)\n", g_bad ? "FAIL" : "PASS", g_bad);
         return g_bad ? 4 : 0;
     }
