@@ -27,6 +27,7 @@ files: `/Library/GPUBundles/nvmtl/libintelxeav1dec.dylib`, `libintelxevenc.dylib
 | `ffmpeg/apply-patches.sh`, `ffmpeg/*.patch` | our FFmpeg 9.0.2 patches and the eight of them the released libraries carry, in order (two files there are not applied: see the script) |
 | `ffmpeg/configure-shared.sh` | the FFmpeg 9.0.2 configuration: shared, LGPL only, AV1/H.264/HEVC/VP9 decoders + Vulkan hwaccels, Vulkan encoders |
 | `tests/vtdec.m`, `tests/vtq.m`, `tests/sbprobe.c` | decode through `VTDecompressionSession`; what VideoToolbox offers; what a sandboxed video service can reach |
+| `tests/vtencq.m` | encode quality: deterministic test sources made in memory, encoded, decoded straight from the encoder's sample buffers, PSNR Y/U/V and bit rate per pattern ([below](#encode-quality-vtencq)) |
 | `tests/vcbench.m` | decode throughput the way Video Codec Test measures it (parallel sessions, its pixel formats), and hardware vs software checksums; `VCB_DUMP=<dir>` writes each picture's visible planes for `cmp -l` |
 
 ## Building
@@ -38,6 +39,50 @@ FFMPEG_SRC=<ffmpeg-9.0.2> MESA_INCLUDE=vk-include PREFIX=install ../videotoolbox
 FFMPEG_INSTALL=$PWD/install MESA_INCLUDE=<mesa>/include ../videotoolbox/build.sh
 FFMPEG_INSTALL=$PWD/install MESA_INCLUDE=<mesa>/include ../videotoolbox/encoder/build.sh
 ```
+
+## Encode quality (vtencq)
+
+`tests/vtencq.m` checks an encoder objectively on any Mac, with frameworks only (no FFmpeg, no source files): four
+sources made with integer arithmetic (the same pictures on every machine and architecture; the `source` column is
+their checksum) - `gradient` (smooth moving ramps), `noise` (band-limited texture moving 3,1 px a frame plus temporal
+grain), `text` (glyph-like dots typed and scrolled, screen content), `scroll` (fractal terrain, 0.75,2.5 px a frame with
+sub-pixel motion) - are encoded, the encoder's CMSampleBuffers are decoded by VideoToolbox with the format description
+the encoder made, and every picture is compared with its source. PSNR is computed as FFmpeg's psnr filter averages it
+(from the mean squared error; `avg` weights Y:U:V 4:1:1; checked against `ffmpeg -lavfi psnr` on a `--dump` stream:
+same to 0.01 dB). Decoders: `sw` (the default for H.264/HEVC, Apple's, independent of the encoder) or `hw`/`any`. macOS
+has no AV1 software decoder in VideoToolbox (an `av01` session fails with -12906 on macOS 27.0.1 arm64), so AV1 goes
+through the IntelXe AV1 decoder (`--metal` or `--declib`, `--decoder any`).
+
+```sh
+clang -arch x86_64 -mmacosx-version-min=15.0 -O2 -fobjc-arc videotoolbox/tests/vtencq.m -framework Foundation \
+  -framework CoreMedia -framework CoreVideo -framework VideoToolbox -framework Metal -o vtencq && codesign -f -s - vtencq
+./vtencq --metal --codec hevc                                   # IntelXe encoders and decoders through the installed plug-in
+./vtencq --lib libintelxevenc.dylib --codec hevc --decoder sw   # a test encoder build, registered in-process
+./vtencq --metal --codec av1 --bitrate 6000000                  # AV1: INTELXEVENC_CODECS gets av1 before registration
+./vtencq --encoder system --codec h264                          # whatever VideoToolbox picks (Apple's encoders on a Mac)
+```
+
+Options: `--codec h264|hevc|av1`, `--bitrate N` (bit/s; 8 Mbit/s, AV1 6), `--cbr`, `--10bit`, `--frames N` (120 per
+pattern), `--size WxH`, `--fps F` (30), `--decoder hw|sw|any`, `--patterns`, `--keyint N`, `--noreorder`, `--realtime`,
+`--dump DIR` (elementary streams; `--dump-source` adds the raw sources), `--list`.
+
+**Reference: Apple's hardware encoders** (M1 Pro, macOS 27.0.1, `--encoder system`, 1920x1080, 120 frames per
+pattern at 30 fps, frame reordering on, Apple's software decoder; the x86_64 build under Rosetta gives the same
+numbers and checksums). PSNR-Y / bit rate against the target:
+
+| encoder, mode | gradient | noise | text | scroll | all: PSNR-Y, avg | all: rate |
+|---|---|---|---|---|---|---|
+| H.264 VBR 8 Mbit/s | 53.48 dB, -79.5% | 35.94, +67.7% | 45.42, -52.9% | 48.48, -51.5% | 41.22, 42.28 | -29.0% |
+| H.264 CBR 8 Mbit/s | 53.10, -12.5% | 37.12, +44.0% | 45.67, -8.2% | 48.01, -12.3% | 42.18, 43.08 | +2.8% |
+| HEVC VBR 8 Mbit/s | 53.67, -81.1% | 35.55, +26.4% | 49.64, -48.4% | 50.00, -65.4% | 41.19, 42.58 | -42.1% |
+| HEVC CBR 8 Mbit/s | 53.17, -12.5% | 37.30, +30.7% | 45.59, -6.9% | 46.90, -12.5% | 42.24, 43.46 | -0.3% |
+| HEVC VBR 6 Mbit/s | 53.45, -76.4% | 34.82, +41.9% | 49.09, -34.8% | 49.70, -57.6% | 40.49, 41.89 | -31.7% |
+| HEVC Main10 VBR 8 Mbit/s | 61.69, -82.7% | 35.35, +17.7% | 49.64, -48.5% | 51.33, -73.0% | 41.10, 42.58 | -46.6% |
+
+Apple's VBR stays far under the target where the content is easy (gradient, scroll, text: 48-54 dB already) and goes
+over it on the noise pattern (temporal grain everywhere): on synthetic sources an under-shoot with a high PSNR is the
+expected behaviour of a VBR encoder, not a rate control fault. Encode speed here was 165-185 fps (Apple's encoders,
+frames copied from memory).
 
 ## Licensing: FFmpeg
 
