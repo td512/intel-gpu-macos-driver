@@ -2,8 +2,11 @@
 // dmode: list the main display's modes, or switch to WxH (IntelXeFB scaled-mode test, run in the console session).
 //   clang -arch x86_64 -mmacosx-version-min=15.0 -O1 -o dmode dmode.c -framework CoreGraphics -framework CoreFoundation
 //   ./dmode            list
-//   ./dmode 1920 1080  switch (first mode of that size)
+//   ./dmode 1920 1080  switch (first 1:1 mode of that size), permanently (CGDisplaySetDisplayMode alone reverts when
+//                      the process exits, so a switch from a shell did nothing)
+//   ./dmode 2560 1440 179.88  the same, at that refresh rate (HiDPI and 1:1 variants of a size share IO mode ids)
 #include <CoreGraphics/CoreGraphics.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -24,8 +27,10 @@ int main(int argc, char **argv) {
 		if (!want_w)
 			printf("  %zux%zu pixels %zux%zu %.2f Hz io %d%s\n", w, h, CGDisplayModeGetPixelWidth(m), CGDisplayModeGetPixelHeight(m),
 			       CGDisplayModeGetRefreshRate(m), CGDisplayModeGetIODisplayModeID(m), CGDisplayModeIsUsableForDesktopGUI(m) ? "" : " (not for GUI)");
-		else if (w == want_w && h == want_h && CGDisplayModeGetPixelWidth(m) == w) {
-			CGError e = CGDisplaySetDisplayMode(d, m, NULL);
+		else if (w == want_w && h == want_h && CGDisplayModeGetPixelWidth(m) == w && (argc < 4 || fabs(CGDisplayModeGetRefreshRate(m) - atof(argv[3])) < 0.5)) {
+			CGDisplayConfigRef cfg; CGError e = CGBeginDisplayConfiguration(&cfg);
+			if (!e) e = CGConfigureDisplayWithDisplayMode(cfg, d, m, NULL);
+			if (!e) e = CGCompleteDisplayConfiguration(cfg, kCGConfigurePermanently);
 			printf("set %zux%zu (io %d): %d\n", w, h, CGDisplayModeGetIODisplayModeID(m), e);
 			return e != kCGErrorSuccess;
 		}
