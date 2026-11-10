@@ -8,7 +8,8 @@
 //   420f/420v: the pixel buffer attributes that app asks for (its choice follows the format's FullRangeVideo)
 // Environment: VCB_THREADS=n sessions in parallel (the app runs one per thread), VCB_PS=1 the format description from the
 // parameter sets (as the app makes it: FullRangeVideo from the VUI), VCB_NOOUT=1 DoNotOutputFrame (decode only),
-// VCB_SW=1 Apple's software decoder, VCB_SUM=1 a checksum of every output picture (hardware vs software).
+// VCB_SW=1 Apple's software decoder, VCB_SUM=1 a checksum of every output picture (hardware vs software), VCB_DUMP=<dir>
+// every output picture's visible planes to <dir>/<pts>.yuv (with VCB_SUM: to find where two decoders differ, cmp -l).
 // Build: clang -arch x86_64 -mmacosx-version-min=15.0 -fobjc-arc -O1 vcbench.m -framework Foundation -framework VideoToolbox \
 //        -framework CoreMedia -framework CoreVideo -framework Metal -o vcbench
 #import <Foundation/Foundation.h>
@@ -19,19 +20,25 @@
 
 static _Atomic long g_out, g_err;
 static int g_sum;
+static const char *g_dump;
 static void cb(void *a, void *b, OSStatus st, VTDecodeInfoFlags f, CVImageBufferRef img, CMTime pts, CMTime dur) {
 	if (st) g_err++; else g_out++;
 	if (g_sum && img && !st) {
 		CVPixelBufferLockBaseAddress(img, kCVPixelBufferLock_ReadOnly);
 		uint64_t hsh = 1469598103934665603ull;
+		FILE *df = NULL;
+		if (g_dump) { char fn[1024]; snprintf(fn, sizeof fn, "%s/%lld.yuv", g_dump, pts.value); df = fopen(fn, "wb"); }
 		for (size_t p = 0; p < CVPixelBufferGetPlaneCount(img); p++) {
 			const uint8_t *base = CVPixelBufferGetBaseAddressOfPlane(img, p);
 			size_t bpr = CVPixelBufferGetBytesPerRowOfPlane(img, p), rows = CVPixelBufferGetHeightOfPlane(img, p), wb = CVPixelBufferGetWidthOfPlane(img, p) * (p ? 2 : 1);
 			for (size_t y = 0; y < rows; y++) for (size_t x = 0; x < wb; x++) { hsh ^= base[y * bpr + x]; hsh *= 1099511628211ull; }
+			if (df) for (size_t y = 0; y < rows; y++) fwrite(base + y * bpr, 1, wb, df);
 		}
+		if (df) fclose(df);
 		OSType pf = CVPixelBufferGetPixelFormatType(img);
 		CFTypeRef m = CVBufferCopyAttachment(img, kCVImageBufferYCbCrMatrixKey, NULL);
-		printf("frame pts %lld fmt %.4s sum %016llx\n", pts.value, (char *)&(OSType){ CFSwapInt32HostToBig(pf) }, hsh);
+		printf("frame pts %lld fmt %.4s %zux%zu sum %016llx\n", pts.value, (char *)&(OSType){ CFSwapInt32HostToBig(pf) },
+		       CVPixelBufferGetWidth(img), CVPixelBufferGetHeight(img), hsh);
 		if (m) CFRelease(m);
 		CVPixelBufferUnlockBaseAddress(img, kCVPixelBufferLock_ReadOnly);
 	}
@@ -42,10 +49,13 @@ int main(int argc, char **argv) {
 	@autoreleasepool {
 		if (argc < 5) { fprintf(stderr, "usage: vcbench DIR SECONDS one|new|flush none|nv12|bgra [async 0|1]\n"); return 2; }
 		id<MTLDevice> dev = getenv("VCB_NOMETAL") ? nil : MTLCreateSystemDefaultDevice(); printf("metal %s\n", dev ? dev.name.UTF8String : "-");
-		NSString *dir = @(argv[1]); double secs = atof(argv[2]); const char *mode = argv[3], *fmt = argv[4];
+		// the codec comes from the folder's name (h264_2k, h265_4k): "." is resolved first
+		char rp[PATH_MAX];
+		NSString *dir = @(realpath(argv[1], rp) ? rp : argv[1]); double secs = atof(argv[2]); const char *mode = argv[3], *fmt = argv[4];
 		int async = argc > 5 ? atoi(argv[5]) : 1;
 		NSString *ext = [dir hasSuffix:@"5_4k"] || [dir hasSuffix:@"5_2k"] || [dir containsString:@"h265"] ? @"h265" : @"h264";
 		NSData *desc = [NSData dataWithContentsOfFile:[dir stringByAppendingFormat:@"/desc.%@", ext]];
+		if (desc.length < 0x24) { fprintf(stderr, "no desc.%s in %s\n", ext.UTF8String, dir.UTF8String); return 1; }
 		const uint8_t *d = desc.bytes; size_t dn = desc.length;
 		FourCharCode codec = (FourCharCode)d[4] | (FourCharCode)d[5] << 8 | (FourCharCode)d[6] << 16 | (FourCharCode)d[7] << 24;
 		int32_t w = d[0x20] | d[0x21] << 8, h = d[0x22] | d[0x23] << 8;
@@ -107,6 +117,7 @@ int main(int argc, char **argv) {
 			dispatch_group_async(g, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ @autoreleasepool {
 				OSStatus r;
 		g_sum = getenv("VCB_SUM") != NULL;
+		g_dump = getenv("VCB_DUMP");
 		NSDictionary *spec = getenv("VCB_SW") ? @{ (id)kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: @NO }
 		                                      : @{ (id)kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: @YES };
 		NSDictionary *attrs = nil;
