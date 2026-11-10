@@ -6,6 +6,7 @@ mod phi_provenance;
 mod raw_select;
 mod select;
 mod select_gep;
+mod texture_handle_merge;
 
 pub(super) fn is_scalar_pointee(ty: &LlType) -> bool {
     matches!(
