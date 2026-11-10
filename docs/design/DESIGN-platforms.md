@@ -195,6 +195,7 @@ Other G21 cards (B50/B60 Pro: e211, e212, …) share the supported G21 entry. Th
 ## 4. The userland side
 
 > Added 2026-11-10 (branch `userland-platform`). This section was checked against the files outside `kernel/`.
+> Updated 2026-11-10 (branch `userland-platform2`): the items marked **Done** below.
 
 Almost nothing outside the kernel decides by device.
 
@@ -213,6 +214,8 @@ What is device-specific is the list of cards the driver attaches to. Each part k
 language. `data/platforms.json` `"supported"` is now the one source of that list:
 
 - each device's id, the name that messages use, the kernel `model` string and whether the project has tested it;
+- what the app's GPU test expects of the card (`gpu_test`): compute rate and memory bandwidth, the good and fair limits,
+  and whether the figures were measured or come from the specification;
 - the kernel descriptor that covers the devices (`kernel_ids`).
 
 `tools/parity/devices.py` reads every copy and fails when one differs. `release/test-efi-flow.sh` and
@@ -228,17 +231,22 @@ language. `data/platforms.json` `"supported"` is now the one source of that list
 | `release/templates/efi.sh` (the app carries it) | `CARD_IDS="e20b e20c"` | exact list |
 | `app/Sources/Model.swift` | `supportedCards` | ids and names |
 | `windows/IntelXe-EFI.ps1` | `$cardIds` in `Get-CardLocation` | exact list |
+| `tools/clbench/clbench.c` | `kSupported`, the OpenCL devices it prefers | exact list |
+| `app/Sources/SupportedDevices.swift` | generated from `gpu_test` (`devices.py --write-swift`) | the file is what the JSON gives |
 | the READMEs, `README-INSTALL*.md`, `efi/README.md`, `tools/parity/platforms.py`; `IntelXe.cpp` | text | names every id and card (`IntelXe.cpp`: every `model`) |
 
-Nothing is generated: each copy stays a plain literal that can be read in its own file. On the B580 and the B570 the
-install check, efi.sh, the app and the Windows tool behave as before. Their messages are built from the list and come
-out the same.
+Each copy stays a plain literal that can be read in its own file. One file is generated:
+`app/Sources/SupportedDevices.swift`, the GPU test's figures, which the app needs at run time. On the B580 and the
+B570 the install check, efi.sh, the app and the Windows tool behave as before. Their messages are built from the list
+and come out the same.
 
 Deliberately left alone:
 
 - the Arc B580 test fixtures: xemac's `XEMAC_FAKE` device (`FAKE_DEVICE 0xe20b`, the BMG hwconfig, 20.01/13.01,
   12 GB) and the app's `SelfTest` facts;
 - the frozen names: the `'B580'` IOServiceOpen type, `0xb580xxxx`, and `B580.kext` as the earlier name;
+- the app's "No Arc B580 or B570 found" message and the install.sh header, which test expectations depend on (a
+  separate change);
 - prose and measurement notes.
 
 ### What a new family needs outside the kernel
@@ -246,21 +254,37 @@ Deliberately left alone:
 The ids come first. Add the device to `"supported"` and run `python3 tools/parity/devices.py`; it names every copy to
 change. The kernel side is in section 3. After that, the work is in these places:
 
-- **Device detection by name.** Detection that matches the marketing name assumes "Arc": the app's GPU test verdict
-  (`GPUTest.swift`, which also holds the B580's expected 13 TFLOP/s and 400 GB/s), `tools/clbench` and
-  `user/tests/metal/cl_lat.c`. A card that is not called "Arc" (an LNL or PTL iGPU) needs a better match. The best match
-  is the IntelXe `model` property or `DRM_XE_DEVICE_QUERY_CONFIG`.
-- **B580 figures in the app.**
-  - The Settings clock range (`Default (1200–2850 MHz)`) and the clock chart's fallback top (2850) are B580 figures.
-  - The live maximum already comes from `debug.intelxe.sensors` (RP0).
-  - On a B570 only the label is off: it shows the B580's range.
+- **Device detection by name. Done.**
+  - The app's GPU test takes its verdict and its expected figures by PCI device id: the IOPCIDevice above the Metal
+    device's registry entry, or else the supported card on the bus when the Metal device carries its name. The
+    figures are the card's `gpu_test` (`SupportedDevices.swift`). The B580's are the earlier constants (13 TFLOP/s,
+    400 GB/s, the same limits). The B570's come from Intel's specification and are marked as not measured
+    (11.5 TFLOP/s, 380 GB/s; the derivation is in the JSON and the generated file). Any other GPU gets no verdict and
+    no figures.
+  - `tools/clbench` prefers a GPU with vendor id 0x8086 whose PCI id (`CL_DEVICE_ID_INTEL`, Intel's runtime) is
+    supported, then any 0x8086 GPU, then a GPU whose `CL_DEVICE_VENDOR` names Intel, then the first GPU. Its argument
+    (a name substring) still overrides. `user/tests/metal/cl_lat.c` does the same without the PCI id, which Apple's
+    OpenCL does not report; `CL_LAT_DEVICE=<n>` picks a GPU.
+  - Not known yet: what vendor id and vendor string Apple's OpenCL reports for this driver's device. It reports ids of
+    its own (Apple M1 Pro: 0x1027f00). Both tools print them, and on the test machine (one GPU) they fall back to it.
+- **B580 figures in the app. Done.**
+  - The Settings label is built from `debug.intelxe.sensors`: `Default (<floor>–<RP0> MHz)`. The floor is the
+    kernel's 1200 MHz SLPC minimum, kept within RPn and RP0 as `slpcParams` keeps it. On the B580 it reads
+    `Default (1200–2850 MHz)` as before. Without the sysctl it says `Default`.
+  - When the sensors give no RP0 (the GPU asleep), the clock chart's top is the last RP0 read, or else the highest
+    reading. It no longer falls back to 2850.
+  - Still B580 figures: the Quiet (1800 MHz) and Performance (2400 MHz) settings.
 - **Discrete-only steps.**
   - efi.sh, the Windows tool and SSDT-ARCOFF look for a PCIe card two bridges below the root port, and they set
     `ResizeAppleGpuBars`.
   - An integrated GPU has no such port and no VRAM BAR, so these steps would be skipped or replaced for one.
   - The same holds for the install guide's 1 GB BAR window.
-- **Video.** The VideoToolbox codecs register by what ANV offers. `videotoolbox/encoder/intelxevenc.c`
-  `IntelXeVEnc_Register` (the test tools' path) still names its encoders "Intel Arc B580 …". The plugin's own
-  registration names them after the `model` property.
+- **Video.** The VideoToolbox codecs register by what ANV offers. **Done:** `videotoolbox/encoder/intelxevenc.c`
+  `IntelXeVEnc_Register` (the test tools' path) now names its encoders after the `model` property, as the plugin's own
+  registration does. "Intel Arc B580 …" is left only as the fallback when the registry has no model.
+- **zink-gl. Done.** `zink-gl/src/mesa-zink.diff` is the source record of the shipped zink binaries. No build script
+  applies it. It still held the pre-rename ANV changes (`b580_drm.h`, `DRM_IOCTL_B580_*`) of the tree it was cut from.
+  It now holds only what a zink-only build compiles (everything outside `src/intel/`). Those sections are byte for
+  byte as before, and the diff still applies to `f01e9b07a91`. ANV's current changes are `mesa/intelxe.diff`.
 - **Mesa.** Mesa's own support for the family. For a pre-Xe2 family, the Xe2 video patches (`mesa/patches` 0010–0095)
   would need a check against that family's video engine.

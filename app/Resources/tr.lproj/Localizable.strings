@@ -243,9 +243,11 @@
 "Drawing results" = "Çizim sonuçları";
 "%lld of 65536 pixels wrong" = "65536 pikselden %lld tanesi yanlış";
 "Compute rate (FP32)" = "Hesaplama hızı (FP32)";
-"An Arc B580 reaches about 13 TFLOP/s. Far less: the GPU clock is held low (power settings) or the CPU starves it (HybridPM)." = "Arc B580 yaklaşık 13 TFLOP/s'ye ulaşır. Çok daha azı: GPU saat hızı düşük tutuluyor (güç ayarları) ya da işlemci onu besleyemiyor (HybridPM).";
+"An Arc %@ reaches about %@ TFLOP/s. Far less: the GPU clock is held low (power settings) or the CPU starves it (HybridPM)." = "Arc %@ yaklaşık %@ TFLOP/s'ye ulaşır. Çok daha azı: GPU saat hızı düşük tutuluyor (güç ayarları) ya da işlemci onu besleyemiyor (HybridPM).";
+"By its specification an Arc %@ reaches about %@ TFLOP/s (not measured on one yet). Far less: the GPU clock is held low (power settings) or the CPU starves it (HybridPM)." = "Özelliklerine göre Arc %@ yaklaşık %@ TFLOP/s'ye ulaşır (henüz bir kartta ölçülmedi). Çok daha azı: GPU saat hızı düşük tutuluyor (güç ayarları) ya da işlemci onu besleyemiyor (HybridPM).";
 "Memory bandwidth" = "Bellek bant genişliği";
-"An Arc B580's memory gives about 400 GB/s. Far less: the memory or GPU clock is held low." = "Arc B580'in belleği yaklaşık 400 GB/s verir. Çok daha azı: bellek ya da GPU saat hızı düşük tutuluyor.";
+"An Arc %@'s memory gives about %@ GB/s. Far less: the memory or GPU clock is held low." = "Arc %@'in belleği yaklaşık %@ GB/s verir. Çok daha azı: bellek ya da GPU saat hızı düşük tutuluyor.";
+"By its specification an Arc %@'s memory gives at most %@ GB/s (not measured on one yet). Far less: the memory or GPU clock is held low." = "Özelliklerine göre Arc %@'in belleği en çok %@ GB/s verir (henüz bir kartta ölçülmedi). Çok daha azı: bellek ya da GPU saat hızı düşük tutuluyor.";
 "Upload (PCIe)" = "Yükleme (PCIe)";
 "The card's PCIe 4.0 x8 link moves about 12-14 GB/s. Far less: the link trained slower (slot, riser, BIOS PCIe setting)." = "Kartın PCIe 4.0 x8 bağlantısı yaklaşık 12-14 GB/s taşır. Çok daha azı: bağlantı daha yavaş kuruldu (yuva, yükseltici kablo, BIOS PCIe ayarı).";
 "Round trip" = "Gidiş-dönüş";
@@ -298,7 +300,8 @@
 "Balanced" = "Dengeli";
 "Power saving" = "Güç tasarrufu";
 "GPU clock" = "GPU saat hızı";
-"Default (1200–2850 MHz)" = "Varsayılan (1200–2850 MHz)";
+"Default (%@–%@ MHz)" = "Varsayılan (%@–%@ MHz)";
+"Default" = "Varsayılan";
 "Quiet (up to 1800 MHz: less heat and fan noise)" = "Sessiz (en çok 1800 MHz: daha az ısı ve fan sesi)";
 "Performance (at least 2400 MHz: lowest latency, more power)" = "Performans (en az 2400 MHz: en düşük gecikme, daha çok güç)";
 "Applied at the next start." = "Bir sonraki açılışta uygulanır.";

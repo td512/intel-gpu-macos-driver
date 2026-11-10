@@ -25,7 +25,7 @@
   }
  },
  "supported": {
-  "about": "The PCI devices (vendor 8086) this driver attaches to: the one list that every copy in the repository is checked against (tools/parity/devices.py; docs/design/DESIGN-platforms.md section 4). family: the kernel descriptor (kernel/IntelXe/xe_platform.cpp) that covers them, kernel_ids its id array. name: the card as messages name it; model: IntelXe.kext's 'model' property for it (the Metal device and the codecs take their names from it). tested: run on hardware by the project.",
+  "about": "The PCI devices (vendor 8086) this driver attaches to: the one list that every copy in the repository is checked against (tools/parity/devices.py; docs/design/DESIGN-platforms.md section 4). family: the kernel descriptor (kernel/IntelXe/xe_platform.cpp) that covers them, kernel_ids its id array. name: the card as messages name it; model: IntelXe.kext's 'model' property for it (the Metal device and the codecs take their names from it). tested: run on hardware by the project. gpu_test: what the app's GPU test (app/Sources/GPUTest.swift) expects of the card, generated into app/Sources/SupportedDevices.swift (python3 tools/parity/devices.py --write-swift): the FP32 compute rate in TFLOP/s and the VRAM copy bandwidth in GB/s it reaches (about), and the results at or above which the test says good / fair (below fair: bad); measured: false when the figures come from the specification, not from a run on the card; basis: where the figures come from.",
   "family": "BMG-G21",
   "kernel_ids": "kIdsBMGG21",
   "devices": [
@@ -33,13 +33,25 @@
     "id": "e20b",
     "name": "B580",
     "model": "Intel Arc B580 Graphics",
-    "tested": true
+    "tested": true,
+    "gpu_test": {
+     "measured": true,
+     "basis": "On the test machine, with the app's own kernels (fma16; copy4, VRAM to VRAM). The good and fair limits are the ones the app had before they moved here.",
+     "fp32_tflops": {"about": 13, "good": 8, "fair": 4},
+     "memory_gbs": {"about": 400, "good": 250, "fair": 120}
+    }
    },
    {
     "id": "e20c",
     "name": "B570",
     "model": "Intel Arc B570 Graphics",
-    "tested": false
+    "tested": false,
+    "gpu_test": {
+     "measured": false,
+     "basis": "From Intel's specification of the B570: 18 Xe2-cores x 8 vector engines x 16 FP32 lanes = 2304 lanes, x 2 FLOP per FMA x 2500 MHz graphics clock = 11.52 TFLOP/s; 10 GB GDDR6 at 19 Gbps on a 160-bit bus = 19 x 160 / 8 = 380 GB/s (peak; a copy reaches less). The good/fair limits are the B580's scaled by the ratio of the two cards' specifications: compute 11.52 / 13.67 (B580: 20 Xe2-cores, 2670 MHz), memory 380 / 456 (B580: 192-bit, 19 Gbps).",
+     "fp32_tflops": {"about": 11.5, "good": 6.7, "fair": 3.4},
+     "memory_gbs": {"about": 380, "good": 208, "fair": 100}
+    }
    }
   ]
  },

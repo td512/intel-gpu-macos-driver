@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // IntelXeManager --selftest [package folder]: the parts that need no window and no password, for checking a build.
 import AppKit
+import Metal
 import SwiftUI
 
 /// Each page without a window, to look at the layout.
@@ -247,6 +248,17 @@ func selfTest() {
            && hybridCPU("12th Gen Intel(R) Core(TM) i5-12600K") && !hybridCPU("12th Gen Intel(R) Core(TM) i5-12400F") && !hybridCPU("12th Gen Intel(R) Core(TM) i5-12600")
            && !hybridCPU("Intel(R) Core(TM) Ultra 7 155H") && !hybridCPU("13th Gen Intel(R) Core(TM) i3-13100F") && !hybridCPU("Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz")
            && !hybridCPU("Apple M2"), "a hybrid CPU by its name: 12th-14th gen with efficiency cores, not Core Ultra or P-core-only models")
+    let b580 = gpuTestExpectations["e20b"], b570 = gpuTestExpectations["e20c"]
+    expect(b580?.measured == true && b580?.tflops == 13 && b580?.tflopsGood == 8 && b580?.tflopsFair == 4
+           && b580?.memoryGBs == 400 && b580?.memoryGood == 250 && b580?.memoryFair == 120
+           && b570?.measured == false && gpuTestExpectations["56a0"] == nil && supportedCards.allSatisfy { gpuTestExpectations[$0.id] != nil },
+           "the GPU test's expectations by device id: the B580's measured ones, the B570's from its specification, none for another card")
+    let b580Clocks = defaultClockRange(rp0: 2850, rpn: 400), highFloor = defaultClockRange(rp0: 2500, rpn: 1300), lowTop = defaultClockRange(rp0: 1000, rpn: 300)
+    expect(b580Clocks.min == 1200 && b580Clocks.max == 2850 && highFloor.min == 1300 && highFloor.max == 2500 && lowTop.min == 1000 && lowTop.max == 1000,
+           "the default clock range: the 1200 MHz floor up to RP0, kept within RPn...RP0 (B580: 1200-2850 MHz)")
+    if let d = MTLCreateSystemDefaultDevice() {
+        print("gpu test here: '\(d.name)', PCI \(intelPCIDeviceID(registryID: d.registryID) ?? "-"), expectation \(gpuTestExpectation(for: d)?.name ?? "none")")
+    }
     expect(EFIPlan(text: "EFI: x\nnothing to change\nnote     y\n").changes == false && EFIPlan(text: "EFI: x\ncopy     z\n").changes, "a plan with and without changes")
     expect(Bundle.main.url(forResource: "efi", withExtension: "sh") != nil, "the app carries efi.sh for packages made before it")
     expect(Bundle.main.url(forResource: "hidpi", withExtension: "sh") != nil, "the app carries hidpi.sh for packages made before it")

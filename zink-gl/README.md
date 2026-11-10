@@ -79,8 +79,11 @@ off first).
 | `lib/libcglzink.dylib` | CGL/NSOpenGL contexts through zink (optional) | `cgl/` (`cgl/build.sh x86_64 OUT`) |
 | `lib/libcglzink-boot.dylib` | the experimental switch for every application (`--global-gl`): loads `libcglzink.dylib` where it may (optional) | `cgl/boot.c` (same build) |
 
-`src/mesa-zink.diff` is the whole difference of the built tree from upstream. Its patches are in `mesa/patches`
-(`0071`, `0072`, `0073` are the zink part). zink talks to ANV only through the Vulkan API, so it does not have to come
+`src/mesa-zink.diff` is the difference of the built tree from upstream in everything this build compiles: all of it
+outside `src/intel/`, which a build without Intel drivers (`-Dvulkan-drivers= -Dgallium-drivers=zink -Dtools=`) does not
+configure. The tree also held ANV changes from before the IntelXe rename (`b580_drm.h`, `DRM_IOCTL_B580_*`); they are not
+in these binaries and are left out of the diff (ANV's current changes: `mesa/intelxe.diff`). It applies to `f01e9b07a91`
+with `git apply` or `patch -p1`. Its patches are in `mesa/patches` (`0071`, `0072`, `0073` are the zink part). zink talks to ANV only through the Vulkan API, so it does not have to come
 from the same Mesa commit as the installed ANV.
 
 Building: Mesa with `mesa/darwin-x86_64.ini` and

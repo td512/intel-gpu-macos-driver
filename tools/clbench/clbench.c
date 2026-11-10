@@ -3,13 +3,17 @@
 // OpenCL, compiler IGC) and for macOS (Apple's OpenCL front end on this project's Metal driver), so one card can be
 // compared kernel by kernel: where the time differs, the code the two compilers made differs.
 //
-//   clbench [device-substring]     default: the first GPU whose name contains "Arc", else the first GPU
+//   clbench [device-substring]     the first GPU whose name contains it; default (or none matches): Intel's GPU (below)
 //   CLBENCH_PLATFORM=n             only platform n (Linux has two OpenCLs for the card: Mesa's rusticl and Intel's)
 //
 // Writes the results to stdout and clbench-<os>.txt, and on request (CLBENCH_DUMP=1) the program binary to
 // clbench-<os>.bin. Windows: x86_64-w64-mingw32-gcc -O2 clbench.c -o clbench.exe (OpenCL.dll is loaded at run time).
 // macOS: clang -O2 clbench.c -o clbench (OpenCL.framework is loaded at run time). Linux: cc -O2 clbench.c -o clbench-linux -ldl -lm
 // (RUSTICL_ENABLE=iris turns Mesa's rusticl on for Intel).
+// The default device, best first: a GPU with Intel's vendor id (CL_DEVICE_VENDOR_ID 0x8086) whose PCI device id
+// (CL_DEVICE_ID_INTEL, cl_intel_device_attribute_query: Intel's runtime) is a card this driver supports; any GPU with
+// vendor id 0x8086; a GPU whose CL_DEVICE_VENDOR names Intel (Apple's OpenCL reports vendor ids of its own, not PCI
+// ones); the first GPU.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,9 +39,11 @@ typedef struct _m *cl_mem; typedef struct _g *cl_program; typedef struct _k *cl_
 #define CL_DEVICE_TYPE_GPU (1 << 2)
 #define CL_PLATFORM_NAME 0x0902
 #define CL_PLATFORM_VERSION 0x0901
+#define CL_DEVICE_VENDOR_ID 0x1001
 #define CL_DEVICE_MAX_COMPUTE_UNITS 0x1002
 #define CL_DEVICE_MAX_CLOCK_FREQUENCY 0x100C
 #define CL_DEVICE_NAME 0x102B
+#define CL_DEVICE_VENDOR 0x102C
 #define CL_DRIVER_VERSION 0x102D
 #define CL_DEVICE_VERSION 0x102F
 #define CL_QUEUE_PROFILING_ENABLE (1 << 1)
@@ -51,6 +57,10 @@ typedef struct _m *cl_mem; typedef struct _g *cl_program; typedef struct _k *cl_
 #define CL_KERNEL_PRIVATE_MEM_SIZE 0x11B4
 #define CL_PROFILING_COMMAND_START 0x1282
 #define CL_PROFILING_COMMAND_END 0x1283
+#define CL_DEVICE_ID_INTEL 0x4251   /* cl_intel_device_attribute_query */
+
+// The cards this driver supports: PCI device ids, vendor 8086 (data/platforms.json "supported"; tools/parity/devices.py)
+static const cl_uint kSupported[] = { 0xe20b, 0xe20c };
 
 #define FNS(X) \
     X(cl_int, clGetPlatformIDs, (cl_uint, cl_platform_id *, cl_uint *)) \
@@ -202,18 +212,25 @@ int main(int argc, char **argv) {
     char path[64]; snprintf(path, sizeof path, "clbench-%s.txt", OS); g_out = fopen(path, "w");
     if (!load()) { say("OpenCL library not found\n"); return 1; }
     cl_platform_id plats[8]; cl_uint np = 0; p_clGetPlatformIDs(8, plats, &np);
-    const char *want = argc > 1 ? argv[1] : NULL; cl_device_id pick = NULL, firstgpu = NULL;
+    const char *want = argc > 1 ? argv[1] : NULL; cl_device_id pick = NULL; int pickrank = 0;
     const char *onlyp = getenv("CLBENCH_PLATFORM");   // one platform's devices only (Linux: rusticl or Intel's runtime)
     for (cl_uint i = 0; i < np; i++) {
         if (onlyp && (cl_uint)atoi(onlyp) != i) continue;
         char pn[256] = ""; p_clGetPlatformInfo(plats[i], CL_PLATFORM_NAME, sizeof pn, pn, NULL);
         cl_device_id ds[8]; cl_uint nd = 0; if (p_clGetDeviceIDs(plats[i], CL_DEVICE_TYPE_GPU, 8, ds, &nd)) continue;
-        for (cl_uint j = 0; j < nd; j++) { char dn[256] = ""; p_clGetDeviceInfo(ds[j], CL_DEVICE_NAME, sizeof dn, dn, NULL);
-            say("platform %u \"%s\" device %u \"%s\"\n", i, pn, j, dn);
-            if (!firstgpu) firstgpu = ds[j];
-            if (!pick && ((want && strstr(dn, want)) || (!want && (strstr(dn, "Arc") || strstr(dn, "B580") || strstr(dn, "e20b"))))) pick = ds[j]; }
+        for (cl_uint j = 0; j < nd; j++) { char dn[256] = "", dv[256] = ""; cl_uint vid = 0, pci = 0;
+            p_clGetDeviceInfo(ds[j], CL_DEVICE_NAME, sizeof dn, dn, NULL); p_clGetDeviceInfo(ds[j], CL_DEVICE_VENDOR, sizeof dv, dv, NULL);
+            p_clGetDeviceInfo(ds[j], CL_DEVICE_VENDOR_ID, sizeof vid, &vid, NULL);
+            if (p_clGetDeviceInfo(ds[j], CL_DEVICE_ID_INTEL, sizeof pci, &pci, NULL)) pci = 0;   // not Intel's runtime
+            say("platform %u \"%s\" device %u \"%s\", vendor \"%s\" 0x%x", i, pn, j, dn, dv, vid);
+            if (pci) say(", PCI device 0x%04x", pci);
+            say("\n");
+            int supported = 0; for (size_t k = 0; k < sizeof kSupported / sizeof *kSupported; k++) supported |= pci == kSupported[k];
+            const int rank = want && strstr(dn, want) ? 5 : vid == 0x8086 && supported ? 4 : vid == 0x8086 ? 3
+                : (strstr(dv, "Intel") || strstr(dv, "intel")) ? 2 : 1;
+            if (rank > pickrank) { pick = ds[j]; pickrank = rank; } }
     }
-    g_dev = pick ? pick : firstgpu; if (!g_dev) { say("no GPU\n"); return 1; }
+    g_dev = pick; if (!g_dev) { say("no GPU\n"); return 1; }
     { char dn[256] = "", dv[256] = "", vv[256] = ""; cl_uint cu = 0, mhz = 0;
       p_clGetDeviceInfo(g_dev, CL_DEVICE_NAME, sizeof dn, dn, NULL); p_clGetDeviceInfo(g_dev, CL_DRIVER_VERSION, sizeof dv, dv, NULL);
       p_clGetDeviceInfo(g_dev, CL_DEVICE_VERSION, sizeof vv, vv, NULL); p_clGetDeviceInfo(g_dev, CL_DEVICE_MAX_COMPUTE_UNITS, 4, &cu, NULL);

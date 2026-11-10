@@ -73,6 +73,8 @@ final class SettingsState: ObservableObject {
     @Published var saved = DriverSettings()
     @Published var edit = DriverSettings()
     @Published var loaded = false
+    /// the default setting's GT clock range on this card (defaultClockRange); nil when IntelXe does not report RP0 and RPn
+    @Published var clockRange: (min: Int, max: Int)?
     @Published var loginItem = SMAppService.mainApp.status == .enabled
     @Published var loginCheck = loginCheckEnabled()
 }
@@ -89,7 +91,7 @@ struct SettingsView: View {
                     Text("Balanced").tag(0); Text("Power saving").tag(1)
                 }
                 Picker("GPU clock", selection: $st.edit.clocks) {
-                    Text("Default (1200–2850 MHz)").tag(0)
+                    Text(st.clockRange.map { String(localized: "Default (\(String($0.min))–\(String($0.max)) MHz)") } ?? String(localized: "Default")).tag(0)
                     Text("Quiet (up to 1800 MHz: less heat and fan noise)").tag(1)
                     Text("Performance (at least 2400 MHz: lowest latency, more power)").tag(2)
                 }
@@ -118,7 +120,10 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .task {
-            if !st.loaded { let s = await Task.detached { DriverSettings.read() }.value; st.saved = s; st.edit = s; st.loaded = true }
+            if !st.loaded {
+                let s = await Task.detached { DriverSettings.read() }.value; st.saved = s; st.edit = s; st.loaded = true
+                st.clockRange = gtClockLimits().map { defaultClockRange(rp0: $0.rp0, rpn: $0.rpn) }
+            }
         }
     }
 }

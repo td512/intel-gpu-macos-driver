@@ -6,6 +6,7 @@
 import CoreMedia
 import CoreVideo
 import Foundation
+import IOKit
 import Metal
 import VideoToolbox
 
@@ -16,6 +17,53 @@ struct TestResult: Identifiable, Hashable {
     let value: String
     let state: State
     var help: String = ""
+}
+
+/// What the GPU test expects of one card (SupportedDevices.swift, generated from data/platforms.json "supported"): about
+/// what it reaches, and the results at or above which the verdict is good, or fair (below: bad). measured: false when
+/// the figures come from the card's specification, not from a run on one.
+struct GPUTestExpectation {
+    let name: String
+    let measured: Bool
+    let tflops, tflopsGood, tflopsFair: Double
+    let memoryGBs, memoryGood, memoryFair: Double
+}
+
+/// "13", "11.5": a figure as the help texts give it.
+private func figure(_ v: Double) -> String { v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v) }
+
+/// The PCI device id ("e20b") of the Intel card behind a registry entry: the IOPCIDevice at it or above it. nil when
+/// there is none, or it is not Intel's.
+func intelPCIDeviceID(registryID: UInt64) -> String? {
+    guard registryID != 0 else { return nil }
+    func id(_ e: io_registry_entry_t, _ key: String) -> String? {
+        guard let d = IORegistryEntryCreateCFProperty(e, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data,
+              d.count >= 2 else { return nil }
+        return String(format: "%04x", UInt16(d[0]) | UInt16(d[1]) << 8)   // little-endian, as ioreg shows it
+    }
+    var entry = IOServiceGetMatchingService(kIOMainPortDefault, IORegistryEntryIDMatching(registryID))
+    for _ in 0..<8 where entry != 0 {
+        if IOObjectConformsTo(entry, "IOPCIDevice") != 0 {
+            let device = id(entry, "vendor-id") == "8086" ? id(entry, "device-id") : nil
+            IOObjectRelease(entry)
+            return device
+        }
+        var parent: io_registry_entry_t = 0
+        let r = IORegistryEntryGetParentEntry(entry, kIOServicePlane, &parent)
+        IOObjectRelease(entry)
+        entry = r == KERN_SUCCESS ? parent : 0
+    }
+    if entry != 0 { IOObjectRelease(entry) }
+    return nil
+}
+
+/// The expected rates for the card behind this Metal device, by its PCI device id: the PCI device above the device's
+/// registry entry, or else the supported card the app found on the bus (supportedCardOnBus) when the Metal device
+/// carries that card's name. nil (another GPU, or a card without figures): the numbers are shown without a verdict.
+func gpuTestExpectation(for d: MTLDevice) -> GPUTestExpectation? {
+    if let id = intelPCIDeviceID(registryID: d.registryID) { return gpuTestExpectations[id] }
+    if let card = supportedCardOnBus(), d.name.contains(card.name) { return gpuTestExpectations[card.id] }
+    return nil
 }
 
 private let kernels = """
@@ -56,9 +104,9 @@ func runGPUTest(progress: @escaping (String) -> Void) -> [TestResult] {
                            help: String(localized: "macOS runs without graphics acceleration. The System page and a diagnostics report say why."))]
     }
     out.append(TestResult(title: String(localized: "Metal device"), value: d.name, state: .info))
-    // the expected rates are an Arc B580's; on another GPU the numbers are shown without a verdict
-    let b580 = d.name.contains("B580") || d.name.contains("Arc")
-    func judged(_ r: TestResult) -> TestResult { b580 ? r : TestResult(title: r.title, value: r.value, state: .info) }
+    // the card's expected rates (SupportedDevices.swift); on another GPU the numbers are shown without a verdict
+    let expect = gpuTestExpectation(for: d)
+    func judged(_ r: TestResult) -> TestResult { expect != nil ? r : TestResult(title: r.title, value: r.value, state: .info) }
     let lib: MTLLibrary
     do { lib = try d.makeLibrary(source: kernels, options: nil) } catch {
         return out + [TestResult(title: String(localized: "Shader compiler"), value: String(localized: "Failed"), state: .bad, help: error.localizedDescription)]
@@ -124,8 +172,13 @@ func runGPUTest(progress: @escaping (String) -> Void) -> [TestResult] {
             e.dispatchThreads(MTLSize(width: n, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1)); e.endEncoding()
         }
         let tf = Double(n) * 16 * 256 * 2 / t / 1e12
-        out.append(judged(TestResult(title: String(localized: "Compute rate (FP32)"), value: String(format: "%.1f TFLOP/s", tf), state: tf >= 8 ? .good : tf >= 4 ? .warning : .bad,
-                              help: tf >= 8 ? "" : String(localized: "An Arc B580 reaches about 13 TFLOP/s. Far less: the GPU clock is held low (power settings) or the CPU starves it (HybridPM)."))))
+        if let e = expect {
+            let help = e.measured
+                ? String(localized: "An Arc \(e.name) reaches about \(figure(e.tflops)) TFLOP/s. Far less: the GPU clock is held low (power settings) or the CPU starves it (HybridPM).")
+                : String(localized: "By its specification an Arc \(e.name) reaches about \(figure(e.tflops)) TFLOP/s (not measured on one yet). Far less: the GPU clock is held low (power settings) or the CPU starves it (HybridPM).")
+            out.append(TestResult(title: String(localized: "Compute rate (FP32)"), value: String(format: "%.1f TFLOP/s", tf),
+                                  state: tf >= e.tflopsGood ? .good : tf >= e.tflopsFair ? .warning : .bad, help: tf >= e.tflopsGood ? "" : help))
+        } else { out.append(TestResult(title: String(localized: "Compute rate (FP32)"), value: String(format: "%.1f TFLOP/s", tf), state: .info)) }
     }
     // 4. memory bandwidth (VRAM to VRAM)
     progress(String(localized: "Memory bandwidth…"))
@@ -137,8 +190,13 @@ func runGPUTest(progress: @escaping (String) -> Void) -> [TestResult] {
             e.dispatchThreads(MTLSize(width: bytes / 16, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1)); e.endEncoding()
         }
         let gbs = 2 * Double(bytes) / t / 1e9
-        out.append(judged(TestResult(title: String(localized: "Memory bandwidth"), value: String(format: "%.0f GB/s", gbs), state: gbs >= 250 ? .good : gbs >= 120 ? .warning : .bad,
-                              help: gbs >= 250 ? "" : String(localized: "An Arc B580's memory gives about 400 GB/s. Far less: the memory or GPU clock is held low."))))
+        if let e = expect {
+            let help = e.measured
+                ? String(localized: "An Arc \(e.name)'s memory gives about \(figure(e.memoryGBs)) GB/s. Far less: the memory or GPU clock is held low.")
+                : String(localized: "By its specification an Arc \(e.name)'s memory gives at most \(figure(e.memoryGBs)) GB/s (not measured on one yet). Far less: the memory or GPU clock is held low.")
+            out.append(TestResult(title: String(localized: "Memory bandwidth"), value: String(format: "%.0f GB/s", gbs),
+                                  state: gbs >= e.memoryGood ? .good : gbs >= e.memoryFair ? .warning : .bad, help: gbs >= e.memoryGood ? "" : help))
+        } else { out.append(TestResult(title: String(localized: "Memory bandwidth"), value: String(format: "%.0f GB/s", gbs), state: .info)) }
     }
     // 5. upload (system memory to VRAM over PCIe)
     progress(String(localized: "Upload rate…"))
