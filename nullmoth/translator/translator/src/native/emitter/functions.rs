@@ -341,12 +341,23 @@ pub(in crate::native) fn opaque_resource_pointer_values_by_function(
                     let Some(result) = instruction.result.as_ref() else {
                         continue;
                     };
-                    if !matches!(instruction.result_ty, Some(LlType::Ptr(1)))
-                        || !matches!(
-                            instruction.opcode.as_str(),
-                            "bitcast" | "freeze" | "phi" | "select"
-                        )
-                    {
+                    if !matches!(
+                        instruction.opcode.as_str(),
+                        "bitcast" | "freeze" | "phi" | "select"
+                    ) {
+                        continue;
+                    }
+                    // a phi's or select's `result_ty` is its first type token, `ptr` (address space 0) for
+                    // `phi ptr addrspace(1)`: the merged handle's type is the one its operands are parsed with
+                    let result_ty = match instruction.opcode.as_str() {
+                        "phi" => instruction.phi_incoming().as_ref().map(|(ty, _)| ty.clone()),
+                        "select" => instruction
+                            .select_arms()
+                            .as_deref()
+                            .map(|(true_value, _)| true_value.ty.clone()),
+                        _ => instruction.result_ty.clone(),
+                    };
+                    if !matches!(result_ty, Some(LlType::Ptr(1))) {
                         continue;
                     }
                     let mut operands = Vec::new();

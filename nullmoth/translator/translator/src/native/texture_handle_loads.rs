@@ -291,6 +291,36 @@ join:
     }
 
     #[test]
+    fn resource_ids_merged_by_a_phi_become_handle_loads() {
+        let src = module(
+            r#"define <4 x float> @f(ptr addrspace(2) %ab, <2 x i32> %c, i1 %cond) {
+entry:
+  br i1 %cond, label %a, label %b
+a:
+  %fa = getelementptr inbounds { i64, i64 }, ptr addrspace(2) %ab, i64 0, i32 0
+  %ia = load i64, ptr addrspace(2) %fa, align 8
+  %ta = inttoptr i64 %ia to ptr addrspace(1)
+  br label %join
+b:
+  %fb = getelementptr inbounds { i64, i64 }, ptr addrspace(2) %ab, i64 0, i32 1
+  %ib = load i64, ptr addrspace(2) %fb, align 8
+  %tb = inttoptr i64 %ib to ptr addrspace(1)
+  br label %join
+join:
+  %t = phi ptr addrspace(1) [ %ta, %a ], [ %tb, %b ]
+  %s = call ptr addrspace(2) @air.get_read_sampler()
+  %r = call { <4 x float>, i8 } @air.read_texture_2d.v4f32(ptr addrspace(1) %t, ptr addrspace(2) %s, <2 x i32> %c, <2 x i32> zeroinitializer, i32 0, i32 0)
+  %v = extractvalue { <4 x float>, i8 } %r, 0
+  ret <4 x float> %v
+}"#,
+        );
+        let out = fold_texture_handle_loads(&src);
+        assert!(out.contains("  %ta = load ptr addrspace(1), ptr addrspace(2) %fa, align 8\n"), "{out}");
+        assert!(out.contains("  %tb = load ptr addrspace(1), ptr addrspace(2) %fb, align 8\n"), "{out}");
+        assert!(!out.contains("inttoptr"), "{out}");
+    }
+
+    #[test]
     fn two_conversions_of_one_integer_share_the_handle() {
         let src = module(
             r#"define <4 x float> @f(ptr addrspace(2) %ab, <2 x float> %uv, i1 %cond) {

@@ -18,6 +18,9 @@ impl Emitter {
         } else {
             parsed_incoming
         };
+        if self.emit_texture_handle_phi(&name, &incoming, &result_ty, instructions)? {
+            return Ok(());
+        }
         if self.emit_selected_access_tree_phi(&name, &incoming, &result_ty, instructions)? {
             return Ok(());
         }

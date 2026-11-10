@@ -17,6 +17,16 @@ impl Emitter {
             ));
         }
         let cond_id = self.value_id_in(&cond.value, &cond.ty, instructions)?;
+        if self.emit_texture_handle_select(
+            &name,
+            cond_id,
+            &true_value.value,
+            &false_value.value,
+            &result_ty,
+            instructions,
+        )? {
+            return Ok(());
+        }
         if let LlType::Ptr(_) = result_ty {
             let arm_is_deferred = |value: &LlValue| {
                 matches!(value, LlValue::Local(local)
