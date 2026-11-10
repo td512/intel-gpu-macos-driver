@@ -5,7 +5,9 @@ hâlâ "test edilmedi" demeli; paketteki IntelXe.kext 10 Kasım sonrası main'de
 bakın. Ayrıca (10 Kasım 03:00 sonrası birleştirmeler): paketteki kext ve eklenti bunları içermeli (release.sh, kaynakları
 son değiştiğinden önce derlenmiş paketleri reddediyor); debug.intelxe.sensors'un güç alanları paketteki kext'ten
 okunmalı; WebGPU deferredRendering örneği paketteki eklentiyle Safari'de yeniden çalıştırılmalı; ASPM satırları hâlâ
-"test edilmedi" demeli. -->
+"test edilmedi" demeli. (10 Kasım öğleden sonra birleştirmeleri): paketteki libintelxevenc AV1'i kaydetmeli (vtencq
+--list), Safari maddeleri paketteki eklentiyle yeniden denetlenmeli (three.js sayfaları, gölgelendirici önbelleği "fc spec:
+HIT"), paketlenmiş yapıda tools/regress --full çalıştırılmalı. -->
 Hesaplamayı hızlandıran sürüm: Metal ve OpenCL işleri sürücüden komut arabelleği başına daha az kilitle geçiyor ve bir
 çevirici düzeltmesi bir matris çekirdeğinin hızını ikiye katlıyor. Ayrıca: katkıyla gelen bir aygıt kimliğiyle **Arc
 B570** (bizim tarafımızda test edilmedi), 12-14. nesil hibrit Intel işlemciler için **HybridPM** ve yeni macOS
@@ -39,13 +41,30 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
 - **Kart ve paket gücü.** `sysctl debug.intelxe.sensors` artık kartın ve paketin enerjisiyle (J) ortalama gücünü (W)
   de veriyor; kartın PMT telemetrisinden, Linux `xe_hwmon`'un okuduğu gibi okunuyor. Test makinesinde yazmaçlar boşta
   kart için 36,2 W, paket için 19,6 W; hafif yükte 40,4 W ve 23,3 W verdi (salt okunur yazmaç okumaları, 10 Kasım).
-  Yeni alanlardan önceki metin değişmedi. Güç sınırları henüz gösterilmiyor.
+  Yeni alanlardan önceki metin değişmedi. Kartın ve paketin firmware'in ayarladığı güç sınırları da gösteriliyor; Linux
+  `xe_hwmon` gibi GPU'nun pcode posta kutusundan okunuyor (test makinesinde: kart PL1 kapalı, PL2 190 W, kritik 380 W;
+  paket 155 W, kapalı). Açılıştan sonraki birkaç dakika paketin enerji sayacı hızlı sayıyor; sürücü o sırada
+  `package power n/a` gösterip kartın gücünü göstermeye devam ediyor.
 - **PCIe ASPM raporu ve bir L1 anahtarı (deneysel, henüz bir B580'de çalışmadı).** `sysctl debug.intelxe.aspm`, GPU
   ile işlemcinin kök portu arasındaki her PCIe bağlantısının güç tasarrufu durumunu (ASPM) ve L1'in Linux'un
   denetimlerinden geçip geçmediğini gösteriyor. `sudo sysctl debug.intelxe.aspm_l1=1` L1'i bu bağlantılarda yalnız
   hepsi denetimlerden geçerse açıyor, `0` ASPM'i kapatıyor, `-1` (varsayılan) bağlantıları donanım yazılımının
   bıraktığı gibi bırakıyor. Siz yazmadıkça hiçbir şey değişmiyor; bir değişiklik bir sonraki yeniden başlatmaya kadar
   sürüyor. Amacı yukarıdaki boşta gücü düşürmek; düşürüp düşürmediği henüz ölçülmedi.
+- **Safari'nin WebGPU'su ve Metal sürücüsü.** three.js'in WebGPU çizicisi çiziyor (r170 ve r181 test sayfaları:
+  malzemeler, ortam haritaları, instancing, compute, gölgeler); çıktı pass'i argument buffer'da tutulan bir işaretçiden
+  uniform okuyordu ve çevirici bunu sıfıra çeviriyordu. WebKit'in GPU'da doğruladığı WebGPU render bundle'ları artık
+  çalışıyor: indirect command buffer'a çizim kodlayan gölgelendirici (`render_command`, WebKit'in `vsICB`'si) çevriliyor
+  ve çizimler slot kayıtlarından `vkCmdDraw*Indirect` ile yapılıyor. Metal'in GPU zaman damgaları (aşama sınırlarında
+  sayaç örnekleme, nanosaniye) uygulamalar için yeni; Safari Intel GPU'larda WebGPU'nun `timestamp-query`'sini sunmuyor
+  (WebKit'in tercihi, bkz. Bilinen sorunlar).
+- **Safari derlenmiş gölgelendiricilerini saklıyor.** WebKit'in GPU süreci `fsync` yapamadığı için Metal sürücüsünün
+  gölgelendirici önbelleklerine her kayıt orada başarısız oluyordu ve Safari arayüz gölgelendiricilerini her açılışta
+  yeniden derliyordu (her biri yaklaşık 2 sn). Önbellekler artık o sandbox'ın izin verdiği gibi yazıyor; ikinci açılış
+  onları önbellekten alıyor.
+- **AV1 kodlama varsayılan olarak açık.** AV1 kodlayıcı VideoToolbox'a HEVC ve H.264'ün yanında kaydediliyor. `vtencq`
+  kodlama kalitesini kaynağa göre ölçüyor (PSNR): B580'de H.264 8 Mbit/s'de 43,3 dB, HEVC 8 Mbit/s'de 43,7 dB, AV1
+  6 Mbit/s'de 42,3 dB (10 bit 41,6 dB), her kare çıkıyor.
 - **Yeniden tasarlanan IntelXe Manager:** durum başlığı ve o an önemli olan tek eylemiyle bir Genel bakış sayfası;
   bir **kurulum yardımcısı** (OpenCore'u hazırlama, isterseniz Safari'nin ayarlarıyla aynı adımda; sürücü; EFI kext'i;
   GPU testi; bitti); OpenCore bir önyükleme yolu kaydetmemişse EFI bölümlerini seçmek için listeliyor, Safari'yi GPU'da
@@ -135,8 +154,8 @@ ve [depoda](https://github.com/yusufklncc/intel-gpu-macos-driver/blob/v0.1.4/rel
 ### 0.1.3'ten yükseltme
 
 1. Paketi kurun (uygulamada v0.1.4'ü indirin, ardından *Bu paketi kur*; ya da `sudo ./install.sh --apply`).
-   `IntelXeFB.kext`, `NMXAccel.kext` (`Info.plist`'i: B570'in kimliği) ve Metal sürücüsü yeni; Mesa ve video kodekleri
-   0.1.3'ünkiler.
+   `IntelXeFB.kext`, `NMXAccel.kext` (`Info.plist`'i: B570'in kimliği), Metal sürücüsü ve video kodlayıcı (AV1
+   varsayılan olarak açık) yeni; Mesa ve video kod çözücüler 0.1.3'ünkiler.
 2. Yeniden başlatmadan önce **EFI'deki `IntelXe.kext`'i değiştirin** (uygulamanın EFI sayfası, macOS'ta
    `sudo ./efi.sh --apply`, Windows'ta `IntelXe-EFI.ps1` ya da elle; `config.plist` girdisi olduğu gibi kalır). B570'in
    kimliğini, GPU saati, sıcaklık ve güç okumalarını, uygulamanın Güç sayfasının yazdığı ayarları, doğrudan gönderimi ve
@@ -179,8 +198,7 @@ neden kapalı olduğu Bilinen sorunlar'da.
 - Safari'nin WebGPU'su: deferredRendering örneği "Fragment function failed creation" hatası veriyordu, G-buffer
   okumaları da sıfır dönüyordu. WebKit'in gölgelendirici derleyicisi argüman arabelleğindeki bir dokuyu 64 bit kaynak
   kimliği olarak okuyor; çevirici bunu doku olarak almıyordu. Safari'nin B580'de derlediği 88 WebGPU gölgelendirici
-  kütüphanesinin hepsi artık çevriliyor (önce biri başarısızdı); bu, o kütüphaneler çevrilerek denetlendi, örnek henüz
-  Safari'de çalıştırılarak değil. Bir dal ya da select ile seçilen doku artık seçilen dokuyu okuyor (önce bağlı başka bir
+  kütüphanesinin hepsi artık çevriliyor (önce biri başarısızdı) ve örnek B580'de Safari'de çiziyor (10 Kasım). Bir dal ya da select ile seçilen doku artık seçilen dokuyu okuyor (önce bağlı başka bir
   dokuyu ya da sıfır); yakalanan gölgelendiricilerin hiçbiri bunu yapmadığı için bu kısım aygıtta test edilmedi.
 
 ### Geliştiriciler için
@@ -228,6 +246,13 @@ neden kapalı olduğu Bilinen sorunlar'da.
   ailenin çekirdek dışında nelere ihtiyacı olduğu: `docs/design/DESIGN-platforms.md` 4. bölüm. Zink ikili dosyalarının
   kaynak kaydı `zink-gl/src/mesa-zink.diff` artık yalnız Zink'e özel bir derlemenin derlediklerini tutuyor (IntelXe
   adlandırmasından önceki ANV değişikliklerini hâlâ taşıyordu).
+- 10 Kasım öğleden sonrasından itibaren: `mtl_timestamps` (her sınırda sayaç örnekleme, komut arabelleğinin GPU
+  süresine karşı), `mtl_gpu_icb` (bir kernel'in ve bir vertex gölgelendiricisinin indirect command buffer'a kodladığı
+  çizimler; B580'de ve Apple GPU'sunda 6/6), `mtl_dirty_stress` (nesne silmeleri boyunca bağlamalar), `vtencq` (kodlama
+  kalitesi), ana makine testi `pcode_test` (güç sınırı çözümleme). **`tools/regress`** test makinesindeki donanım
+  denetimlerini tek komutla çalıştırıp tek bir tabloyla bitiriyor (`regress.sh`; `--full` Safari'deki WebGPU sayfalarını ve
+  Geekbench'i ekliyor); `selftest.sh` her kararı kayıtlı çıktılara karşı denetliyor. Kext platform başlangıç satırını
+  `IntelXePlatform` kayıt özelliği olarak da yayımlıyor.
 - Araçlar: `vcbench` bir HEVC kümesinin içinde çalıştırılınca çöküyordu (H.264 tanımını arıyordu); düzeltildi,
   `VCB_DUMP=<dizin>` karşılaştırma için her resmi yazıyor. B580'de (10 Kasım) H.264 2K, HEVC 2K ve HEVC 4K donanım
   resimleri her karede Apple'ın yazılım çözücüsününkiyle aynı; H.264 4K (tam aralıklı bir akış) çözücünün kendi
@@ -255,6 +280,13 @@ neden kapalı olduğu Bilinen sorunlar'da.
 - **B570 test edilmedi**, yukarıdaki gibi.
 - **PCIe ASPM (`debug.intelxe.aspm_l1`) henüz bir B580'de çalışmadı.** Test etmiyorsanız varsayılanında bırakın;
   rapor (`debug.intelxe.aspm`) yalnız okuyor.
+- **Safari WebGPU'nun `timestamp-query`'sini Intel GPU'larda sunmuyor:** WebKit x86_64'te aygıt adına bakıyor
+  (`HardwareCapabilities.mm`) ve Metal sürücüsüne hiç sormuyor. Zaman damgası izleyen three.js r187 sayfaları özellik
+  yokken `createQuerySet` çağırıp çizmeyi bırakıyor (Backdrop Water gibi bazı threejs.org WebGPU örnekleri); WebKit aynı
+  tercihi Apple'ın kendi sürücüleri dahil her Intel GPU için yapıyor.
+- **GPU'da kodlanan indeksli çizimler** CPU'nun o slota kodladığı indeks tamponunun içini ve onun ilkel türünü
+  göstermeli (çekirdek Vulkan ikisini de GPU belleğinden alamıyor); diğerleri atlanıp log'a yazılıyor. WebKit'in
+  doğrulama gölgelendiricisi her zaman öyle yapıyor.
 - **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel: IOSurface'e çizim (tarayıcılar) ve CGL
   pbuffer'ları henüz desteklenmiyor.
 <!-- decision pending: ship the global switch in 0.1.4? -->

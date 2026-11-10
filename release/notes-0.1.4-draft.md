@@ -4,7 +4,9 @@ lines still say "untested", that the packaged IntelXe.kext is built from main af
 fences) and ran on the B580, and the Windows EFI tool's HybridPM / SSDT-ARCOFF lines once it has run on Windows. Also
 (merges of 10 Nov after 03:00): that the packaged kext and plugin contain them (release.sh refuses packages older than
 the last commit to their sources), the power fields of debug.intelxe.sensors read from the packaged kext, the WebGPU
-deferredRendering sample re-run in Safari with the packaged plugin, and that the ASPM lines still say "untested". -->
+deferredRendering sample re-run in Safari with the packaged plugin, and that the ASPM lines still say "untested".
+(Merges of 10 Nov afternoon): the packaged libintelxevenc registers AV1 (vtencq --list), the Safari items re-checked with
+the packaged plugin (three.js pages, shader cache "fc spec: HIT"), tools/regress --full on the packaged build. -->
 The faster-compute release: Metal and OpenCL work goes through the driver with less locking per command buffer, and a
 translator fix doubles a matrix kernel's speed. Also: the **Arc B570**, a contributed device ID (untested by us),
 **HybridPM** for 12th-14th gen hybrid Intel CPUs, and a redesigned **IntelXe Manager** with a setup assistant from a
@@ -34,12 +36,28 @@ fresh macOS install to a verified driver.
 - **Card and package power.** `sysctl debug.intelxe.sensors` now ends with the card's and the package's energy (J) and
   average power (W), read from the card's PMT telemetry the way Linux `xe_hwmon` reads it. On the test machine the
   registers gave 36.2 W for the card and 19.6 W for the package at idle, 40.4 W and 23.3 W under light load (read-only
-  register reads, 10 November). The text before the new fields is unchanged. Power limits are not shown yet.
+  register reads, 10 November). The text before the new fields is unchanged. It also shows the card's and the
+  package's power limits as the firmware set them, read through the GPU's pcode mailbox as Linux `xe_hwmon` does (on
+  the test machine: card PL1 off, PL2 190 W, critical 380 W; package 155 W, off). For several minutes after a start the
+  package's energy counter runs fast; the driver then shows `package power n/a` and keeps the card's power.
 - **PCIe ASPM report and an L1 switch (experimental, not yet run on a B580).** `sysctl debug.intelxe.aspm` shows the
   power-saving state (ASPM) of every PCIe link between the GPU and the CPU's root port, and whether L1 passes Linux's
   checks. `sudo sysctl debug.intelxe.aspm_l1=1` turns L1 on for those links only if every link passes, `0` turns ASPM
   off, `-1` (the default) leaves them as the firmware set them. Nothing changes unless you write it, and a change lasts
   until the next restart. It is meant to lower the idle power above; whether it does is not measured yet.
+- **Safari's WebGPU and Metal driver.** three.js's WebGPU renderer draws (r170 and r181 test pages: materials,
+  environment maps, instancing, compute, shadows); its output pass read a uniform through a pointer kept in an argument
+  buffer, which the translator turned into zero. WebGPU render bundles that WebKit validates on the GPU now work: a
+  shader that encodes draws into an indirect command buffer (`render_command`, WebKit's `vsICB`) is translated, and the
+  draws run from per-slot records with `vkCmdDraw*Indirect`. Metal's GPU timestamps (counter sampling at stage
+  boundaries, in nanoseconds) are new for applications; Safari does not offer WebGPU's `timestamp-query` on Intel GPUs
+  (WebKit's choice, see Known issues).
+- **Safari keeps its compiled shaders.** WebKit's GPU process may not `fsync`, so every store of the Metal driver's
+  shader caches failed there and Safari compiled its interface shaders again at every start (about 2 s each). The caches
+  now write as that sandbox allows; the second start takes them from the cache.
+- **AV1 encoding on by default.** The AV1 encoder is registered with VideoToolbox next to HEVC and H.264. `vtencq`
+  measures encode quality against the source (PSNR): on the B580 H.264 43.3 dB at 8 Mbit/s, HEVC 43.7 dB at 8 Mbit/s,
+  AV1 42.3 dB at 6 Mbit/s (10-bit 41.6 dB), every frame out.
 - **IntelXe Manager, redesigned:** an Overview page with a status header and the one action that matters now; a
   **setup assistant** (prepare OpenCore, with Safari's settings in the same step if you want them; the driver; the EFI
   kext; a GPU test; done), which lists the EFI partitions to choose from when OpenCore recorded none and sets up Safari
@@ -126,8 +144,8 @@ Checksums: `intel-gpu-macos-driver-0.1.4.sha256`. Install guide: `README-INSTALL
 ### Upgrading from 0.1.3
 
 1. Install the package (the app: *Download v0.1.4*, then *Install this package*; or `sudo ./install.sh --apply`).
-   `IntelXeFB.kext`, `NMXAccel.kext` (its `Info.plist`: the B570's ID) and the Metal driver are new; Mesa and the
-   video codecs are those of 0.1.3.
+   `IntelXeFB.kext`, `NMXAccel.kext` (its `Info.plist`: the B570's ID), the Metal driver and the video encoder (AV1 on
+   by default) are new; Mesa and the video decoders are those of 0.1.3.
 2. **Replace `IntelXe.kext` in the EFI** before you restart (the app's EFI page, `sudo ./efi.sh --apply` on macOS,
    `IntelXe-EFI.ps1` on Windows, or by hand; its `config.plist` entry stays as it is). It brings the B570's ID, the GPU
    clock, temperature and power readings, the settings the app's Power page writes, direct submission and the
@@ -170,7 +188,7 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
 - Safari's WebGPU: the deferredRendering sample failed with "Fragment function failed creation", and its G-buffer reads
   returned zero. WebKit's shader compiler reads a texture from an argument buffer as a 64-bit resource ID, which the
   translator did not take as a texture. All 88 WebGPU shader libraries that Safari compiled on the B580 now translate
-  (one failed before); this was checked by translating those libraries, not yet by running the sample in Safari. A
+  (one failed before), and the sample draws in Safari on the B580 (10 November). A
   texture chosen by a branch or a select now reads the chosen texture (before, another bound texture or zero); none of
   the captured shaders does this, so that part is untested on the device.
 
@@ -218,6 +236,13 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   and the encoder test path names its encoders after the card's model. `docs/design/DESIGN-platforms.md` section 4
   lists what a new family needs outside the kernel. `zink-gl/src/mesa-zink.diff`, the source record of the Zink
   binaries, now holds only what a Zink-only build compiles (it still carried ANV changes from before the IntelXe rename).
+- Since the afternoon of 10 November: `mtl_timestamps` (counter sampling at every boundary, against the command
+  buffer's GPU time), `mtl_gpu_icb` (draws a kernel and a vertex shader encode into an indirect command buffer; 6/6 on
+  the B580 and on Apple's GPU), `mtl_dirty_stress` (bindings across object destroys), `vtencq` (encode quality),
+  the host test `pcode_test` (power-limit decoding). **`tools/regress`** runs the hardware checks on the test machine in
+  one command (`regress.sh`, `--full` adds the WebGPU pages in Safari and Geekbench) and ends in one table; its
+  `selftest.sh` checks every verdict against recorded output. The kext publishes its platform start line as the
+  `IntelXePlatform` registry property.
 - Tools: `vcbench` crashed when run inside an HEVC set (it looked for an H.264 description); fixed, and `VCB_DUMP=<dir>`
   writes each picture for comparison. On the B580 (10 November) H.264 2K, HEVC 2K and HEVC 4K hardware pictures equal
   Apple's software decoder's for every frame; H.264 4K (a full-range stream) equals it in the decoder's own format,
@@ -244,6 +269,12 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
 - **The B570 is untested**, as above.
 - **PCIe ASPM (`debug.intelxe.aspm_l1`) has not run on a B580 yet.** Leave it at its default unless you are testing
   it; the report (`debug.intelxe.aspm`) only reads.
+- **WebGPU `timestamp-query` is not offered in Safari** on Intel GPUs: WebKit checks the device name on x86_64
+  (`HardwareCapabilities.mm`) and never asks the Metal driver. three.js r187 pages that track timestamps call
+  `createQuerySet` without the feature and stop drawing (several threejs.org WebGPU examples, such as Backdrop Water);
+  WebKit makes the same choice for every Intel GPU, Apple's own drivers included.
+- **GPU-encoded indexed draws** must point into the index buffer the CPU encoded for that slot, with its primitive type
+  (core Vulkan takes neither from GPU memory); others are skipped and logged. WebKit's validation shader always does.
 - **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental: no IOSurface drawing (browsers) or CGL
   pbuffers yet.
 <!-- decision pending: ship the global switch in 0.1.4? -->
