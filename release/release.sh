@@ -8,7 +8,8 @@
 # Checks (all must pass, also for --publish):
 #   - VERSION in the repository, the branch (main), a clean work tree (untracked files only warn);
 #   - the tag vVERSION exists neither here nor on origin or gitlab; origin/main is an ancestor of HEAD (a fast-forward);
-#   - OUT_DIR holds the package zips of package.sh and the app, and its .sha256 matches them;
+#   - OUT_DIR holds the package zips of package.sh and the app, built after the last commit to what goes into them
+#     (code, scripts, templates, packager; not documentation), and its .sha256 matches them;
 #   - the versions inside: IntelXe.kext and HybridPM.kext in the -efi.zip, IntelXe Manager in its zip, install.sh in the
 #     Tahoe and Sequoia zips;
 #   - the release notes release/notes-VERSION.md (the final file, not the -draft) exist, say VERSION and have no
@@ -55,6 +56,16 @@ for f in "$N-tahoe.zip" "$N-sequoia.zip" "$N-efi.zip" "$N.sha256" "IntelXe-Manag
 	[ -f "$OUT/$f" ] && ok "$f" || bad "missing $OUT/$f"
 done
 [ -f "$OUT/$N-zink-gl.zip" ] && ok "$N-zink-gl.zip (optional)" || warn "no $N-zink-gl.zip (optional)"
+# packages older than the source that goes into them: built before a later commit to the code, the scripts, the
+# templates or the packager (documentation-only commits outside release/templates do not count)
+t_code=$(git log -1 --format=%ct -- kernel nullmoth user app zink-gl windows ':(exclude)*.md' 2>/dev/null)
+t_pkg=$(git log -1 --format=%ct -- release/templates release/package.sh release/nvmtl-allow.txt VERSION 2>/dev/null)
+t_src=$(( ${t_code:-0} > ${t_pkg:-0} ? ${t_code:-0} : ${t_pkg:-0} ))
+for f in "$N-tahoe.zip" "$N-sequoia.zip" "$N-efi.zip" "$N-zink-gl.zip" "IntelXe-Manager-$VER.zip"; do
+	[ -f "$OUT/$f" ] || continue
+	m=$(stat -f %m "$OUT/$f")
+	[ "$m" -ge "$t_src" ] || bad "$f was built $(date -r "$m" '+%d %b %H:%M'), before the source commit of $(date -r "$t_src" '+%d %b %H:%M') ($(git log -1 --format=%h -- kernel nullmoth user app zink-gl windows release/templates release/package.sh release/nvmtl-allow.txt VERSION ':(exclude)*.md')): package again"
+done
 if [ -f "$OUT/$N.sha256" ]; then
 	(cd "$OUT" && shasum -a 256 -c "$N.sha256" >/dev/null 2>&1) && ok "$N.sha256 matches" || bad "$N.sha256 does not match the files"
 fi
