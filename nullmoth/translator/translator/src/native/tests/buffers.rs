@@ -4055,7 +4055,18 @@ entry:
     .flat_map(|w| w.to_le_bytes())
     .collect::<Vec<_>>();
     let asm = disassemble(&out).expect("disassemble transformed");
-    assert!(!asm.contains("OpFunctionCall"), "{asm}");
+    // @helper is inlined. The count is read through the constant pointer the record holds, a device address: the one
+    // call left is the null-guarded device-address load helper's (WAS: no call at all, the count a constant zero read
+    // through an unmodeled pointer).
+    let transformed = load_bytes(&out).expect("load transformed");
+    let reads = null_bda_loads(&transformed);
+    let calls = transformed
+        .all_inst_iter()
+        .filter(|inst| inst.class.opcode == Op::FunctionCall)
+        .filter_map(|inst| inst.result_id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1, "{asm}");
+    assert!(reads.contains_key(&calls[0]), "the one call reads the count by its address\n{asm}");
     assert!(!asm.contains("OpPtrAccessChain"), "{asm}");
     assert!(
         !asm.lines()
@@ -6190,9 +6201,18 @@ entry:
   ret i32 %v
 }
 "#;
-    let asm = disassemble(&emit_vulkan_spirv(ll).expect("native emit")).expect("disassemble");
+    // The placeholders themselves (the field's pointer and the element pointer) are byte placeholders...
+    let placeholders_only = ll.replace(
+        "  %v = load i32, ptr addrspace(2) %elt\n  ret i32 %v",
+        "  ret i32 0",
+    );
+    let asm =
+        disassemble(&emit_vulkan_spirv(&placeholders_only).expect("native emit")).expect("disassemble");
     assert!(asm.contains("OpVariable"), "{asm}");
     assert!(!asm.contains("_ptr_Private__ptr_"), "{asm}");
+    // ...and a value read through one is refused (WAS: a constant zero).
+    let error = emit_vulkan_spirv(ll).expect_err("a read through an unmodeled pointer must fail");
+    assert!(error.contains("load %v through %elt, an unmodeled pointer placeholder"), "{error}");
 }
 
 #[test]
@@ -11486,7 +11506,7 @@ entry:
 }
 
 #[test]
-fn native_constant_selected_private_table_preserves_access_chain_storage() {
+fn native_constant_selected_private_table_read_is_refused_not_zero() {
     let ll = r#"
 target triple = "air64-apple-macosx14.0.0"
 @first = internal unnamed_addr addrspace(2) constant [2 x <2 x i8>] [<2 x i8> zeroinitializer, <2 x i8> <i8 1, i8 2>], align 2
@@ -11509,39 +11529,18 @@ entry:
 !3 = !{i32 0, !"air.buffer", !"air.buffer_size", i32 2, !"air.location_index", i32 0, i32 1, !"air.write", !"air.address_space", i32 1, !"air.arg_type_size", i32 2, !"air.arg_type_align_size", i32 2, !"air.arg_type_name", !"char2", !"air.arg_name", !"out"}
 !4 = !{i32 1, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint", !"air.arg_name", !"index"}
 "#;
+    // A pointer selected between two constant tables and then indexed has no model (the tables are Private variables,
+    // which a logical pointer select cannot choose between). WAS: the element read was a constant zero, so the
+    // kernel stored zero whatever the index; the access chains this test checked never reached the tables. Open:
+    // the read could be a select of the two tables' elements.
     let tmp = std::env::temp_dir().join(format!(
         "metal2vulkan_private_table_storage_reconcile_{}",
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&tmp);
-    let spv = crate::translate_sanitized_native(ll, Stage::Kernel, &tmp).expect("translate");
-    let module = load_bytes(&spv).expect("load spv");
-    for instruction in module.all_inst_iter().filter(|instruction| {
-        matches!(
-            instruction.class.opcode,
-            Op::AccessChain
-                | Op::InBoundsAccessChain
-                | Op::PtrAccessChain
-                | Op::InBoundsPtrAccessChain
-        )
-    }) {
-        let Operand::IdRef(base) = instruction.operands[0] else {
-            continue;
-        };
-        let base_type = module
-            .all_inst_iter()
-            .find_map(|candidate| {
-                (candidate.result_id == Some(base)).then_some(candidate.result_type)
-            })
-            .flatten()
-            .expect("access-chain base type");
-        assert_eq!(
-            pointer_type_storage_class(&module, instruction.result_type.expect("result type")),
-            pointer_type_storage_class(&module, base_type),
-            "access-chain result must inherit its base storage class"
-        );
-    }
-    tools::spirv_val_bytes(&spv, &tmp).expect("spirv-val");
+    let error = crate::translate_sanitized_native(ll, Stage::Kernel, &tmp)
+        .expect_err("an element read through an unmodeled table pointer must fail, not read zero");
+    assert!(error.contains("load %value through %element, an unmodeled pointer placeholder"), "{error}");
     let _ = std::fs::remove_dir_all(tmp);
 }
 
