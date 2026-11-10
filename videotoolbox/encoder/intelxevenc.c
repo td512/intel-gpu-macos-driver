@@ -965,6 +965,30 @@ __attribute__((visibility("default"))) OSStatus IntelXeHEVC_CreateInstance(FourC
 __attribute__((visibility("default"))) OSStatus IntelXeH264_CreateInstance(FourCharCode c, CFAllocatorRef a, VTVideoEncoderRef *out) { return create('avc1', a, out); }
 __attribute__((visibility("default"))) OSStatus IntelXeAV1_CreateInstance(FourCharCode c, CFAllocatorRef a, VTVideoEncoderRef *out) { return create('av01', a, out); }
 
+// The card's name for the encoders' names: IntelXe.kext's "model" property ("Intel Arc B570 Graphics") at or above
+// NMXAccel, without " Graphics", as the GPU plug-in names its codecs (nvmtl_registry_model, nvmtl_codec_name).
+// "Intel Arc B580" when the registry has none.
+static void gpu_name(char *out, size_t n) {
+	strlcpy(out, "Intel Arc B580", n);
+	io_service_t sv = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("NMXAccel"));
+	if (!sv) return;
+	CFTypeRef m = IORegistryEntrySearchCFProperty(sv, kIOServicePlane, CFSTR("model"), kCFAllocatorDefault,
+	                                              kIORegistryIterateRecursively | kIORegistryIterateParents);
+	IOObjectRelease(sv);
+	char b[128] = "";
+	if (m && CFGetTypeID(m) == CFDataGetTypeID()) {
+		CFIndex len = 0; const CFIndex max = CFDataGetLength(m); const UInt8 *p = CFDataGetBytePtr(m);
+		while (len < max && len < (CFIndex)sizeof b - 1 && p[len]) { b[len] = (char)p[len]; len++; }
+		b[len] = 0;
+	} else if (m && CFGetTypeID(m) == CFStringGetTypeID() && !CFStringGetCString(m, b, sizeof b, kCFStringEncodingUTF8)) b[0] = 0;
+	if (m) CFRelease(m);
+	size_t len = strlen(b);
+	while (len && (b[len - 1] == ' ' || b[len - 1] == '\n' || b[len - 1] == '\t')) b[--len] = 0;
+	if (len > 9 && !strcmp(b + len - 9, " Graphics")) b[len -= 9] = 0;
+	const char *t = b; while (*t == ' ') t++;
+	if (*t && !strcasestr(t, "unknown")) strlcpy(out, t, n);
+}
+
 // Registers the encoders the device can run (one call per process; returns how many were registered). Called by the GPU
 // plug-in once VideoToolbox is loaded in the process, or by a test tool.
 __attribute__((visibility("default"))) int IntelXeVEnc_Register(void) {
@@ -972,16 +996,20 @@ __attribute__((visibility("default"))) int IntelXeVEnc_Register(void) {
 	dispatch_once(&once, ^{
 		count = 0;
 		const char *e = getenv("INTELXEVENC_CODECS");   // e.g. "hevc,h264"; default: HEVC and H.264 (AV1 once ANV has it on Xe2)
-		struct { FourCharCode t; const char *name, *id, *disp; OSStatus (*fac)(FourCharCode, CFAllocatorRef, VTVideoEncoderRef *); } enc[] = {
-			{ 'hvc1', "hevc", "io.github.yusufklncc.intelxe.videoencoder.hevc", "Intel Arc B580 HEVC", IntelXeHEVC_CreateInstance },
-			{ 'avc1', "h264", "io.github.yusufklncc.intelxe.videoencoder.h264", "Intel Arc B580 H.264", IntelXeH264_CreateInstance },
-			{ 'av01', "av1", "io.github.yusufklncc.intelxe.videoencoder.av1", "Intel Arc B580 AV1", IntelXeAV1_CreateInstance },
+		struct { FourCharCode t; const char *name, *id, *codec; OSStatus (*fac)(FourCharCode, CFAllocatorRef, VTVideoEncoderRef *); } enc[] = {
+			{ 'hvc1', "hevc", "io.github.yusufklncc.intelxe.videoencoder.hevc", "HEVC", IntelXeHEVC_CreateInstance },
+			{ 'avc1', "h264", "io.github.yusufklncc.intelxe.videoencoder.h264", "H.264", IntelXeH264_CreateInstance },
+			{ 'av01', "av1", "io.github.yusufklncc.intelxe.videoencoder.av1", "AV1", IntelXeAV1_CreateInstance },
 		};
+		char gpu[128];
+		gpu_name(gpu, sizeof gpu);
 		for (size_t i = 0; i < sizeof enc / sizeof *enc; i++) {
 			int on = e ? strstr(e, enc[i].name) != NULL : enc[i].t != 'av01';
 			if (!on) continue;
+			char name[160];
+			snprintf(name, sizeof name, "%s %s", gpu, enc[i].codec);   // "Intel Arc B580 HEVC"
 			CFStringRef id = CFStringCreateWithCString(NULL, enc[i].id, kCFStringEncodingUTF8);
-			CFStringRef disp = CFStringCreateWithCString(NULL, enc[i].disp, kCFStringEncodingUTF8);
+			CFStringRef disp = CFStringCreateWithCString(NULL, name, kCFStringEncodingUTF8);
 			CFNumberRef rating = i32(1000);
 			// VideoToolbox lists a dynamically registered encoder as "Dynamically Registered <codec> Video Encoder" whatever
 			// name it is given; the ID is what clients select it by
@@ -990,7 +1018,7 @@ __attribute__((visibility("default"))) int IntelXeVEnc_Register(void) {
 			const void *v[] = { id, disp, rating, kCFBooleanTrue };
 			CFDictionaryRef info = CFDictionaryCreate(NULL, k, v, 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 			OSStatus r = VTRegisterVideoEncoderWithInfo(enc[i].t, info, enc[i].fac);
-			os_log(lg(), "intelxevenc: %{public}s encoder %{public}s in %{public}s (VTRegisterVideoEncoderWithInfo -> %d)", enc[i].disp,
+			os_log(lg(), "intelxevenc: %{public}s encoder %{public}s in %{public}s (VTRegisterVideoEncoderWithInfo -> %d)", name,
 			       r ? "NOT registered" : "registered", proc(), (int)r);
 			if (!r) count++;
 			CFRelease(info); CFRelease(rating); CFRelease(disp); CFRelease(id);
