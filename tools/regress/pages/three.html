@@ -1,0 +1,92 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- three.html (regress.sh WebGPU stage, NEEDS NETWORK: three.js r170 comes from the jsDelivr CDN): a three.js
+     WebGPURenderer scene, an unlit orange cube (MeshBasicMaterial 0xff8800) on a blue background (0x336699), checked
+     two ways:
+       render target   the scene drawn into a THREE.RenderTarget, centre and corner read with
+                       readRenderTargetPixelsAsync (three.js' own readback)
+       output pass     the scene drawn to the canvas; WebGPURenderer draws it into an internal rgba16float target first
+                       and then runs its output pass to the canvas. That target is found by wrapping createTexture
+                       (before three.js loads) and its centre texel is read back with copyTextureToBuffer.
+     PASS when the centre is the mesh colour and the corner the background. three.js keeps colours linear inside and
+     encodes sRGB at the output; a pixel is accepted in either encoding (a broken draw gives the background or black,
+     never the other encoding). The renderer must be on its WebGPU backend: a fall-back to WebGL2 is a FAIL. -->
+<html><head><meta charset="utf-8"><title>regress three</title>
+<style>body{background:#fff;color:#000;font:13px Menlo,monospace;margin:8px} canvas{width:320px;height:200px;border:1px solid #888} pre{white-space:pre-wrap}</style></head>
+<body><canvas id="c" width="320" height="200"></canvas><pre id="o"></pre>
+<script type="module">
+import { say, finish, guard, near } from './common.js';
+guard(90000);
+// every texture three.js creates, to find the rgba16float target of the output pass afterwards
+const TEX = [];
+if (window.GPUDevice) {
+  const f = GPUDevice.prototype.createTexture;
+  GPUDevice.prototype.createTexture = function (d) { const t = f.call(this, d); TEX.push({ t, d }); return t; };
+}
+const f16 = (u) => {   // IEEE half to number
+  const s = u >> 15 ? -1 : 1, e = (u >> 10) & 31, m = u & 1023;
+  return e ? s * Math.pow(2, e - 15) * (1 + m / 1024) : s * Math.pow(2, -14) * (m / 1024);
+};
+const fmt = (a) => Array.from(a).map((v) => v.toFixed(3)).join(',');
+// pass: got (0..1 floats, rgb) is want in linear or in sRGB encoding
+const either = (got, c) => near(got, [c.r, c.g, c.b], 0.02) ? 'linear'
+  : near(got, c.clone().convertLinearToSRGB().toArray(), 0.02) ? 'sRGB' : null;
+const verdict = (name, got, c) => {
+  const enc = either(got, c);
+  say(`${enc ? 'PASS' : 'FAIL'} ${name}: got ${fmt(got)}${enc ? ' (' + enc + ')' : ' want ' + fmt([c.r, c.g, c.b]) + ' linear or ' + fmt(c.clone().convertLinearToSRGB().toArray()) + ' sRGB'}`);
+};
+let THREE = null;
+try {
+  THREE = await import('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.webgpu.js');
+} catch (e) {
+  say('SKIP network: three.js r170 did not load from the CDN: ' + (e.message || e));
+}
+if (THREE) try {
+  say('INFO three.js r' + THREE.REVISION);
+  const r = new THREE.WebGPURenderer({ canvas: document.getElementById('c'), antialias: false });
+  await r.init();
+  if (!r.backend || !r.backend.isWebGPUBackend) throw new Error('WebGPURenderer fell back to ' + (r.backend && r.backend.constructor.name) + ' (no WebGPU)');
+  const dev = r.backend.device;
+  dev.onuncapturederror = (e) => say('FAIL uncaptured WebGPU error: ' + e.error.message);
+  const MESH = new THREE.Color(0xff8800), BG = new THREE.Color(0x336699);   // linear working-space values
+  const sc = new THREE.Scene();
+  sc.background = BG;
+  const cam = new THREE.PerspectiveCamera(50, 320 / 200, 0.1, 10);
+  cam.position.z = 3;
+  const cube = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), new THREE.MeshBasicMaterial({ color: MESH }));
+  cube.rotation.set(0.5, 0.7, 0);
+  sc.add(cube);
+
+  // 1. render target + readRenderTargetPixelsAsync
+  const rt = new THREE.RenderTarget(64, 64);
+  r.setRenderTarget(rt);
+  await r.renderAsync(sc, cam);
+  r.setRenderTarget(null);
+  const c8 = await r.readRenderTargetPixelsAsync(rt, 32, 32, 1, 1);
+  const k8 = await r.readRenderTargetPixelsAsync(rt, 1, 1, 1, 1);
+  verdict('render target centre', [c8[0] / 255, c8[1] / 255, c8[2] / 255], MESH);
+  verdict('render target corner', [k8[0] / 255, k8[1] / 255, k8[2] / 255], BG);
+
+  // 2. the canvas, through the output pass; read the internal rgba16float target
+  for (let i = 0; i < 3; i++) await r.renderAsync(sc, cam);
+  const rts = TEX.filter((x) => x.d.format === 'rgba16float' && x.d.size && (x.d.size.width || x.d.size[0]) === 320);
+  if (!rts.length) {
+    say('INFO output pass: no 320-wide rgba16float target (three.js drew to the canvas directly); not checked');
+  } else {
+    const t = rts[rts.length - 1].t;
+    const rb = dev.createBuffer({ size: 2560, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const e = dev.createCommandEncoder();
+    e.copyTextureToBuffer({ texture: t, origin: { x: 0, y: 100 } }, { buffer: rb, bytesPerRow: 2560 }, { width: 320, height: 1 });
+    dev.queue.submit([e.finish()]);
+    await rb.mapAsync(GPUMapMode.READ);
+    const h = new Uint16Array(rb.getMappedRange());
+    const at = (x) => [0, 1, 2].map((k) => f16(h[x * 4 + k]));
+    verdict('output pass centre', at(160), MESH);
+    verdict('output pass edge', at(2), BG);
+    rb.unmap();
+  }
+} catch (e) {
+  say('FAIL exception: ' + (e.message || e));
+}
+await finish();
+</script></body></html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- tri.html (regress.sh WebGPU stage): the plainest WebGPU draws, no framework. One orange triangle on a blue clear,
+     drawn six ways: draw / drawIndexed uint16 / drawIndexed uint32, each with its buffers filled through
+     mappedAtCreation and through queue.writeBuffer; into an offscreen rgba8unorm texture and into a canvas texture
+     (the preferred canvas format, read back before it is presented). Checked pixels: the centre (inside the triangle,
+     orange 255,128,0) and a top corner (outside it, the clear colour 51,102,153). A wrong index format, a buffer
+     upload that never lands or a lost draw shows as the clear colour at the centre. -->
+<html><head><meta charset="utf-8"><title>regress tri</title>
+<style>body{background:#fff;color:#000;font:13px Menlo,monospace;margin:8px} canvas{width:64px;height:64px;border:1px solid #888;margin:2px} pre{white-space:pre-wrap}</style></head>
+<body><div id="cs"></div><pre id="o"></pre>
+<script type="module">
+import { say, finish, guard, device, readPixels, pixel, check } from './common.js';
+guard(45000);
+const W = 64, H = 64;
+try {
+  const dev = await device();
+  const cfmt = navigator.gpu.getPreferredCanvasFormat();
+  say('INFO canvas format: ' + cfmt);
+  const code = `
+@vertex fn vs(@location(0) a: vec2f) -> @builtin(position) vec4f { return vec4f(a, 0, 1); }
+@fragment fn fs() -> @location(0) vec4f { return vec4f(1, 0.5, 0, 1); }`;
+  const m = dev.createShaderModule({ code });
+  const pipe = (format) => dev.createRenderPipeline({
+    layout: 'auto',
+    vertex: { module: m, entryPoint: 'vs', buffers: [{ arrayStride: 8, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }] }] },
+    fragment: { module: m, entryPoint: 'fs', targets: [{ format }] },
+    primitive: { topology: 'triangle-list' },
+  });
+  const pipes = { rgba8unorm: pipe('rgba8unorm'), [cfmt]: pipe(cfmt) };
+  const verts = new Float32Array([-0.8, -0.8, 0.8, -0.8, 0, 0.8]);
+  const idx16 = new Uint16Array([0, 1, 2, 0]);   // 4 entries: buffer sizes stay a multiple of 4 bytes
+  const idx32 = new Uint32Array([0, 1, 2]);
+  // buf: a buffer with data, through mappedAtCreation (mapped) or queue.writeBuffer
+  const buf = (data, usage, mapped) => {
+    const size = (data.byteLength + 3) & ~3;
+    if (mapped) {
+      const b = dev.createBuffer({ size, usage, mappedAtCreation: true });
+      new data.constructor(b.getMappedRange()).set(data);
+      b.unmap();
+      return b;
+    }
+    const b = dev.createBuffer({ size, usage: usage | GPUBufferUsage.COPY_DST });
+    dev.queue.writeBuffer(b, 0, data);
+    return b;
+  };
+  const kinds = [['draw', 'draw'], ['idx16', 'i16'], ['idx32', 'i32']];
+  for (const target of ['offscreen', 'canvas']) {
+    for (const [kname, kind] of kinds) {
+      for (const mapped of [true, false]) {
+        const name = `${target} ${kname}/${mapped ? 'mapped' : 'write'}`;
+        let tex, fmt;
+        if (target === 'offscreen') {
+          fmt = 'rgba8unorm';
+          tex = dev.createTexture({ size: [W, H], format: fmt, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+        } else {
+          fmt = cfmt;
+          const c = document.createElement('canvas');
+          c.width = W; c.height = H;
+          document.getElementById('cs').appendChild(c);
+          const ctx = c.getContext('webgpu');
+          ctx.configure({ device: dev, format: fmt, alphaMode: 'opaque', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+          tex = ctx.getCurrentTexture();
+        }
+        const vb = buf(verts, GPUBufferUsage.VERTEX, mapped);
+        const enc = dev.createCommandEncoder();
+        const p = enc.beginRenderPass({ colorAttachments: [{ view: tex.createView(), loadOp: 'clear', clearValue: { r: 0.2, g: 0.4, b: 0.6, a: 1 }, storeOp: 'store' }] });
+        p.setPipeline(pipes[fmt]);
+        p.setVertexBuffer(0, vb);
+        if (kind === 'draw') p.draw(3);
+        else {
+          p.setIndexBuffer(buf(kind === 'i16' ? idx16 : idx32, GPUBufferUsage.INDEX, mapped), kind === 'i16' ? 'uint16' : 'uint32');
+          p.drawIndexed(3);
+        }
+        p.end();
+        dev.queue.submit([enc.finish()]);
+        // readPixels submits its copy before it first awaits: the canvas texture is copied before the browser presents it
+        const px = await readPixels(dev, tex, W, H);
+        const bgra = fmt.startsWith('bgra');
+        check(name + ' centre', pixel(px, W, W / 2, H / 2, bgra).slice(0, 3), [255, 128, 0], 2);
+        check(name + ' corner', pixel(px, W, 2, 2, bgra).slice(0, 3), [51, 102, 153], 2);
+      }
+    }
+  }
+} catch (e) {
+  say('FAIL exception: ' + (e.message || e));
+}
+await finish();
+</script></body></html>
