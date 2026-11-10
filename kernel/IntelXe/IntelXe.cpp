@@ -625,9 +625,17 @@ bool IntelXe::start(IOService *provider) {
 	}
 	gXePlat = plat;
 	gXePlatId = id;
-	LOG("8086:%04x: %s%s%s, graphics %u.%02u, media %u.%02u, %s", id, plat->name, *sub ? "-" : "", sub,
-		plat->graphicsVerx100 / 100, plat->graphicsVerx100 % 100, plat->mediaVerx100 / 100, plat->mediaVerx100 % 100,
-		plat->isDgfx ? "discrete" : "integrated");
+	{
+		// The same line as a registry property ("IntelXePlatform"): the log of a boot does not keep a message this early
+		// (the kext starts from the boot kernel collection before logd runs, and the kernel message buffer wraps), so the
+		// regression check, the report and the app read it from here.
+		char line[128];
+		snprintf(line, sizeof(line), "8086:%04x: %s%s%s, graphics %u.%02u, media %u.%02u, %s", id, plat->name, *sub ? "-" : "",
+			sub, plat->graphicsVerx100 / 100, plat->graphicsVerx100 % 100, plat->mediaVerx100 / 100,
+			plat->mediaVerx100 % 100, plat->isDgfx ? "discrete" : "integrated");
+		LOG("%s", line);
+		setProperty("IntelXePlatform", line);
+	}
 	// xe->info.has_usm (the graphics IP's) and a standalone media GT (max_gt_per_tile 2): off where the platform has none.
 	// The UM queues sit in VRAM here, so has_usm needs a discrete part too.
 	if (!plat->hasUsm || !plat->isDgfx) gUsm = 0;
