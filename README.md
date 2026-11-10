@@ -59,7 +59,8 @@ You prepare everything from Windows, Linux or macOS; no Mac is needed. The full 
    the EFI you point it to (the same changes; its HybridPM and table steps are checked on macOS only so far); each backs up the EFI first
    and changes only what the driver needs.
 
-The IntelXe Manager app's setup assistant walks through these steps from a fresh macOS install to a tested driver.
+The IntelXe Manager app's setup assistant walks through these steps from a fresh macOS install to a tested driver;
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md) is that way on one page.
 
 Later releases install over the old one from the app's Driver page.
 

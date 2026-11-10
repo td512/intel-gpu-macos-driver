@@ -61,7 +61,7 @@ rehber [`release/README-INSTALL.tr.md`](release/README-INSTALL.tr.md)'de (her pa
    gösterdiğiniz EFI'de yapar; hepsi önce EFI'yi yedekler ve yalnızca sürücünün ihtiyacı olanı değiştirir.
 
 IntelXe Manager uygulamasının kurulum yardımcısı bu adımları, macOS'un temiz kurulumundan test edilmiş bir sürücüye
-kadar sırayla yaptırır.
+kadar sırayla yaptırır; [`docs/QUICKSTART.tr.md`](docs/QUICKSTART.tr.md) bu yolu tek sayfada anlatıyor.
 
 Sonraki sürümler uygulamanın Sürücü sayfasından eskisinin üzerine kurulur.
 
