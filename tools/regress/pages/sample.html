@@ -1,0 +1,93 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- sample.html (regress.sh WebGPU stage): texture sampling with texture coordinates computed from the fragment
+     position, the pattern of three.js' output pass (WebGPURenderer draws the scene into an rgba16float target, then a
+     full-screen pass samples it at fragCoord.xy / a uniform size and writes the canvas). Its bindings are the same:
+     sampler at binding 0, texture at 1, uniform vec2 at 2, all in group 0.
+     The source is a 160x120 rgba16float texture: the top-left quadrant orange (1, 0.25, 0), the rest dark blue
+     (0.03, 0.13, 0.32). Each variant draws a full-screen triangle into an rgba8unorm target of the same size, which is
+     read back at (40,30) (in the orange quadrant) and (120,90) (in the blue part). A uniform that does not reach the
+     shader, a wrong fragCoord or a sampler/texture binding mix-up gives the wrong colour at one of the two points. -->
+<html><head><meta charset="utf-8"><title>regress sample</title>
+<style>body{background:#fff;color:#000;font:13px Menlo,monospace;margin:8px} pre{white-space:pre-wrap}</style></head>
+<body><pre id="o"></pre>
+<script type="module">
+import { say, finish, guard, device, readPixels, pixel, check } from './common.js';
+guard(45000);
+const W = 160, H = 120;
+const ORANGE = [255, 64, 0], BLUE = [8, 33, 82];   // (1, 0.25, 0) and (0.03, 0.13, 0.32) in rgba8unorm
+try {
+  const dev = await device();
+  // the source texture, drawn by the GPU (as three.js' scene pass would)
+  const src = dev.createTexture({
+    size: [W, H], format: 'rgba16float',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
+  });
+  const VS = `@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  var P = array(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3)); return vec4f(P[i], 0, 1); }`;
+  {
+    const m = dev.createShaderModule({ code: VS + `
+@fragment fn fs(@builtin(position) p: vec4f) -> @location(0) vec4f {
+  if (p.x < 80.0 && p.y < 60.0) { return vec4f(1, 0.25, 0, 1); }
+  return vec4f(0.03, 0.13, 0.32, 1); }` });
+    const pl = dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba16float' }] } });
+    const e = dev.createCommandEncoder();
+    const p = e.beginRenderPass({ colorAttachments: [{ view: src.createView(), loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 1 }, storeOp: 'store' }] });
+    p.setPipeline(pl); p.draw(3); p.end();
+    dev.queue.submit([e.finish()]);
+  }
+  // the output-pass fragment shader, written as three.js' WGSL node builder writes it (spacing included)
+  const FS = (expr) => `
+@binding( 0 ) @group( 0 ) var smp : sampler;
+@binding( 1 ) @group( 0 ) var tex : texture_2d<f32>;
+@binding( 2 ) @group( 0 ) var<uniform> sz : vec2<f32>;
+@fragment fn main( @builtin( position ) fragCoord : vec4<f32> ) -> @location( 0 ) vec4<f32> { return ${expr}; }`;
+  // [name, WGSL expression, expected colour at (40,30), at (120,90)]; "+ 0.0 * sz.x" keeps the uniform bound
+  const uv = (x, y) => [Math.round((x + 0.5) / W * 255), Math.round((y + 0.5) / H * 255), 0];
+  const V = [
+    ['const uv 0.25', 'textureSample(tex, smp, vec2f(0.25, 0.25)) + vec4f(0.0 * sz.x)', ORANGE, ORANGE],
+    ['fragCoord/const', 'textureSample(tex, smp, fragCoord.xy / vec2f(160.0, 120.0)) + vec4f(0.0 * sz.x)', ORANGE, BLUE],
+    ['fragCoord/uniform', 'textureSample(tex, smp, fragCoord.xy / sz)', ORANGE, BLUE],
+    ['sampleLevel fragCoord/uniform', 'textureSampleLevel(tex, smp, fragCoord.xy / sz, 0.0)', ORANGE, BLUE],
+    ['textureLoad fragCoord', 'textureLoad(tex, vec2i(fragCoord.xy), 0) + vec4f(0.0 * sz.x)', ORANGE, BLUE],
+    ['uv as colour', 'vec4f(fragCoord.xy / sz, 0.0, 1.0)', uv(40, 30), uv(120, 90)],
+  ];
+  const ub = dev.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  dev.queue.writeBuffer(ub, 0, new Float32Array([W, H, 0, 0]));
+  const smp = dev.createSampler({ magFilter: 'nearest', minFilter: 'nearest', mipmapFilter: 'nearest', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+  const vm = dev.createShaderModule({ code: VS });
+  // an explicit layout (as three.js makes): with 'auto' a variant that leaves the sampler or texture unused would get
+  // a layout without that binding
+  const bgl = dev.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+    { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d' } },
+    { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+  ] });
+  const layout = dev.createPipelineLayout({ bindGroupLayouts: [bgl] });
+  for (const [name, expr, wantA, wantB] of V) {
+    try {
+      const fm = dev.createShaderModule({ code: FS(expr) });
+      const pl = dev.createRenderPipeline({ layout, vertex: { module: vm, entryPoint: 'vs' }, fragment: { module: fm, entryPoint: 'main', targets: [{ format: 'rgba8unorm' }] } });
+      const bg = dev.createBindGroup({ layout: bgl, entries: [
+        { binding: 0, resource: smp },
+        { binding: 1, resource: src.createView({ aspect: 'all', dimension: '2d', mipLevelCount: 1 }) },
+        { binding: 2, resource: { buffer: ub } },
+      ] });
+      const dst = dev.createTexture({ size: [W, H], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+      const e = dev.createCommandEncoder();
+      const p = e.beginRenderPass({ colorAttachments: [{ view: dst.createView(), loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: 'store' }] });
+      p.setPipeline(pl); p.setBindGroup(0, bg); p.draw(3); p.end();
+      dev.queue.submit([e.finish()]);
+      const px = await readPixels(dev, dst, W, H);
+      check(name + ' (40,30)', pixel(px, W, 40, 30).slice(0, 3), wantA, 2);
+      check(name + ' (120,90)', pixel(px, W, 120, 90).slice(0, 3), wantB, 2);
+      dst.destroy();
+    } catch (err) {
+      say('FAIL ' + name + ': ' + (err.message || err));
+    }
+  }
+} catch (e) {
+  say('FAIL exception: ' + (e.message || e));
+}
+await finish();
+</script></body></html>
