@@ -382,6 +382,19 @@ static int nvmtl_rebind_import(const void *inside, const char *symbol, void *rep
 
 INSTANCE_FNS(DECL) DEVICE_FNS(DECL)
 #undef DECL
+/* Object generation: bumped BEFORE every image view, buffer view or sampler this process destroys, and whenever a bindless
+   heap slot (a texture's gpuResourceID) is given up. A binding slot names its object by pointer; once an object is gone the
+   allocator may hand the same address to a new one, and a slot comparison then calls the new object unchanged. The
+   dirty-only machinery (nvmtl_dirty.h) trusts what a descriptor set or a skipped argument-buffer table holds only while the
+   generation it was made at is current. Bumped before the destroy, so whoever later gets the address sees the new value. */
+static _Atomic uint64_t g_objgen = 1;
+static inline uint64_t nvmtl_objgen(void) { return atomic_load_explicit(&g_objgen, memory_order_acquire); }
+void nvmtl_vk_objgen_bump(void) { atomic_fetch_add_explicit(&g_objgen, 1, memory_order_acq_rel); }
+static PFN_vkDestroyImageView g_gen_real_destroy_view;
+static VKAPI_ATTR void VKAPI_CALL nvmtl_gen_destroy_view(VkDevice d, VkImageView v, const VkAllocationCallbacks *a)
+{ if (v) nvmtl_vk_objgen_bump(); g_gen_real_destroy_view(d, v, a); }
+static void nvmtl_gen_hook_destroy(void)
+{ if (!g_gen_real_destroy_view && pvkDestroyImageView) { g_gen_real_destroy_view = pvkDestroyImageView; pvkDestroyImageView = nvmtl_gen_destroy_view; } }
 static void nvmtl_hitch_wrap(void);   // NVMTL_HITCH_MS
 static int g_hitch_ms = -1;           // NVMTL_HITCH_MS: -1 not read yet, 0 off
 #include "nvmtl_gputime.h"            // GPUTIME (/tmp/nvmtl-gputime): GPU time per frame by category
@@ -1220,6 +1233,7 @@ static int nvmtl_vk_initialize(void)
                    p_pstat_stats = (PFN_vkGetPipelineExecutableStatisticsKHR)pvkGetDeviceProcAddr(g_dev, "vkGetPipelineExecutableStatisticsKHR");
                    if (!p_pstat_props || !p_pstat_stats) g_pstat = 0;
                    nvlog("pstat: per-pipeline compile statistics %s", g_pstat ? "ON (NVMTL_PSTAT=1)" : "unavailable"); }
+    nvmtl_gen_hook_destroy();   // before the bindless hook, which then calls through it
     { extern void nvmtl_bl_hook_destroy(void); nvmtl_bl_hook_destroy(); }
     if (g_sample_locations) {
         pvkCmdSetSampleLocationsEXT = (PFN_vkCmdSetSampleLocationsEXT)pvkGetDeviceProcAddr(g_dev, "vkCmdSetSampleLocationsEXT");
@@ -3178,6 +3192,7 @@ _Static_assert(sizeof(nvmtl_slot) == 40, "nvmtl_slot stays 40 bytes");
 /* chg[set]: one bit per binding index that changed (0..NVMTL_NBIND-1). WAS: 4 words for 321 indices - a storage texture
    at index 256 and up (storage texture 63 and up) set a bit past the array, in the other set's word or texgen. */
 #define NVMTL_CHG_WORDS ((NVMTL_NBIND + 63) / 64)
+#include "nvmtl_dirty.h"   /* the reuse / was / copy decisions of nvmtl_snapshot_set_c (host-tested: dirty_model.c) */
 // Every handle a slot holds is an NVK object pointer (VkBuffer, VkImageView, VkSampler, VkBufferView), and NVK reads
 // through each one in vkUpdateDescriptorSets. A value that is not an 8-byte-aligned user address cannot be a live
 // object, and NVK faults on it: WindowServer died a few seconds after each start on RTX 3060 machines with a buffer
@@ -3211,6 +3226,9 @@ typedef struct { nvmtl_slot s[2][NVMTL_NBIND];
                  uint8_t dirty[2]; VkDescriptorSet last[2]; unsigned last_idx[2]; uint32_t last_hi[2]; uint64_t lastw[2][4];
                  uint64_t chg[2][NVMTL_CHG_WORDS]; uint64_t texgen[2]; const void *emb_fn[2]; uint64_t emb_gen[2]; uint32_t emb_n[2];
                  uint64_t emb_key[2][NVMTL_EMB_KEYMAX];
+                 /* the object generation (nvmtl_objgen) the last set was built at, and the skipped table was noted at:
+                    neither is trusted once a view, sampler or heap slot was given up since (nvmtl_dirty.h) */
+                 uint64_t lastgen[2], emb_og[2];
                  uint32_t lastdyn[2]; void *lasttab[2];
                  uint64_t lasttb[2][4];
                  /* tab[set]: the address table's buffer addresses (0..31) and texture entries (64..191) as the slots stand,
@@ -3434,6 +3452,7 @@ static void nvmtl_sampler_release(VkSampler handle)
         *state_link = entry->state_next;
 
         nvmtl_vk_bindless_sampler_forget(handle);
+        nvmtl_vk_objgen_bump();   // a sampler made later may get this handle's address (nvmtl_dirty.h)
         pvkDestroySampler(g_dev, handle, NULL);
         *entry = (nvmtl_sampler_intern_entry){ .state_next = g_sampler_intern_free };
         g_sampler_intern_free = index;
@@ -3997,6 +4016,7 @@ static void nvmtl_bindless_drain(void)
 void nvmtl_vk_bindless_drop(uint32_t slot)
 {
     if (!g_heap_ready || !slot || slot >= NVMTL_BINDLESS_SLOTS) return;
+    nvmtl_vk_objgen_bump();   // the slot (a texture's gpuResourceID) will name another texture: skipped tables are re-read
     const uint64_t seq = __atomic_load_n(&g_sub_seq, __ATOMIC_ACQUIRE);   // every submission so far may still read it
     if (seq > atomic_load(&g_sub_wm)) {
         int queued = 0;
@@ -4114,14 +4134,18 @@ int nvmtl_vk_emb_same(nvk_cmdbuf *c, uint32_t set, const void *fn, const uint64_
 {
     nvmtl_bindtable *t = c ? (nvmtl_bindtable *)c->table : NULL;
     if (!t || set > 1 || !fn || n > NVMTL_EMB_KEYMAX || !nvmtl_dirty_only_on()) return 0;
-    return t->emb_fn[set] == fn && t->emb_gen[set] == t->texgen[set] && t->emb_n[set] == n && !memcmp(t->emb_key[set], key, (size_t)n * 8);
+    // the key holds the argument buffer's handles, not the objects they resolved to: a handle (a heap slot) that was given
+    // up and handed to another texture, or a view replaced at the same address, reads the same key (nvmtl_objgen)
+    return t->emb_fn[set] == fn && t->emb_gen[set] == t->texgen[set] && t->emb_og[set] == nvmtl_objgen()
+           && t->emb_n[set] == n && !memcmp(t->emb_key[set], key, (size_t)n * 8);
 }
 void nvmtl_vk_emb_note(nvk_cmdbuf *c, uint32_t set, const void *fn, const uint64_t *key, uint32_t n)
 {
     nvmtl_bindtable *t = c ? (nvmtl_bindtable *)c->table : NULL;
     if (!t || set > 1) return;
     if (!fn || n > NVMTL_EMB_KEYMAX) { t->emb_fn[set] = NULL; return; }
-    t->emb_fn[set] = fn; t->emb_gen[set] = t->texgen[set]; t->emb_n[set] = n; memcpy(t->emb_key[set], key, (size_t)n * 8);
+    t->emb_fn[set] = fn; t->emb_gen[set] = t->texgen[set]; t->emb_og[set] = nvmtl_objgen();
+    t->emb_n[set] = n; memcpy(t->emb_key[set], key, (size_t)n * 8);
 }
 int nvmtl_vk_bind_buffer_offset(nvk_cmdbuf *c, uint32_t set, uint32_t index, size_t offset)
 {
@@ -4853,57 +4877,41 @@ static VkDescriptorSet nvmtl_snapshot_set_c(nvk_cmdbuf *c, uint32_t which, const
     static const uint64_t notb[4] = { 0, 0, 0, 0 };
     const uint64_t *tb = p->tbany ? p->tbm[which] : notb;
     const int sametb = !memcmp(t->lasttb[which], tb, sizeof notb);
-    int live = sametb && t->last[which] && !t->dirty[which] && t->last_idx[which] < c->nsets
-               && (VkDescriptorSet)c->sets[t->last_idx[which]].set == t->last[which];
-    if (live && tabok && hi <= t->last_hi[which]) {
-        int covered = 1;
-        for (int k = 0; k < 4; k++) if (pm[k] & ~t->lastw[which][k]) covered = 0;
-        if (covered) {
-            c->dyn_out[which] = t->lastdyn[which]; c->tab_out[which] = t->lasttab[which];
-            nvmtl_enc78_count(E78C_SETREUSE, 1); return t->last[which];
-        }
+    // read before anything is decided or built: a view or sampler destroyed from here on bumps it past what lastgen gets
+    const uint64_t gen = nvmtl_objgen();
+    const nvmtl_ds_in in = { pm, t->lastw[which], t->chg[which], hi, t->last_hi[which],
+                             sametb && t->last[which] && t->last_idx[which] < c->nsets
+                             && (VkDescriptorSet)c->sets[t->last_idx[which]].set == t->last[which],
+                             t->dirty[which], tabok, t->lastgen[which] == gen, nvmtl_dirty_only_on() };
+    if (nvmtl_ds_reuse(&in)) {
+        c->dyn_out[which] = t->lastdyn[which]; c->tab_out[which] = t->lasttab[which];
+        nvmtl_enc78_count(E78C_SETREUSE, 1); return t->last[which];
     }
     // Only buffer slots changed (Apple's GL rebinds its uniform bytes for every draw). A pipeline that reaches every
     // buffer through the address table (no buffer binding in its mask) still has all its descriptors in the last set;
     // what changed is the table. On the same table page that is a new dynamic offset, not a new set.
     // Also taken with nothing dirty when the last set's table lacks entries this pipeline reads (stage 1d): the new
     // table on the same page is again only a new dynamic offset. Nothing changed, so buffer descriptors may be read.
-    const int was = sametb && t->last[which] && (t->dirty[which] || !tabok) && t->last_idx[which] < c->nsets
-                    && (VkDescriptorSet)c->sets[t->last_idx[which]].set == t->last[which];
-    if (was && nvmtl_table_ubo() && hi <= t->last_hi[which] && (!t->dirty[which] || !(pm[0] & 0xffffffffull))
-        && !(t->chg[which][0] >> 32) && !t->chg[which][1] && !t->chg[which][2] && !t->chg[which][3]
-        && !t->chg[which][4] && !t->chg[which][5]) {
-        int covered = 1;
-        for (int k = 0; k < 4; k++) if (pm[k] & ~t->lastw[which][k]) covered = 0;
+    // The changed buffers' descriptors in the set are stale from here on: nvmtl_ds_was_taken drops them from lastw.
+    if (nvmtl_ds_was(&in, nvmtl_table_ubo())) {
         const int table = NVMTL_E78_HAS(pm, NVMTL_ADDRESS_BINDING);
         const nvmtl_address_page *page = (const nvmtl_address_page *)c->address_pages;
         const int samePage = !table || (t->lasttab[which] && page && (c->address_count % NVMTL_TABLES_PER_PAGE) != 0
                                         && (void *)page->buffer.buf == t->lasttab[which]);
         VkDescriptorBufferInfo ai;
-        if (covered && samePage && (!table || !nvmtl_address_snapshot(c, which, &ai))) {
+        if (samePage && (!table || !nvmtl_address_snapshot(c, which, &ai))) {
             if (table) { t->lastdyn[which] = (uint32_t)ai.offset; t->lastneed[which] = need; }
-            t->dirty[which] = 0; memset(t->chg[which], 0, sizeof t->chg[which]);
+            t->dirty[which] = 0; nvmtl_ds_was_taken(t->lastw[which], t->chg[which]);
             c->dyn_out[which] = t->lastdyn[which]; c->tab_out[which] = t->lasttab[which];
             nvmtl_enc78_count(E78C_SETREUSE, 1);
             return t->last[which];
         }
     }
-    uint64_t m[4];
-    for (int k = 0; k < 4; k++) m[k] = pm[k] | (live ? t->lastw[which][k] : 0);
-    if (live && t->last_hi[which] > hi) hi = t->last_hi[which];
-    VkDescriptorSet from = VK_NULL_HANDLE; uint64_t cm[4] = { 0, 0, 0, 0 };
-    if (live && nvmtl_dirty_only_on()) {
-        from = t->last[which];
-        for (int k = 0; k < 4; k++) cm[k] = t->lastw[which][k];
-        for (uint32_t j = 0; j < NVMTL_NSTEX && NVMTL_STEX_BASE + j < 256; j++) {
-            const uint32_t i = NVMTL_STEX_BASE + j;
-            if (j < t->last_hi[which]) cm[i >> 6] |= 1ull << (i & 63); else cm[i >> 6] &= ~(1ull << (i & 63));
-        }
-        for (int k = 0; k < 4; k++) cm[k] &= ~t->chg[which][k];
-    }
+    uint64_t m[4], cm[NVMTL_CHG_WORDS];
+    const VkDescriptorSet from = nvmtl_ds_new(&in, m, &hi, cm) ? t->last[which] : VK_NULL_HANDLE;
     VkDescriptorSet s = nvmtl_snapshot_set_md(c, which, hi, m, p->tbany ? tb : NULL, from, from ? cm : NULL);
     if (!s) return s;
-    t->last[which] = s; t->last_idx[which] = c->nsets - 1; t->last_hi[which] = hi; t->dirty[which] = 0;
+    t->last[which] = s; t->last_idx[which] = c->nsets - 1; t->last_hi[which] = hi; t->dirty[which] = 0; t->lastgen[which] = gen;
     memcpy(t->lasttb[which], tb, sizeof notb);
     t->lastdyn[which] = c->dyn_out[which]; t->lasttab[which] = c->tab_out[which]; t->lastneed[which] = need;
     memset(t->chg[which], 0, sizeof t->chg[which]);
@@ -10111,6 +10119,7 @@ int nvmtl_vk_texel_view_create(nvk_buffer *b, size_t offset, size_t range, uint3
 void nvmtl_vk_texel_view_destroy(void *alias, void *view)
 {
     if (g_dbuf) nvmtl_db_texel_forget(view);
+    if (view) nvmtl_vk_objgen_bump();   // nvmtl_dirty.h: a buffer view made later may get this address
     if (view && pvkDestroyBufferView) pvkDestroyBufferView(g_dev, (VkBufferView)view, NULL);
     if (alias) pvkDestroyBuffer(g_dev, (VkBuffer)alias, NULL);
 }
@@ -10150,10 +10159,17 @@ int nvmtl_vk_bind_texture_view(nvk_cmdbuf *c, uint32_t set, uint32_t index, void
 {
     if (index >= NVMTL_NTEX) { nvlog("bind texture view: index %u is outside [0,%d)", index, NVMTL_NTEX); return -1; }
     const nvmtl_slot *was = (c->table && set < 2) ? &((nvmtl_bindtable *)c->table)->s[set][NVMTL_NBUF + index] : NULL;
-    const int same = was && was->kind == NVMTL_SLOT_TEX && was->h == view;
+    // A texture slot keeps in vextra (a buffer slot's field) the object generation its heap slot was looked up at: the same
+    // view pointer after a view was destroyed may be another view with another heap slot (nvmtl_objgen)
+    const uint32_t gen = (uint32_t)nvmtl_objgen();
+    const int ptrsame = was && was->kind == NVMTL_SLOT_TEX && was->h == view, same = ptrsame && was->vextra == gen;
     int r = nvmtl_bind_slot(c, set, NVMTL_NBUF + index, NVMTL_SLOT_TEX, view, 0);
-    if (!r && !same && c->table && set < 2) { extern uint32_t nvmtl_bl_slot(void *); ((nvmtl_bindtable *)c->table)->s[set][NVMTL_NBUF + index].size = view ? nvmtl_bl_slot(view) : 0;
-        nvmtl_tab_note((nvmtl_bindtable *)c->table, set, NVMTL_NBUF + index); }
+    if (!r && !same && c->table && set < 2) { extern uint32_t nvmtl_bl_slot(void *); nvmtl_bindtable *t = (nvmtl_bindtable *)c->table;
+        const uint32_t i = NVMTL_NBUF + index; nvmtl_slot *sl = &t->s[set][i]; const size_t was_size = sl->size;
+        sl->size = view ? nvmtl_bl_slot(view) : 0; sl->vextra = gen;
+        // same pointer, another heap slot: the address table entry changed although nvmtl_bind_slot saw no change
+        if (ptrsame && sl->size != was_size) { t->dirty[set] = 1; t->chg[set][i >> 6] |= 1ull << (i & 63); t->texgen[set]++; }
+        nvmtl_tab_note(t, set, i); }
     return r;
 }
 int nvmtl_vk_bind_storage_view(nvk_cmdbuf *c, uint32_t set, uint32_t index, void *view)

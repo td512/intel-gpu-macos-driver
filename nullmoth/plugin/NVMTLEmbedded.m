@@ -363,6 +363,8 @@ void nvmtl_bind_embedded(__unsafe_unretained NVMTLCommandBuffer *cb, uint32_t se
     NSArray<NVMTLEmbeddedPlan *> *embedded = embeddedPlan;
     extern int nvmtl_vk_emb_same(nvk_cmdbuf *, uint32_t, const void *, const uint64_t *, uint32_t);
     extern void nvmtl_vk_emb_note(nvk_cmdbuf *, uint32_t, const void *, const uint64_t *, uint32_t);
+    // embSurf: this call bound something a later identical key must not skip (an IOSurface texture, a storage twin, a
+    // handle that resolved to nothing or failed to bind) - the table is not noted, so the next call binds again
     uint64_t embKey[480]; uint32_t embN = 0; BOOL embKeyed = embedded.count * 3 <= 480, embSurf = NO;
     if (embKeyed) {
         for (NVMTLEmbeddedPlan *plan in embedded) {
@@ -417,11 +419,13 @@ void nvmtl_bind_embedded(__unsafe_unretained NVMTLCommandBuffer *cb, uint32_t se
         if (!resource) {
             nvlog("embedded %s slot %u: handle 0x%llx resolves to nothing — released, or never ours; REFUSED",
                   what, slot, (unsigned long long)handle);
+            embSurf = YES;   // the handle may name a texture later with the same key: never skip on it
             nvmtl_clear_embedded_slot(cb, set, slot, wantSampler); continue;
         }
         if (wantSampler != ((handle & NVMTL_RESID_SAMPLER) != 0)) {
             nvlog("embedded slot %u: the field wants a %s but handle 0x%llx is the other kind — REFUSED",
                   slot, what, (unsigned long long)handle);
+            embSurf = YES;
             nvmtl_clear_embedded_slot(cb, set, slot, wantSampler); continue;
         }
         if (nvmtl_embedded_info_due(&nvmtl_embedded_bound_count)) {
@@ -433,15 +437,15 @@ void nvmtl_bind_embedded(__unsafe_unretained NVMTLCommandBuffer *cb, uint32_t se
         if (wantSampler) {
             NVMTLSamplerState *s = resource;
             nvmtl_retain_resource(cb, s);
-            if (nvmtl_vk_bind_sampler(&cb->_c, set, slot, &s->_s))
-                nvlog("embedded sampler slot %u: bind FAILED", slot);
+            if (nvmtl_vk_bind_sampler(&cb->_c, set, slot, &s->_s)) {
+                nvlog("embedded sampler slot %u: bind FAILED", slot); embSurf = YES; }
         } else {
             NVMTLTexture *t = resource;
             nvmtl_retain_resource(cb, t);
             nvmtl_surface_in_for_cb(cb, t);
             { NVMTLTexture *sr = t->_parent ? t->_parent : t; if (sr->_surf) embSurf = YES; }
-            if (nvmtl_vk_bind_texture_view(&cb->_c, set, slot, [t nvsampleview]))
-                nvlog("embedded texture slot %u: bind FAILED", slot);
+            if (nvmtl_vk_bind_texture_view(&cb->_c, set, slot, [t nvsampleview])) {
+                nvlog("embedded texture slot %u: bind FAILED", slot); embSurf = YES; }
             void *sv = nvmtl_storage_view_for(cb, t, plan->storage);
             if (sv && !t->_stex) embSurf = YES;   // a twin is copied in and out per encoder: never skip this binding
             nvmtl_vk_bind_storage_view(&cb->_c, set, slot, sv);
