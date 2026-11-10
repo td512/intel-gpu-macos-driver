@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // The Monitor page: what the card does right now, once a second, with the last five minutes drawn. Read only and cheap:
 // sysctls anyone may read (NMXAccel's presented frames, IntelXe's VRAM use and, from 0.1.4, debug.intelxe.sensors with
-// the GT clock and temperatures) and the main display's mode from CoreGraphics.
+// the GT clock, temperatures, the card's and the package's power and the power limits) and the main display's mode from
+// CoreGraphics.
 import Charts
 import CoreGraphics
 import Foundation
@@ -25,6 +26,21 @@ private func firstInt(_ text: String, after label: String) -> Int? {
     let digits = text[r.upperBound...].drop(while: { $0 == " " }).prefix(while: { $0.isNumber })
     return Int(digits)
 }
+/// "card power 36.98 W" -> 36.98; nil for "n/a" (the kext refused that window) or without the label (before 0.1.4)
+private func firstWatts(_ text: String, after label: String) -> Double? {
+    guard let r = text.range(of: label) else { return nil }
+    let number = text[r.upperBound...].drop(while: { $0 == " " }).prefix(while: { $0.isNumber || $0 == "." })
+    guard !number.isEmpty, text[r.upperBound...].drop(while: { $0 == " " }).dropFirst(number.count).hasPrefix(" W") else { return nil }
+    return Double(number)
+}
+/// "card PL2 190 W (on)" -> 190 when that limit is on
+private func enabledLimit(_ text: String, _ label: String) -> Double? {
+    guard let r = text.range(of: label) else { return nil }
+    let rest = text[r.upperBound...].drop(while: { $0 == " " })
+    let number = rest.prefix(while: { $0.isNumber || $0 == "." })
+    guard !number.isEmpty, rest.dropFirst(number.count).hasPrefix(" W (on)") else { return nil }
+    return Double(number)
+}
 
 /// The GT clock's hardware range as IntelXe reads it (debug.intelxe.sensors, from 0.1.4): RP0, the most the GPU runs at,
 /// and RPn, the least. nil without the sysctl or while the GPU sleeps.
@@ -43,6 +59,10 @@ struct MonitorSample {
     var actMHz: Int?, reqMHz: Int?, maxMHz: Int?
     var packageC: Int?, vramC: Int?
     var vramUsedMB: Int?
+    /// average power over the last reading's window (debug.intelxe.sensors from the PMT kext of 0.1.4)
+    var cardW: Double?, packageW: Double?
+    /// the card's sustained (PL1) or burst (PL2) limit, whichever is on, PL1 first
+    var cardLimitW: Double?
     var mode = ""
 }
 
@@ -59,6 +79,7 @@ final class MonitorModel: ObservableObject {
     @Published var fpsHistory: [MonitorPoint] = []
     @Published var clockHistory: [MonitorPoint] = []
     @Published var tempHistory: [MonitorPoint] = []
+    @Published var powerHistory: [MonitorPoint] = []
     @Published var sensorsMissing = false
     /// the last RP0 read: the clock chart's top while the GPU sleeps
     var lastMaxMHz: Int?
@@ -87,6 +108,8 @@ final class MonitorModel: ObservableObject {
         if let text = sysctlString("debug.intelxe.sensors"), text.hasPrefix("act") {
             s.actMHz = firstInt(text, after: "act"); s.reqMHz = firstInt(text, after: "req"); s.maxMHz = firstInt(text, after: "RP0")
             s.packageC = firstInt(text, after: "package"); s.vramC = firstInt(text, after: "VRAM")
+            s.cardW = firstWatts(text, after: "card power"); s.packageW = firstWatts(text, after: "package power")
+            s.cardLimitW = enabledLimit(text, "card PL1") ?? enabledLimit(text, "card PL2")
             if let m = s.maxMHz, m > 0 { lastMaxMHz = m }
             sensorsMissing = false
         } else { sensorsMissing = sysctlString("debug.intelxe.state") != nil }
@@ -106,6 +129,7 @@ final class MonitorModel: ObservableObject {
         add(s.fps, to: &fpsHistory)
         add(s.actMHz.map(Double.init), to: &clockHistory)
         add(s.packageC.map(Double.init), to: &tempHistory)
+        add(s.cardW, to: &powerHistory)
     }
 }
 
@@ -187,6 +211,15 @@ struct MonitorView: View {
                               value: s.packageC.map { String(localized: "GPU \($0) °C") } ?? "–",
                               detail: s.vramC.map { String(localized: "memory \($0) °C") } ?? "",
                               points: model.tempHistory, color: .orange, top: max(100, model.tempHistory.map(\.v).max() ?? 0))
+                    if s.cardW != nil || !model.powerHistory.isEmpty {
+                        MetricRow(title: "Power", symbol: "bolt",
+                                  value: s.cardW.map { String(format: "%.1f W ", $0) + String(localized: "card") } ?? "–",
+                                  detail: [s.packageW.map { String(localized: "GPU package") + String(format: " %.1f W", $0) },
+                                           s.cardLimitW.map { String(localized: "limit") + String(format: " %.0f W", $0) }]
+                                      .compactMap { $0 }.joined(separator: " · "),
+                                  points: model.powerHistory, color: .pink,
+                                  top: max(60, (model.powerHistory.map(\.v).max() ?? 0) * 1.2))
+                    }
                 }
                 LabeledContent("Video memory in use") { Text(s.vramUsedMB.map { String(format: "%.1f GB", Double($0) / 1024) } ?? "–") }
             }

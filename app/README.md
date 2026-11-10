@@ -19,7 +19,7 @@ choose from.
 | Page | What |
 |---|---|
 | Overview | a status header with the one action that matters now, the setup steps, this Mac's requirements (macOS, processor, card, SIP, AMFI boot-arg, `IntelXe.kext`, Metal device, boot guard); start-up warnings with fixes |
-| Monitor | five-minute charts of the GPU clock, temperatures and frames; the optional menu bar item |
+| Monitor | five-minute charts of the GPU clock, temperatures, the card's power (with the package's and the power limit) and frames; the optional menu bar item |
 | Driver | choose a package (download the latest release, or a folder you unpacked); check, install, repair, undo, uninstall; *Safari and WebKit*: the system-volume copy of the Metal driver (`ssv-install.sh`) |
 | EFI (OpenCore) | the EFI OpenCore booted from: mount it; `IntelXe.kext` and `SSDT-ARCOFF.aml` with their `config.plist` entries, and `HybridPM.kext` where the CPU needs it (stage 4); SIP, boot-args and quirks (stage 2, separate); `SecureBootModel` for Safari; undo the last change |
 | OpenGL (Zink) | the same for the optional Zink package; on or off for every LWJGL application |

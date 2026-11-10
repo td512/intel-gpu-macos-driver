@@ -280,6 +280,10 @@
 "Temperature" = "Sıcaklık";
 "GPU %lld °C" = "GPU %lld °C";
 "memory %lld °C" = "bellek %lld °C";
+"Power" = "Güç";
+"card" = "kart";
+"GPU package" = "GPU paketi";
+"limit" = "sınır";
 "Video memory in use" = "Kullanılan video belleği";
 "pixels" = "piksel";
 

@@ -78,8 +78,10 @@ func renderSnapshots(into folder: String) {
         monitor.clockHistory.append(MonitorPoint(t: t, v: busy ? 2650 + 150 * wave : (i % 40 < 6 ? 1900 : 0)))
         monitor.tempHistory.append(MonitorPoint(t: t, v: busy ? 58 + Double(i - 150) / 15 + 1.5 * wave : 44 + 0.8 * wave))
         monitor.fpsHistory.append(MonitorPoint(t: t, v: busy ? 160 + 18 * wave : (i % 40 < 6 ? 60 : 2)))
+        monitor.powerHistory.append(MonitorPoint(t: t, v: busy ? 148 + 14 * wave : 36 + 0.6 * wave))
     }
-    monitor.now = MonitorSample(fps: 171, actMHz: 2780, reqMHz: 2850, maxMHz: 2850, packageC: 67, vramC: 72, vramUsedMB: 3420, mode: "2560x1440, 180 Hz")
+    monitor.now = MonitorSample(fps: 171, actMHz: 2780, reqMHz: 2850, maxMHz: 2850, packageC: 67, vramC: 72, vramUsedMB: 3420,
+                                cardW: 156.4, packageW: 118.9, cardLimitW: 190, mode: "2560x1440, 180 Hz")
     // the Report page while a report runs: the bar at its fourth section
     let reporting = Manager()
     reporting.log = "== step 1/9: system\n== step 2/9: pci\n== step 3/9: display\n== step 4/9: driver\n"; reporting.busy = reportTitle
