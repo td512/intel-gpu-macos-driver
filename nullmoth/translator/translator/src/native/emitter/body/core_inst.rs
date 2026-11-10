@@ -1398,6 +1398,34 @@ impl Emitter {
             ));
         };
         if let LlValue::Local(src_name) = &src.value {
+            // an entry buffer parameter's own address, for the render_command lowering's index pointers
+            if crate::native::render_command::is_address_name(&name)
+                && !self.pointer_payload_words.contains_key(src_name)
+                && self.direct_param_indices.contains_key(src_name)
+            {
+                let payload = self.emit_direct_buffer_address_payload(src_name, instructions)?;
+                self.pointer_payload_words.insert(src_name.clone(), payload);
+            }
+            // a BDA pointer (loaded from memory): its device address plus its constant offset
+            if crate::native::render_command::is_address_name(&name)
+                && dst_ty == LlType::Int(64)
+                && !self.pointer_payload_words.contains_key(src_name)
+            {
+                if let Some(raw) = self.raw_offsets.get(src_name).cloned() {
+                    if let (Some(base), true) = (raw.device_addr_base, raw.dyn_terms.is_empty() && !raw.unmodelable) {
+                        let result_type = self.type_id(&dst_ty)?;
+                        let result = self.result_id(&name, &dst_ty)?;
+                        let off = self.const_signed_int(64, raw.const_off)?;
+                        instructions.push(Self::inst(
+                            Op::IAdd,
+                            Some(result_type),
+                            Some(result),
+                            vec![Operand::IdRef(base), Operand::IdRef(off)],
+                        ));
+                        return Ok(());
+                    }
+                }
+            }
             if let Some((low, high)) = self.pointer_payload_words.get(src_name).copied() {
                 let LlType::Int(bits) = dst_ty else {
                     unreachable!()

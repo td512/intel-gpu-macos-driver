@@ -1349,6 +1349,17 @@ impl Emitter {
                             self.bda_address_loads.insert(result.clone());
                         }
                     }
+                    // the render_command lowering (native/render_command.rs) takes the device address of an index
+                    // pointer through `%nvicbN.*` ptrtoints: its source must carry its address payload
+                    if inst.opcode == TirOpcode::PtrToInt
+                        && inst.result.as_deref().is_some_and(crate::native::render_command::is_address_name)
+                    {
+                        if let Some(crate::native::tir::TirOperand::Value { name, ty: LlType::Ptr(_) }) =
+                            inst.operands.first()
+                        {
+                            self.pointer_payload_values.insert(name.clone());
+                        }
+                    }
                     if matches!(inst.cmp_predicate().as_deref(), Some("eq" | "ne")) {
                         if let [crate::native::tir::TirOperand::Value {
                             name: lhs_name,

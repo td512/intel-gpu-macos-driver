@@ -1056,19 +1056,19 @@ target triple = "spirv-unknown-vulkan1.2"
 define void @main() {
 entry:
   tail call void @air.set_object_buffer_render_command.p1i8(ptr addrspace(1) null, i32 0, ptr addrspace(1) null, i32 2)
-  tail call void @air.draw_primitives_render_command(ptr addrspace(1) null, i32 0, i32 1, i32 2, i32 3, i32 4, i32 5)
+  tail call void @air.set_pipeline_state_render_command(ptr addrspace(1) null, i32 0, ptr addrspace(1) null)
   ret void
 }
 
 declare void @air.set_object_buffer_render_command.p1i8(ptr addrspace(1), i32, ptr addrspace(1), i32)
-declare void @air.draw_primitives_render_command(ptr addrspace(1), i32, i32, i32, i32, i32, i32)
+declare void @air.set_pipeline_state_render_command(ptr addrspace(1), i32, ptr addrspace(1))
 "#;
     let module = load_bytes(emit_vulkan_spirv(ll).expect("native emit")).expect("load native spv");
     let error = passes::transform(module, Stage::Kernel, None, None, None, Some("main"))
-        .expect_err("an indirect-command-buffer encoder has no Vulkan lowering");
+        .expect_err("an indirect-command-buffer state write has no Vulkan lowering");
     assert!(
         error.contains("air.set_object_buffer_render_command")
-            || error.contains("air.draw_primitives_render_command"),
+            || error.contains("air.set_pipeline_state_render_command"),
         "the refusal must name the family it could not lower: {error}"
     );
     assert!(
@@ -1077,12 +1077,45 @@ declare void @air.draw_primitives_render_command(ptr addrspace(1), i32, i32, i32
     );
 }
 
+/// GPU-encoded ICBs: the render_command draws (WebKit's index-validation shaders vsICB / vsUshortICB, and a kernel that
+/// encodes draw, indexed draws of both index types and a reset) translate to stores into the plugin's slot records
+/// (render_command.rs) and validate. Before, each was refused as an unrecognised AIR family.
+fn icb_fixture_translates(name: &str, ll: &str, stage: Stage, stores: usize) {
+    let tmp = std::env::temp_dir().join(format!("metal2vulkan_icb_{name}_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let spv = crate::translate_sanitized_native(ll, stage, &tmp).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+    let asm = disassemble(&spv).unwrap_or_else(|e| panic!("{name}: disassemble: {e:?}"));
+    assert!(!asm.contains("render_command"), "{name}: {asm}");
+    assert!(asm.contains("PhysicalStorageBuffer"), "{name}: the record is reached by its device address: {asm}");
+    assert_eq!(asm.matches("OpStore").count(), stores, "{name}: {asm}");
+    if std::process::Command::new("spirv-val").arg("--version").output().is_ok() {
+        tools::spirv_val_bytes(&spv, &tmp).unwrap_or_else(|e| panic!("{name}: spirv-val: {e:?}"));
+    }
+}
+
+#[test]
+fn webkit_vsicb_encodes_its_empty_draw_into_the_icb_record() {
+    // the out-of-bounds flag, then kind, primitive, five indexed words and the two zeroed plain-draw counts
+    icb_fixture_translates("vsICB", include_str!("fixtures/icb/vsICB.ll"), Stage::Vertex, 10);
+    icb_fixture_translates("vsUshortICB", include_str!("fixtures/icb/vsUshortICB.ll"), Stage::Vertex, 10);
+}
+
+#[test]
+fn a_kernel_encodes_draws_and_a_reset_into_the_icb_records() {
+    // draw (8 words), two indexed draws (9 each), reset (5)
+    icb_fixture_translates("encode", include_str!("fixtures/icb/icb_encode_kernel.ll"), Stage::Kernel, 31);
+}
+
 #[test]
 fn a_command_encoder_family_is_recognised_rather_than_unknown() {
     use crate::air_intrinsics::{air_intrinsic_disposition, AirIntrinsicDisposition};
     for name in [
         "air.set_object_buffer_render_command.p1i8",
         "air.draw_primitives_render_command",
+        "air.draw_indexed_primitives_render_command.p1i16",
+        "air.draw_indexed_primitives_render_command.p1i32",
+        "air.reset_render_command",
+        "air.set_pipeline_state_render_command",
         "air.set_kernel_buffer_compute_command.p2i8",
         "air.set_threadgroup_memory_length_compute_command",
     ] {

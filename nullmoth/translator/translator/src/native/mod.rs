@@ -27,6 +27,7 @@ pub(crate) mod ray_intersection;
 mod reloop_nest;
 mod relooper;
 mod render;
+mod render_command;
 mod rewrites;
 mod vec_scalar_merge;
 mod atomic_image_format;
@@ -80,6 +81,10 @@ fn lower_air_text_uncached(san_ll: &str) -> std::borrow::Cow<'_, str> {
 }
 
 fn lower_air_text_rest(san_ll: &str) -> std::borrow::Cow<'_, str> {
+    // GPU-encoded indirect command buffers: render_command writes become stores into the plugin's slot records
+    if let std::borrow::Cow::Owned(lowered) = render_command::lower_render_commands(san_ll) {
+        return std::borrow::Cow::Owned(lower_air_text_owned(lowered));
+    }
     let native = air_native_math_as_fast(san_ll);
     if let std::borrow::Cow::Owned(rewritten) = native {
         // (lower_air_text_owned's inline-sampler step finds the metadata form here and leaves the text as it is)
@@ -142,6 +147,7 @@ fn lower_air_text_rest(san_ll: &str) -> std::borrow::Cow<'_, str> {
 
 pub(crate) fn lower_air_text_owned(san_ll: String) -> String {
     let san_ll = crate::rt_runtime::rewrite_text(&san_ll).unwrap_or(san_ll);
+    let san_ll = render_command::lower_render_commands_owned(san_ll);
     let san_ll = match inline_sampler::lower_inline_sampler_constants(&san_ll) {
         std::borrow::Cow::Borrowed(_) => san_ll,
         std::borrow::Cow::Owned(lowered) => lowered,

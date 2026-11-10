@@ -161,7 +161,7 @@ fi
 
 if want tests || [ "$WHAT" = all ]; then
   echo "== tests"
-  for t in mtl_smoke xlate_check mtl_cube_read mtl_props mtl_f32filter mtl_timestamps; do
+  for t in mtl_smoke xlate_check mtl_cube_read mtl_props mtl_f32filter mtl_timestamps mtl_gpu_icb; do
     xcrun --sdk "$SDK" clang -isysroot "$SDK" -arch x86_64 -mmacosx-version-min=15.0 -fobjc-arc -O1 -g -Wall \
       -Werror=unguarded-availability-new -o "$OUT/$t" "$REPO/user/tests/metal/$t.m" -framework Foundation -framework Metal -framework IOKit
   done
