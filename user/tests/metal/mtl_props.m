@@ -10,10 +10,14 @@ int main(void) { @autoreleasepool {
     printf("name %s | class %s\n", d.name.UTF8String, NSStringFromClass([d class]).UTF8String);
     printf("registryID 0x%llx location %ld locationNumber %lu maxTransferRate %llu\n", d.registryID, (long)d.location, (unsigned long)d.locationNumber, d.maxTransferRate);
     printf("peerGroupID %llu peerIndex %u peerCount %u lowPower %d headless %d removable %d unified %d\n", d.peerGroupID, d.peerIndex, d.peerCount, d.lowPower, d.headless, d.removable, d.hasUnifiedMemory);
-    printf("32BitFloatFiltering %d 32BitMSAA %d QueryTextureLOD %d PullModel %d PlacementSparse %d\n", d.supports32BitFloatFiltering, d.supports32BitMSAA, d.supportsQueryTextureLOD, d.supportsPullModelInterpolation, d.supportsPlacementSparse);
+    printf("32BitFloatFiltering %d 32BitMSAA %d QueryTextureLOD %d PullModel %d", d.supports32BitFloatFiltering, d.supports32BitMSAA, d.supportsQueryTextureLOD, d.supportsPullModelInterpolation);
+    if (@available(macOS 26.4, *)) printf(" PlacementSparse %d", d.supportsPlacementSparse);
+    printf("\n");
     printf("maxArgumentBufferSamplerCount %lu maxConcurrentCompilationTaskCount %lu sparseTileSize %lu recommendedMaxWorkingSet %llu\n", (unsigned long)d.maxArgumentBufferSamplerCount, (unsigned long)d.maximumConcurrentCompilationTaskCount, (unsigned long)d.sparseTileSizeInBytes, d.recommendedMaxWorkingSetSize);
-    id<MTLBuffer> b = [d newBufferWithLength:4096 options:0]; printf("buffer sparseBufferTier %ld\n", (long)b.sparseBufferTier);
+    id<MTLBuffer> b = [d newBufferWithLength:4096 options:0];
+    if (@available(macOS 26.0, *)) printf("buffer sparseBufferTier %ld\n", (long)b.sparseBufferTier);
     MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:16 height:16 mipmapped:NO];
-    id<MTLTexture> t = [d newTextureWithDescriptor:td]; printf("texture sparseTextureTier %ld\n", (long)t.sparseTextureTier);
+    id<MTLTexture> t = [d newTextureWithDescriptor:td];
+    if (@available(macOS 26.0, *)) printf("texture sparseTextureTier %ld\n", (long)t.sparseTextureTier);
     return 0;
 } }
