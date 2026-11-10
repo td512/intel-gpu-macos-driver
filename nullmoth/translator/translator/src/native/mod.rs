@@ -38,6 +38,7 @@ mod wg_atomic;
 
 mod tir;
 mod cl_constant;
+mod texture_handle_loads;
 
 use crate::spirv_module::Instruction;
 use crate::spirv_module::Module;
@@ -121,11 +122,20 @@ fn lower_air_text_rest(san_ll: &str) -> std::borrow::Cow<'_, str> {
             std::borrow::Cow::Owned(ptr_phi_load::sink_pointer_phi_loads_owned(owned))
         }
     } };
-    match lowered {
+    let lowered = match lowered {
         std::borrow::Cow::Borrowed(borrowed) => inline::forward_builder_pointer_fields(borrowed),
         std::borrow::Cow::Owned(owned) => match inline::forward_builder_pointer_fields(&owned) {
             std::borrow::Cow::Borrowed(_) => std::borrow::Cow::Owned(owned),
             std::borrow::Cow::Owned(forwarded) => std::borrow::Cow::Owned(forwarded),
+        },
+    };
+    // a texture or sampler loaded as its 64-bit resource ID (WebKit's WGSL) is loaded as the handle Metal's own
+    // compiler loads, the form reflection and the emitter know
+    match lowered {
+        std::borrow::Cow::Borrowed(borrowed) => texture_handle_loads::fold_texture_handle_loads(borrowed),
+        std::borrow::Cow::Owned(owned) => match texture_handle_loads::fold_texture_handle_loads(&owned) {
+            std::borrow::Cow::Borrowed(_) => std::borrow::Cow::Owned(owned),
+            std::borrow::Cow::Owned(folded) => std::borrow::Cow::Owned(folded),
         },
     }
 }
@@ -148,9 +158,13 @@ pub(crate) fn lower_air_text_owned(san_ll: String) -> String {
             },
         )),
     )));
-    match inline::forward_builder_pointer_fields(&lowered) {
+    let lowered = match inline::forward_builder_pointer_fields(&lowered) {
         std::borrow::Cow::Borrowed(_) => lowered,
         std::borrow::Cow::Owned(forwarded) => forwarded,
+    };
+    match texture_handle_loads::fold_texture_handle_loads(&lowered) {
+        std::borrow::Cow::Borrowed(_) => lowered,
+        std::borrow::Cow::Owned(folded) => folded,
     }
 }
 pub use diagnostics::{
