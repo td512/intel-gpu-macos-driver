@@ -67,6 +67,15 @@ struct EFIView: View {
             }
         }
         .formStyle(.grouped)
+        // changes made outside the app (another tool, an editor): look when the page shows, when the app comes back to
+        // the front, and every few seconds while the page is open
+        .task { await manager.refreshEFIIfChanged() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await manager.refreshEFIIfChanged() }
+        }
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+            if page.confirming == nil { Task { await manager.refreshEFIIfChanged() } }
+        }
         .sheet(item: $page.confirming) { action in
             EFIConfirmSheet(action: action, plan: manager.efiPlans[action], disk: efi["efi_description"]) { manager.performEFI(action) }
         }

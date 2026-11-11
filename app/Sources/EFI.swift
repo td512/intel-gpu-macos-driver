@@ -79,6 +79,31 @@ struct EFIStatus {
     var showsHybridPM: Bool { self["hybridpm_needed"] == "yes" || ["same", "different"].contains(self["hybridpm_file"]) }
 }
 
+/// A cheap fingerprint of what efi.sh reads in an EFI (EFI/OC/config.plist, ACPI, Kexts with their contents, Drivers):
+/// paths, sizes and modification times, no file contents. The EFI page compares it to notice changes made outside the
+/// app (another tool, a text editor, a second copy of the app) and reads the EFI again. nil when it cannot be read.
+func efiFingerprint(root: String) -> String? {
+    guard !root.isEmpty else { return nil }
+    let oc = URL(fileURLWithPath: root).appendingPathComponent("EFI/OC")
+    let fm = FileManager.default
+    func stamp(_ url: URL) -> String? {
+        guard let a = try? fm.attributesOfItem(atPath: url.path) else { return nil }
+        let size = (a[.size] as? NSNumber)?.int64Value ?? -1
+        let time = (a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(url.path.dropFirst(oc.path.count))=\(size)@\(time)"
+    }
+    guard let config = stamp(oc.appendingPathComponent("config.plist")) else { return nil }
+    var parts = [config]
+    for sub in ["ACPI", "Kexts", "Drivers"] {
+        let dir = oc.appendingPathComponent(sub)
+        guard let walk = fm.enumerator(at: dir, includingPropertiesForKeys: nil) else { continue }
+        var entries: [String] = []
+        for case let url as URL in walk { if let s = stamp(url) { entries.append(s) } }
+        parts += entries.sorted()
+    }
+    return parts.joined(separator: "\n")
+}
+
 /// A plan as efi.sh prints it. Its hash goes back to efi.sh with the command.
 struct EFIPlan: Hashable {
     let text: String

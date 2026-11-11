@@ -44,6 +44,7 @@ final class Manager: ObservableObject {
     @Published var efi = EFIStatus()
     @Published var efiTarget = EFITarget.recorded
     @Published var efiPlans: [EFIAction: EFIPlan] = [:]
+    private var efiStamp: String?   // efiFingerprint when efi and efiPlans were read
     @Published var hidpi = HiDPIStatus()
     /// the system-volume copy of the Metal driver (SystemVolume.swift)
     @Published var ssv = SSVStatus()
@@ -89,7 +90,7 @@ final class Manager: ObservableObject {
         guard let package, let script = efiScript(for: package) else { efi = EFIStatus(); efiPlans = [:]; return }
         let choice = efiChoice
         let test = ProcessInfo.processInfo.environment["INTELXE_MANAGER_TEST_EFI"] ?? efiFolder
-        let (status, target, plans) = await Task.detached { () -> (EFIStatus, EFITarget, [EFIAction: EFIPlan]) in
+        let (status, target, plans, stamp) = await Task.detached { () -> (EFIStatus, EFITarget, [EFIAction: EFIPlan], String?) in
             var target = test.map { EFITarget.folder($0) } ?? .recorded
             var status = efiStatus(script: script, package: package, target: target)
             if !status.found, let choice, status.candidates.contains(where: { $0.uuid == choice }) {
@@ -104,11 +105,21 @@ final class Manager: ObservableObject {
                     }
                 }
             }
-            return (status, target, plans)
+            return (status, target, plans, efiFingerprint(root: status["efi_mount_point"]))
         }.value
         efi = status
         efiTarget = target
         efiPlans = plans
+        efiStamp = stamp
+    }
+
+    /// Reads the EFI again when its files changed since the last read (a change made outside the app), so that the EFI
+    /// page and its plans are not stale. efi.sh refuses a plan whose EFI changed anyway; this keeps what is shown right.
+    func refreshEFIIfChanged() async {
+        guard busy == nil, efi.known, let before = efiStamp else { return }
+        let root = efi["efi_mount_point"]
+        let now = await Task.detached { efiFingerprint(root: root) }.value
+        if now != before { await refreshEFI() }
     }
 
     func chooseEFIPartition(_ uuid: String) {

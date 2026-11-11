@@ -236,8 +236,9 @@ translations deep. ANV is already on the machine (Zink uses it directly). The id
   extras on its last page, an EFI chooser when OpenCore recorded no boot path); the system-volume copy for Safari (and
   OpenCore's `SecureBootModel`); SSDT-ARCOFF adapted to the card's ACPI path and HybridPM at stage 4; diagnostics for a
   bug report (Report page); GPU tests; a check at login.
-- Next: release signatures that are independent of GitHub; a check that the EFI page's state is current after changes
-  made outside the app.
+- The EFI page reads the EFI again when its files change outside the app (a fingerprint of config.plist, ACPI, Kexts and
+  Drivers: when the page shows, when the app comes to the front, every 5 s while it is open).
+- Next: release signatures that are independent of GitHub.
 
 ## Other Xe2 (Battlemage) cards
 
