@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Help and FAQ · intel-gpu-macos-driver</title>
+<meta name="description" content="Fix it: symptoms and their fixes for the Intel Arc driver for macOS, how to send a report, and the questions people ask.">
+<meta name="theme-color" content="#05070b">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232fe2ff'/%3E%3Cstop offset='1' stop-color='%237a6bff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='6' y='6' width='20' height='20' rx='5' fill='url(%23g)'/%3E%3Cpath d='M11 2v4M16 2v4M21 2v4M11 26v4M16 26v4M21 26v4M2 11h4M2 16h4M2 21h4M26 11h4M26 16h4M26 21h4' stroke='%232fe2ff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/PlusJakartaSans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<nav class="nav" aria-label="Main">
+  <a class="brand" href="index.html">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2fe2ff"/><stop offset="1" stop-color="#7a6bff"/></linearGradient></defs><rect x="6" y="6" width="20" height="20" rx="5" fill="url(#bm)"/><rect x="11" y="11" width="10" height="10" rx="2" fill="#05070b" opacity=".55"/><path d="M11 2v4M16 2v4M21 2v4M11 26v4M16 26v4M21 26v4M2 11h4M2 16h4M2 21h4M26 11h4M26 16h4M26 21h4" stroke="#2fe2ff" stroke-width="2" stroke-linecap="round"/></svg>
+    <span>IntelXe <small>for macOS</small></span>
+  </a>
+  <div class="nav-links">
+    <a href="index.html"><span lang="en">Home</span><span lang="tr">Ana sayfa</span></a>
+    <a href="#start"><span lang="en">Start here</span><span lang="tr">Buradan başlayın</span></a>
+    <a href="#fix"><span lang="en">Fix it</span><span lang="tr">Sorun giderme</span></a>
+    <a href="#report"><span lang="en">Send a report</span><span lang="tr">Rapor gönderin</span></a>
+    <a href="#faq">FAQ</a>
+    <a href="https://github.com/yusufklncc/intel-gpu-macos-driver">GitHub</a>
+  </div>
+  <div class="nav-right">
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="tr" aria-pressed="false">TR</button>
+    </div>
+    <a class="btn btn-primary btn-small" href="index.html#download"><span lang="en">Download</span><span lang="tr">İndir</span></a>
+    <details class="menu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary>
+      <nav>
+        <a href="index.html"><span lang="en">Home</span><span lang="tr">Ana sayfa</span></a>
+        <a href="#start"><span lang="en">Start here</span><span lang="tr">Buradan başlayın</span></a>
+        <a href="#fix"><span lang="en">Fix it</span><span lang="tr">Sorun giderme</span></a>
+        <a href="#report"><span lang="en">Send a report</span><span lang="tr">Rapor gönderin</span></a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/yusufklncc/intel-gpu-macos-driver">GitHub</a>
+      </nav>
+    </details>
+  </div>
+</nav>
+
+<main id="top">
+
+<section class="hero" style="padding-bottom:40px">
+  <div class="wrap">
+    <span class="eyebrow"><span lang="en">Help</span><span lang="tr">Yardım</span></span>
+    <h1><span lang="en">Fix it.</span><span lang="tr">Çözelim.</span></h1>
+    <p class="lede"><span lang="en">Each entry starts with what you see: a message, a screen, a behaviour. Find yours, follow the fix. If nothing matches, a report tells us the rest.</span><span lang="tr">Her madde gördüğünüz şeyle başlıyor: bir mesaj, bir ekran, bir davranış. Kendinizinkini bulun, çözümü uygulayın. Hiçbiri uymuyorsa gerisini bir rapor anlatır.</span></p>
+  </div>
+</section>
+
+<!-- start here -->
+<section id="start" style="padding-top:20px">
+  <div class="wrap">
+    <div class="steps reveal">
+      <div class="step"><h3><span lang="en">Use the latest release</span><span lang="tr">Son sürümü kullanın</span></h3>
+        <p><span lang="en">IntelXe Manager's Driver page offers it. Many problems are already fixed there, and its EFI page updates IntelXe.kext too.</span><span lang="tr">IntelXe Manager'ın Sürücü sayfası onu sunuyor. Birçok sorun orada zaten düzeltilmiş; EFI sayfası IntelXe.kext'i de güncelliyor.</span></p></div>
+      <div class="step"><h3><span lang="en">Look at the app's Overview</span><span lang="tr">Uygulamanın Genel bakış sayfasına bakın</span></h3>
+        <p><span lang="en">At every start the app checks for the known problems below and shows a warning with its fix: a panic, the boot guard, an old system-volume copy, a half-done HiDPI switch, a stale kext, a hybrid CPU without HybridPM.</span><span lang="tr">Uygulama her açılışta aşağıdaki bilinen sorunlara bakıyor ve çözümüyle bir uyarı gösteriyor: bir panik, açılış koruması, eski bir sistem diski kopyası, yarım kalmış HiDPI anahtarı, eski bir kext, HybridPM'siz hibrit işlemci.</span></p></div>
+      <div class="step"><h3><span lang="en">Find your symptom, or send a report</span><span lang="tr">Belirtinizi bulun ya da rapor gönderin</span></h3>
+        <p><span lang="en">The entries below are grouped by stage. If none matches, make a diagnostics report and open an issue with its ID (<a href="#report">below</a>).</span><span lang="tr">Aşağıdaki maddeler aşamaya göre gruplu. Hiçbiri uymuyorsa bir tanı raporu oluşturup kimliğiyle bir issue açın (<a href="#report">aşağıda</a>).</span></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- fix it -->
+<section id="fix" style="padding-top:40px">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><span lang="en">Before the driver</span><span lang="tr">Sürücüden önce</span></span>
+      <h2><span lang="en">Installing macOS and <em>preparing OpenCore.</em></span><span lang="tr">macOS kurulumu ve <em>OpenCore hazırlığı.</em></span></h2>
+    </div>
+    <div class="issues">
+      <div class="issue reveal"><h3><span lang="en">The macOS installer shows no picture</span><span lang="tr">macOS kurulumu görüntü vermiyor</span></h3>
+        <p><span lang="en">IntelXe.kext or SSDT-ARCOFF.aml is already in the EFI. The table hides the card from the generic display driver the installer runs on. Take both out; they come last, after the driver is installed (stage 4).</span><span lang="tr">IntelXe.kext ya da SSDT-ARCOFF.aml zaten EFI'de. Tablo kartı, kurulumun çalıştığı genel ekran sürücüsünden gizliyor. İkisini de çıkarın; sürücü kurulduktan sonra en son eklenirler (4. aşama).</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">Panic about 20 seconds into the boot, <code>watchdogd ... exited</code></span><span lang="tr">Açılışın 20. saniyesinde panik, <code>watchdogd ... exited</code></span></h3>
+        <p><span lang="en"><code>UEFI &gt; Output &gt; ReconnectGraphicsOnConnect</code> is <code>true</code>. Set it to <code>false</code>: with true, OpenCore's RELEASE build boots macOS without a console framebuffer. The app's EFI page and the Windows tool set it.</span><span lang="tr"><code>UEFI &gt; Output &gt; ReconnectGraphicsOnConnect</code> <code>true</code>. <code>false</code> yapın: true iken OpenCore'un RELEASE derlemesi macOS'u konsol framebuffer'ı olmadan açıyor. Uygulamanın EFI sayfası ve Windows aracı bunu ayarlıyor.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">The driver refuses: SIP or AMFI not relaxed</span><span lang="tr">Sürücü reddediyor: SIP ya da AMFI gevşetilmemiş</span></h3>
+        <p><span lang="en">Stage 2 is not in effect: <code>csr-active-config</code> and <code>amfi_get_out_of_my_way=0x1</code> must be set, and both must be in <code>NVRAM &gt; Delete</code> so that the new values replace the old ones. Restart after changing them. <code>./install.sh</code> alone checks this and changes nothing.</span><span lang="tr">2. aşama devrede değil: <code>csr-active-config</code> ve <code>amfi_get_out_of_my_way=0x1</code> ayarlı olmalı, ikisi de <code>NVRAM &gt; Delete</code> içinde olmalı ki yeni değerler eskilerin yerine geçsin. Değiştirdikten sonra yeniden başlatın. Yalnızca <code>./install.sh</code> bunu denetler, hiçbir şeyi değiştirmez.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">The EFI page finds no EFI</span><span lang="tr">EFI sayfası EFI bulamıyor</span></h3>
+        <p><span lang="en">OpenCore did not record which EFI it booted from. The app then lists the EFI partitions to choose from, or takes a folder you pick (a USB stick's). After the driver step it also sets <code>ExposeSensitiveData</code> so that the next boots record it.</span><span lang="tr">OpenCore hangi EFI'den açıldığını kaydetmemiş. Uygulama o zaman seçmeniz için EFI bölümlerini listeliyor ya da seçtiğiniz bir klasörü (bir USB belleğinkini) kullanıyor. Sürücü adımından sonra <code>ExposeSensitiveData</code>'yı da ayarlıyor, böylece sonraki açılışlar bunu kaydediyor.</span></p></div>
+    </div>
+
+    <div class="section-head reveal" style="margin-top:80px">
+      <span class="eyebrow"><span lang="en">The first boots</span><span lang="tr">İlk açılışlar</span></span>
+      <h2><span lang="en">After the EFI step <em>and the restart.</em></span><span lang="tr">EFI adımı <em>ve yeniden başlatma sonrası.</em></span></h2>
+    </div>
+    <div class="issues">
+      <div class="issue reveal"><h3><span lang="en">A black screen or a reboot loop</span><span lang="tr">Siyah ekran ya da sürekli yeniden başlama</span></h3>
+        <p><span lang="en">Boot from the USB stick with your working EFI, or select the OpenCore entry and hold Shift for safe mode (it skips the driver's kernel collection). Then undo: the app's Driver page or <code>sudo ./install.sh --undo</code>, and take IntelXe.kext and SSDT-ARCOFF.aml out of the EFI. Send a report.</span><span lang="tr">Çalışan EFI'nizin olduğu USB bellekten açın ya da OpenCore girişini seçip güvenli mod için Shift'e basılı tutun (sürücünün çekirdek koleksiyonunu atlıyor). Sonra geri alın: uygulamanın Sürücü sayfası ya da <code>sudo ./install.sh --undo</code>; IntelXe.kext ve SSDT-ARCOFF.aml'i EFI'den çıkarın. Bir rapor gönderin.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">It stays on the Apple logo after a few failed boots</span><span lang="tr">Birkaç başarısız açılıştan sonra Apple logosunda kalıyor</span></h3>
+        <p><span lang="en">The boot guard: after two boots that ended in their first minute it uses the safest settings, after four it holds acceleration off, and on macOS 26 the screen then stays on the logo. Restart and choose <b>Reset NVRAM</b> in the OpenCore picker (Space shows it), or over SSH run <code>sudo nvram intelxe-accel-off=ok</code> and restart.</span><span lang="tr">Açılış koruması: ilk dakikasında biten iki açılıştan sonra en güvenli ayarları kullanıyor, dördüncüden sonra hızlandırmayı kapalı tutuyor; macOS 26'da ekran o zaman logoda kalıyor. Yeniden başlatıp OpenCore seçicisinde <b>Reset NVRAM</b>'ı seçin (Space ile görünür) ya da SSH ile <code>sudo nvram intelxe-accel-off=ok</code> çalıştırıp yeniden başlatın.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">The desktop is not accelerated</span><span lang="tr">Masaüstü hızlandırılmamış</span></h3>
+        <p><span lang="en">No transparency, slow windows, About This Mac does not name the card. Check the app's EFI page: IntelXe.kext must be present and enabled, and SSDT-ARCOFF must name your card's ACPI path (the page adapts it). In Terminal, <code>kmutil showloaded | grep -i intelxe</code> should list IntelXe and IntelXeFB.</span><span lang="tr">Saydamlık yok, pencereler yavaş, Bu Mac Hakkında kartın adını göstermiyor. Uygulamanın EFI sayfasına bakın: IntelXe.kext yerinde ve açık olmalı, SSDT-ARCOFF kartınızın ACPI yolunu göstermeli (sayfa bunu uyarlıyor). Terminal'de <code>kmutil showloaded | grep -i intelxe</code> IntelXe ve IntelXeFB'yi listelemeli.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">"IntelXe.kext X is loaded, but Y is installed"</span><span lang="tr">"IntelXe.kext X yüklü, ama Y kurulu"</span></h3>
+        <p><span lang="en">The kernel still runs the previous build. Restart; if the warning stays, run <i>Install this package</i> again on the Driver page, and update IntelXe.kext on the EFI page.</span><span lang="tr">Çekirdek hâlâ önceki derlemeyi çalıştırıyor. Yeniden başlatın; uyarı kalırsa Sürücü sayfasında <i>Install this package</i>'ı yeniden çalıştırın ve EFI sayfasında IntelXe.kext'i güncelleyin.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">The first seconds after login stutter</span><span lang="tr">Girişten sonraki ilk saniyeler takılıyor</span></h3>
+        <p><span lang="en">Expected after an install: macOS compiles the desktop's shaders once and keeps them. Later logins are smoother. A light grey band on the login screen after a restart is a known, harmless issue.</span><span lang="tr">Kurulumdan sonra beklenen bir durum: macOS masaüstünün gölgelendiricilerini bir kez derleyip saklıyor. Sonraki girişler daha akıcı. Yeniden başlattıktan sonra giriş ekranındaki açık gri şerit bilinen ve zararsız bir sorun.</span></p></div>
+    </div>
+
+    <div class="section-head reveal" style="margin-top:80px">
+      <span class="eyebrow"><span lang="en">Day to day</span><span lang="tr">Günlük kullanım</span></span>
+      <h2><span lang="en">When it runs, <em>but something is off.</em></span><span lang="tr">Çalışıyor, <em>ama bir şey ters.</em></span></h2>
+    </div>
+    <div class="issues">
+      <div class="issue reveal"><h3><span lang="en">"macOS restarted after a kernel panic"</span><span lang="tr">"macOS bir çekirdek paniğinden sonra yeniden başladı"</span></h3>
+        <p><span lang="en">The app found a recent panic report. Make a diagnostics report: it holds the panic's text. Then open an issue with the report ID.</span><span lang="tr">Uygulama yakın tarihli bir panik raporu buldu. Bir tanı raporu oluşturun: paniğin metni içinde. Sonra rapor kimliğiyle bir issue açın.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">Safari is slow again after a macOS update</span><span lang="tr">macOS güncellemesinden sonra Safari yine yavaş</span></h3>
+        <p><span lang="en">A macOS update replaces the system volume and with it the driver's system-volume copy that Safari's GPU process loads. The app's Driver page (<i>Safari and WebKit</i>) installs it again.</span><span lang="tr">macOS güncellemesi sistem diskini ve onunla birlikte Safari'nin GPU sürecinin yüklediği sistem diski kopyasını değiştiriyor. Uygulamanın Sürücü sayfası (<i>Safari and WebKit</i>) onu yeniden kuruyor.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">"The system-volume copy is older than the rest"</span><span lang="tr">"Sistem diski kopyası geri kalanından eski"</span></h3>
+        <p><span lang="en">WindowServer uses the copy on the system volume, and it is from an earlier release. Install the package's system-volume copy too (<code>system-volume/ssv-install.sh --apply</code>, or the Driver page) and restart.</span><span lang="tr">WindowServer sistem diskindeki kopyayı kullanıyor ve o daha eski bir sürümden. Paketin sistem diski kopyasını da kurun (<code>system-volume/ssv-install.sh --apply</code> ya da Sürücü sayfası) ve yeniden başlatın.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">Everything is slow on a 12th–14th gen CPU</span><span lang="tr">12.–14. nesil işlemcide her şey yavaş</span></h3>
+        <p><span lang="en">Without HybridPM.kext macOS can hold a hybrid CPU's cores at low clocks, which makes the GPU look slow too. Add HybridPM.kext below Lilu.kext in the EFI; the EFI page does it.</span><span lang="tr">HybridPM.kext olmadan macOS hibrit işlemcinin çekirdeklerini düşük saatte tutabiliyor, bu da GPU'yu da yavaş gösteriyor. HybridPM.kext'i EFI'de Lilu.kext'in altına ekleyin; EFI sayfası bunu yapıyor.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">Programs fail to start or slow down with many GPU apps open</span><span lang="tr">Çok sayıda GPU uygulaması açıkken programlar açılmıyor ya da yavaşlıyor</span></h3>
+        <p><span lang="en">The 1 GB window of video memory the CPU can reach is full. The app's Monitor page shows how full it is; quitting a few GPU-heavy programs frees it.</span><span lang="tr">CPU'nun erişebildiği 1 GB'lık video belleği penceresi dolu. Uygulamanın İzleme sayfası doluluğu gösteriyor; GPU'yu yoğun kullanan birkaç programı kapatmak yer açıyor.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">HiDPI modes are missing or the switch is half on</span><span lang="tr">HiDPI modları yok ya da anahtar yarım açık</span></h3>
+        <p><span lang="en">Turn HiDPI off and on again on the app's Display page, then restart.</span><span lang="tr">Uygulamanın Ekran sayfasında HiDPI'ı kapatıp yeniden açın, sonra yeniden başlatın.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">three.js pages stay black in Safari</span><span lang="tr">three.js sayfaları Safari'de siyah kalıyor</span></h3>
+        <p><span lang="en">Pages that show three.js's FPS panel (the Inspector, r187) turn GPU timestamps on although WebKit does not offer them on Intel GPUs, and then draw nothing. A three.js issue: pages without the panel draw.</span><span lang="tr">three.js'in FPS panelini (Inspector, r187) gösteren sayfalar, WebKit Intel GPU'larda sunmadığı hâlde GPU zaman damgalarını açıyor ve sonra hiçbir şey çizmiyor. Bu three.js'in sorunu: paneli olmayan sayfalar çiziyor.</span></p></div>
+      <div class="issue reveal"><h3><span lang="en">ffmpeg does not see the hardware encoders</span><span lang="tr">ffmpeg donanım kodlayıcılarını görmüyor</span></h3>
+        <p><span lang="en">Command-line tools whose first Metal use is a VideoToolbox encode miss them in their first session. Apps that bring Metal up first (OBS, QuickTime, HandBrake) see them.</span><span lang="tr">Metal'i ilk kez bir VideoToolbox kodlamasıyla kullanan komut satırı araçları ilk oturumlarında onları göremiyor. Metal'i önce açan uygulamalar (OBS, QuickTime, HandBrake) görüyor.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- report -->
+<section id="report">
+  <div class="wrap">
+    <div class="section-head center reveal">
+      <span class="eyebrow"><span lang="en">Send a report</span><span lang="tr">Rapor gönderin</span></span>
+      <h2><span lang="en">Problems are fixed <em>from logs.</em></span><span lang="tr">Sorunlar <em>loglardan</em> çözülüyor.</span></h2>
+    </div>
+    <div class="report">
+      <div class="card reveal">
+        <h3><span lang="en">Make the report</span><span lang="tr">Raporu oluşturun</span></h3>
+        <p><span lang="en">The easiest way: <b>IntelXe Manager › Report › Create a diagnostics report</b>. It puts one file on your Desktop, named after a report ID such as <code>XR-1A2B3C4D</code>, lists the warnings it found with their fixes, and <i>Report a bug</i> opens the issue form with the ID filled in. Without the app: <code>sh collect-macos.sh</code> from <code>tools/report</code>.</span><span lang="tr">En kolayı: <b>IntelXe Manager › Report › Create a diagnostics report</b>. Masaüstünüze <code>XR-1A2B3C4D</code> gibi bir rapor kimliğiyle adlandırılmış tek bir dosya koyuyor, bulduğu uyarıları çözümleriyle listeliyor ve <i>Report a bug</i> issue formunu kimlik dolu olarak açıyor. Uygulama olmadan: <code>tools/report</code> içinden <code>sh collect-macos.sh</code>.</span></p>
+        <p><span lang="en">For display and boot problems a second report from a Linux live USB on the same machine helps a lot: it records what Linux's own driver finds on your card.</span><span lang="tr">Ekran ve açılış sorunlarında aynı makinede bir Linux canlı USB'den alınan ikinci bir rapor çok yardımcı oluyor: Linux'un kendi sürücüsünün kartınızda bulduklarını kaydediyor.</span></p>
+        <div class="actions">
+          <a class="btn btn-primary btn-small" href="https://github.com/yusufklncc/intel-gpu-macos-driver/issues/new/choose"><span lang="en">Open an issue</span><span lang="tr">Issue aç</span></a>
+          <a class="btn btn-ghost btn-small" href="https://github.com/yusufklncc/intel-gpu-macos-driver/tree/main/tools/report"><span lang="en">The report scripts</span><span lang="tr">Rapor betikleri</span></a>
+        </div>
+      </div>
+      <div class="card reveal">
+        <h3><span lang="en">What it keeps private</span><span lang="tr">Neyi gizli tutuyor</span></h3>
+        <p><span lang="en">Nothing is uploaded: you attach the file yourself. The scripts only read. Before the file is written they remove serial numbers (machine, board, disks, the monitor's EDID), the hardware UUID, MLB and ROM, MAC addresses, your user and host names, the names of known Wi-Fi networks and the identity keys in the OpenCore config, then search the result again and stop if anything is left. Never collected: screen contents, documents, passwords, the Windows product key.</span><span lang="tr">Hiçbir şey yüklenmiyor: dosyayı siz ekliyorsunuz. Betikler yalnızca okuyor. Dosya yazılmadan önce seri numaralarını (makine, anakart, diskler, monitörün EDID'i), donanım UUID'sini, MLB ve ROM'u, MAC adreslerini, kullanıcı ve bilgisayar adlarınızı, bilinen Wi-Fi ağlarının adlarını ve OpenCore yapılandırmasındaki kimlik anahtarlarını çıkarıyor; sonucu bir kez daha tarıyor ve bir şey kalmışsa duruyor. Hiç toplanmayanlar: ekran içeriği, belgeler, parolalar, Windows ürün anahtarı.</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head center reveal">
+      <span class="eyebrow">FAQ</span>
+      <h2><span lang="en">Questions, <em>answered.</em></span><span lang="tr">Sorular, <em>yanıtlar.</em></span></h2>
+    </div>
+    <div class="faq">
+      <h3 class="faq-group reveal"><span lang="en">Will it work on my machine?</span><span lang="tr">Makinemde çalışır mı?</span></h3>
+      <details><summary><span lang="en">Which cards are supported?</span><span lang="tr">Hangi kartlar destekleniyor?</span></summary>
+        <p><span lang="en">The Arc B580, tested, and the Arc B570, the same chip: supported from 0.1.4 but not tested by us. Reports from B570 owners are welcome.</span><span lang="tr">Test edilen Arc B580 ve aynı çipi kullanan Arc B570: 0.1.4'ten beri destekleniyor ama bizim tarafımızda test edilmedi. B570 sahiplerinin raporlarını bekliyoruz.</span></p></details>
+      <details><summary><span lang="en">My card is an Arc A-series, another B-series, or integrated graphics. Will it work?</span><span lang="tr">Kartım Arc A serisi, başka bir B serisi ya da dahili grafik. Çalışır mı?</span></summary>
+        <p><span lang="en">Not yet. The kernel driver already describes the other families the way Linux's xe does and refuses them at start; what each still needs is listed in the repository. You can help bring yours up: see <a href="index.html#more-cards">Help us support more cards</a>.</span><span lang="tr">Henüz değil. Çekirdek sürücü diğer aileleri Linux'un xe'si gibi tanımlıyor ve açılışta reddediyor; her birinin neye ihtiyacı olduğu depoda listeli. Kendi kartınızın getirilmesine yardım edebilirsiniz: <a href="index.html#more-cards">Daha fazla karta destek</a>.</span></p></details>
+      <details><summary><span lang="en">Does it work with an AMD processor?</span><span lang="tr">AMD işlemciyle çalışır mı?</span></summary>
+        <p><span lang="en">It was only ever run on an Intel CPU. macOS on AMD CPUs needs its own kernel patches; we have not tried the driver there.</span><span lang="tr">Yalnızca Intel işlemcide çalıştırıldı. AMD işlemcide macOS kendi çekirdek yamalarını istiyor; sürücüyü orada denemedik.</span></p></details>
+      <details><summary><span lang="en">Does it work on a laptop?</span><span lang="tr">Dizüstünde çalışır mı?</span></summary>
+        <p><span lang="en">Laptops with an Arc B-series GPU are not covered: the driver supports the desktop B580 and B570 with one DisplayPort monitor on the card.</span><span lang="tr">Arc B serisi GPU'lu dizüstüler kapsamda değil: sürücü, kartın DisplayPort'unda tek monitörle masaüstü B580 ve B570'i destekliyor.</span></p></details>
+      <details><summary><span lang="en">Can I use two monitors, or HDMI?</span><span lang="tr">İki monitör ya da HDMI kullanabilir miyim?</span></summary>
+        <p><span lang="en">One monitor on the card's DisplayPort for now. A second display pipe is on the roadmap.</span><span lang="tr">Şimdilik kartın DisplayPort'unda tek monitör. İkinci ekran yolu yol haritasında.</span></p></details>
+      <details><summary><span lang="en">Does it work on Apple silicon Macs or on macOS 15?</span><span lang="tr">Apple silicon Mac'lerde ya da macOS 15'te çalışır mı?</span></summary>
+        <p><span lang="en">Apple silicon Macs cannot take a PCIe GPU. macOS 15 Sequoia gets a package built from the same sources, but it has not been re-tested since the move to Tahoe.</span><span lang="tr">Apple silicon Mac'lere PCIe GPU takılamıyor. macOS 15 Sequoia için aynı kaynaktan derlenmiş bir paket var, ama Tahoe'ya geçildiğinden beri yeniden test edilmedi.</span></p></details>
+
+      <h3 class="faq-group reveal"><span lang="en">Before you install</span><span lang="tr">Kurmadan önce</span></h3>
+      <details><summary><span lang="en">Why does it need relaxed SIP and AMFI?</span><span lang="tr">Neden gevşetilmiş SIP ve AMFI gerekiyor?</span></summary>
+        <p><span lang="en">The kexts and the Metal driver are not signed by Apple. Relaxed SIP lets unsigned kexts load from the Auxiliary Kernel Collection; without the AMFI boot-arg WindowServer refuses the Metal driver.</span><span lang="tr">Kext'ler ve Metal sürücüsü Apple tarafından imzalı değil. Gevşetilmiş SIP imzasız kext'lerin yardımcı çekirdek koleksiyonundan yüklenmesine izin veriyor; AMFI boot-arg'ı olmadan WindowServer Metal sürücüsünü reddediyor.</span></p></details>
+      <details><summary><span lang="en">Can it damage my PC or my card?</span><span lang="tr">PC'me ya da kartıma zarar verebilir mi?</span></summary>
+        <p><span lang="en">It does not flash firmware or change BIOS settings. What can go wrong is a boot that does not come up: every change is backed up and can be undone, a boot guard falls back to safe settings, and a USB stick with a working EFI gets you back.</span><span lang="tr">Firmware yazmıyor, BIOS ayarlarını değiştirmiyor. Ters gidebilecek şey açılmayan bir açılış: her değişiklik yedekleniyor ve geri alınabiliyor, bir açılış koruması güvenli ayarlara dönüyor, çalışan bir EFI'si olan USB bellek de sizi geri getiriyor.</span></p></details>
+      <details><summary><span lang="en">Do I need Windows or a Mac?</span><span lang="tr">Windows ya da Mac gerekiyor mu?</span></summary>
+        <p><span lang="en">No. Any computer can prepare the OpenCore EFI. After macOS is installed, IntelXe Manager does the rest on the PC. On Windows, <code>IntelXe-EFI.ps1</code> can make the EFI changes too; it does not build an EFI for you.</span><span lang="tr">Hayır. OpenCore EFI'sini herhangi bir bilgisayar hazırlayabilir. macOS kurulduktan sonra gerisini IntelXe Manager PC'de yapıyor. Windows'ta EFI değişikliklerini <code>IntelXe-EFI.ps1</code> da yapabiliyor; sizin yerinize bir EFI kurmuyor.</span></p></details>
+      <details><summary><span lang="en">Do I need an integrated GPU?</span><span lang="tr">Dahili GPU gerekiyor mu?</span></summary>
+        <p><span lang="en">No. The test machine installed macOS on the B580 alone: the installer runs on the card's firmware output, slow but working.</span><span lang="tr">Hayır. Test makinesi macOS'u yalnızca B580 ile kurdu: kurulum kartın firmware çıkışında çalışıyor, yavaş ama çalışıyor.</span></p></details>
+      <details><summary><span lang="en">Is it free?</span><span lang="tr">Ücretsiz mi?</span></summary>
+        <p><span lang="en">Yes, and open source. Its nullmoth-derived parts are under the PolyForm Noncommercial License, so it is for noncommercial use.</span><span lang="tr">Evet, ve açık kaynak. nullmoth'tan türeyen parçaları PolyForm Noncommercial lisansında, bu yüzden ticari olmayan kullanım için.</span></p></details>
+
+      <h3 class="faq-group reveal"><span lang="en">After it is installed</span><span lang="tr">Kurduktan sonra</span></h3>
+      <details><summary><span lang="en">Can I install macOS updates?</span><span lang="tr">macOS güncellemelerini kurabilir miyim?</span></summary>
+        <p><span lang="en">Yes. The driver in /Library stays. An update removes the system-volume copy Safari uses; the app notices and offers to install it again.</span><span lang="tr">Evet. /Library'deki sürücü yerinde kalıyor. Bir güncelleme Safari'nin kullandığı sistem diski kopyasını siliyor; uygulama bunu fark edip yeniden kurmayı öneriyor.</span></p></details>
+      <details><summary><span lang="en">How do I update the driver?</span><span lang="tr">Sürücüyü nasıl güncellerim?</span></summary>
+        <p><span lang="en">The app's Driver page downloads a new release, checks its signature and installs it over the old one; then its EFI page replaces IntelXe.kext. The release notes say when a step is needed.</span><span lang="tr">Uygulamanın Sürücü sayfası yeni sürümü indiriyor, imzasını denetliyor ve eskisinin üzerine kuruyor; sonra EFI sayfası IntelXe.kext'i değiştiriyor. Sürüm notları bir adım gerektiğinde bunu söylüyor.</span></p></details>
+      <details><summary><span lang="en">Which apps work?</span><span lang="tr">Hangi uygulamalar çalışıyor?</span></summary>
+        <p><span lang="en">See <a href="index.html#apps">Tested apps</a> on the home page. Native OpenGL goes through Apple's OpenGL-over-Metal by default; Zink is faster for many games.</span><span lang="tr">Ana sayfadaki <a href="index.html#apps">Test edilen uygulamalar</a>'a bakın. Yerel OpenGL varsayılan olarak Apple'ın Metal üzerindeki OpenGL'inden geçiyor; birçok oyunda Zink daha hızlı.</span></p></details>
+      <details><summary><span lang="en">How do I remove it?</span><span lang="tr">Nasıl kaldırırım?</span></summary>
+        <p><span lang="en">The Driver page's <i>Uninstall</i> (or <code>sudo ./install.sh --uninstall</code>) removes it from /Library and keeps the backups; then take IntelXe.kext and SSDT-ARCOFF.aml out of the EFI before you restart.</span><span lang="tr">Sürücü sayfasındaki <i>Uninstall</i> (ya da <code>sudo ./install.sh --uninstall</code>) onu /Library'den kaldırıyor, yedekleri bırakıyor; yeniden başlatmadan önce IntelXe.kext ve SSDT-ARCOFF.aml'i EFI'den çıkarın.</span></p></details>
+
+      <h3 class="faq-group reveal"><span lang="en">Getting help</span><span lang="tr">Yardım almak</span></h3>
+      <details><summary><span lang="en">Where do I ask?</span><span lang="tr">Nereye sorarım?</span></summary>
+        <p><span lang="en">In the project's GitHub issues: the bug form asks for what we need, including the report ID.</span><span lang="tr">Projenin GitHub issue'larında: hata formu, rapor kimliği dahil ihtiyacımız olanı soruyor.</span></p></details>
+      <details><summary><span lang="en">What should I put in a bug report?</span><span lang="tr">Bir hata raporuna ne yazmalıyım?</span></summary>
+        <p><span lang="en">What you did, what you expected, what happened instead, and the report ID from IntelXe Manager. Please do not post raw system reports: they carry serial numbers.</span><span lang="tr">Ne yaptığınızı, ne beklediğinizi, onun yerine ne olduğunu ve IntelXe Manager'ın verdiği rapor kimliğini. Lütfen ham sistem raporlarını paylaşmayın: seri numaraları içeriyorlar.</span></p></details>
+      <details><summary><span lang="en">Is this an official Intel or Apple driver?</span><span lang="tr">Bu resmi bir Intel ya da Apple sürücüsü mü?</span></summary>
+        <p><span lang="en">No. It is an independent project, not affiliated with Intel, Apple or NullMoth Systems.</span><span lang="tr">Hayır. Bağımsız bir proje; Intel, Apple ya da NullMoth Systems ile bağlantısı yok.</span></p></details>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div>
+      <a class="brand" href="index.html" style="text-decoration:none;color:var(--ink)"><span>IntelXe <small>for macOS</small></span></a>
+      <p><span lang="en">Experimental and unsupported. Not affiliated with Intel, Apple or NullMoth Systems.</span><span lang="tr">Deneysel ve desteksiz. Intel, Apple ya da NullMoth Systems ile bağlantısı yok.</span></p>
+      <p id="privacy"><span lang="en"><b>Privacy:</b> this site sets no cookies and has no analytics or trackers; its fonts are served with it. The download section asks api.github.com once for the latest release.</span><span lang="tr"><b>Gizlilik:</b> bu site çerez kullanmıyor, analiz ya da izleyici içermiyor; yazı tipleri sitenin kendisinden geliyor. İndirme bölümü son sürüm için api.github.com'a bir kez soruyor.</span></p>
+    </div>
+    <div class="links">
+      <a href="index.html"><span lang="en">Home</span><span lang="tr">Ana sayfa</span></a>
+      <a href="https://github.com/yusufklncc/intel-gpu-macos-driver">GitHub</a>
+      <a href="https://github.com/yusufklncc/intel-gpu-macos-driver/releases"><span lang="en">Releases</span><span lang="tr">Sürümler</span></a>
+      <a href="https://github.com/yusufklncc/intel-gpu-macos-driver/blob/main/release/README-INSTALL.md"><span lang="en">Install guide</span><span lang="tr">Kurulum rehberi</span></a>
+      <a href="https://github.com/yusufklncc/intel-gpu-macos-driver/issues"><span lang="en">Report a problem</span><span lang="tr">Sorun bildir</span></a>
+    </div>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>
