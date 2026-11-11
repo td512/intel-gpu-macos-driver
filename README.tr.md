@@ -106,7 +106,7 @@ Her şeyi kendiniz derlemek isterseniz: [Kaynaktan derleme](#kaynaktan-derleme).
   <img src="docs/images/manager-zink.png" width="32%" alt="IntelXe Manager: bütün OpenGL uygulamaları anahtarı ve listesiyle Zink sayfası">
 </p>
 <p align="center">
-  <img src="docs/images/safari-webgpu.jpg" width="80%" alt="Arc B580'de Safari'nin WebGPU'su: webgpu-samples Deferred Rendering örneği">
+  <img src="docs/images/safari-webgpu.png" width="80%" alt="Arc B580'de Safari'nin WebGPU'su: webgpu-samples Deferred Rendering örneği">
 </p>
 
 *IntelXe Manager'ın Genel bakış, İzleme ve Zink sayfaları; B580'de Safari'nin WebGPU'su Deferred Rendering örneğini

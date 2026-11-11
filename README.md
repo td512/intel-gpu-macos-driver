@@ -101,7 +101,7 @@ To build everything yourself, see [Building from source](#building-from-source).
   <img src="docs/images/manager-zink.png" width="32%" alt="IntelXe Manager: the Zink page with the switch for every OpenGL application and its list">
 </p>
 <p align="center">
-  <img src="docs/images/safari-webgpu.jpg" width="80%" alt="Safari's WebGPU on the Arc B580: the webgpu-samples Deferred Rendering sample">
+  <img src="docs/images/safari-webgpu.png" width="80%" alt="Safari's WebGPU on the Arc B580: the webgpu-samples Deferred Rendering sample">
 </p>
 
 *IntelXe Manager's Overview, Monitor and Zink pages, and Safari's WebGPU drawing the Deferred Rendering sample on the
