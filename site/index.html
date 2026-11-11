@@ -8,7 +8,9 @@
 <meta name="theme-color" content="#05070b">
 <meta property="og:title" content="intel-gpu-macos-driver: Intel Arc on macOS">
 <meta property="og:description" content="The Arc B580 running macOS 26 Tahoe: desktop at 180 Hz, Metal, Safari with WebGPU, hardware video. Experimental, open source.">
-<meta property="og:image" content="images/desktop.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/yusufklncc/intel-gpu-macos-driver/main/site/images/desktop.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232fe2ff'/%3E%3Cstop offset='1' stop-color='%237a6bff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='6' y='6' width='20' height='20' rx='5' fill='url(%23g)'/%3E%3Cpath d='M11 2v4M16 2v4M21 2v4M11 26v4M16 26v4M21 26v4M2 11h4M2 16h4M2 21h4M26 11h4M26 16h4M26 21h4' stroke='%232fe2ff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,6 +39,19 @@
       <button type="button" data-lang="tr" aria-pressed="false">TR</button>
     </div>
     <a class="btn btn-primary btn-small" href="#download"><span lang="en">Download</span><span lang="tr">İndir</span></a>
+    <details class="menu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary>
+      <nav>
+        <a href="#works"><span lang="en">What works</span><span lang="tr">Neler çalışıyor</span></a>
+        <a href="#manager"><span lang="en">The app</span><span lang="tr">Uygulama</span></a>
+        <a href="#install"><span lang="en">Install</span><span lang="tr">Kurulum</span></a>
+        <a href="#issues"><span lang="en">Known issues</span><span lang="tr">Bilinen sorunlar</span></a>
+        <a href="#help"><span lang="en">If something goes wrong</span><span lang="tr">Bir şey ters giderse</span></a>
+        <a href="#faq"><span lang="en">FAQ</span><span lang="tr">SSS</span></a>
+        <a href="#download"><span lang="en">Download</span><span lang="tr">İndir</span></a>
+        <a href="https://github.com/yusufklncc/intel-gpu-macos-driver">GitHub</a>
+      </nav>
+    </details>
   </div>
 </nav>
 
@@ -45,7 +60,7 @@
 <!-- ================= hero ================= -->
 <section class="hero">
   <div class="wrap">
-    <span class="eyebrow"><span lang="en">Release</span><span lang="tr">Sürüm</span> <span data-version>0.1.4</span> · <span lang="en">experimental</span><span lang="tr">deneysel</span></span>
+    <a class="pill" data-notes href="https://github.com/yusufklncc/intel-gpu-macos-driver/releases/latest"><b><span lang="en">New</span><span lang="tr">Yeni</span> <span data-version>0.1.4</span></b><span lang="en">WebGPU in Safari, signed releases, GPU-encoded draws 88× faster</span><span lang="tr">Safari'de WebGPU, imzalı sürümler, GPU'da kodlanan çizimler 88 kat hızlı</span> →</a>
     <h1><span lang="en">Your Intel Arc card,<br><em>running macOS.</em></span><span lang="tr">Intel Arc kartınız,<br><em>macOS'ta çalışıyor.</em></span></h1>
     <p class="lede">
       <span lang="en">A Metal driver for the Arc B580 and B570 on macOS 26 Tahoe. It brings the GPU up the way Linux's <code>xe</code> driver does, runs Mesa's Vulkan driver on top and implements Metal on Vulkan: the desktop, Metal apps and games, Safari with WebGPU and hardware video run on the card.</span>
@@ -55,6 +70,7 @@
       <a class="btn btn-primary" href="#download"><span lang="en">Get <span data-version>0.1.4</span></span><span lang="tr"><span data-version>0.1.4</span> sürümünü indir</span></a>
       <a class="btn btn-ghost" href="#install"><span lang="en">How to install</span><span lang="tr">Nasıl kurulur</span></a>
     </div>
+    <p class="meta">macOS 26 Tahoe · Arc B580 / B570 · OpenCore · <span lang="en">free, open source, noncommercial</span><span lang="tr">ücretsiz, açık kaynak, ticari olmayan</span></p>
     <p class="hero-note"><span lang="en">Tested on one PC with one Arc B580. Keep a USB stick with a working OpenCore EFI before you try it.</span><span lang="tr">Tek bir PC'de, tek bir Arc B580 ile test edildi. Denemeden önce çalışan bir OpenCore EFI'yi USB bellekte hazır tutun.</span></p>
 
     <div class="hero-shot reveal">
@@ -177,6 +193,7 @@
         <div class="step"><h3><span lang="en">Add the kext to the EFI and restart</span><span lang="tr">Kext'i EFI'ye ekleyin ve yeniden başlatın</span><span class="where">IntelXe Manager</span></h3>
           <p><span lang="en">IntelXe.kext and SSDT-ARCOFF, the table adapted to your card's ACPI path (and HybridPM.kext on a 12th–14th gen hybrid CPU). After the restart the desktop moves at your monitor's refresh rate.</span><span lang="tr">IntelXe.kext ve kartınızın ACPI yoluna uyarlanmış SSDT-ARCOFF (12.–14. nesil hibrit işlemcide HybridPM.kext de). Yeniden başlattıktan sonra masaüstü monitörünüzün yenileme hızında akıyor.</span></p></div>
       </div>
+      <div class="callout" style="border-color:rgba(47,226,255,0.28);background:rgba(47,226,255,0.05)"><span lang="en"><b style="color:var(--cyan)">The first start.</b> After stage 4 the first login is a few seconds less smooth: macOS compiles the desktop's shaders once and keeps them. Then open IntelXe Manager: its Overview should say the driver is working, and About This Mac names the card.</span><span lang="tr"><b style="color:var(--cyan)">İlk açılış.</b> 4. aşamadan sonraki ilk giriş birkaç saniye daha az akıcı: macOS masaüstünün gölgelendiricilerini bir kez derleyip saklıyor. Sonra IntelXe Manager'ı açın: Genel bakış sürücünün çalıştığını söylemeli, Bu Mac Hakkında da kartın adını göstermeli.</span></div>
       <div class="callout"><span lang="en"><b>Going back.</b> The app's Driver page undoes the install and its EFI page undoes the last EFI change; both keep backups. If the PC does not come up, boot from the USB stick, or press Shift on the OpenCore entry for safe mode, and undo.</span><span lang="tr"><b>Geri dönüş.</b> Uygulamanın Sürücü sayfası kurulumu, EFI sayfası son EFI değişikliğini geri alıyor; ikisi de yedek tutuyor. PC açılmazsa USB bellekten açın ya da OpenCore girişinde Shift'e basıp güvenli modda açın ve geri alın.</span></div>
       <p style="margin-top:22px"><a class="btn btn-ghost btn-small" href="https://github.com/yusufklncc/intel-gpu-macos-driver/blob/main/release/README-INSTALL.md"><span lang="en">The full install guide</span><span lang="tr">Tam kurulum rehberi (İngilizce)</span></a>
         <a class="btn btn-ghost btn-small" lang="tr" href="https://github.com/yusufklncc/intel-gpu-macos-driver/blob/main/release/README-INSTALL.tr.md">Türkçe rehber</a></p>
@@ -198,6 +215,30 @@
       <div class="issue reveal"><h3><span lang="en">After login</span><span lang="tr">Girişten sonra</span></h3><p><span lang="en">The first seconds after login are less smooth than later, and the login screen shows a light grey band after a restart.</span><span lang="tr">Girişten sonraki ilk saniyeler sonrasından daha az akıcı; yeniden başlattıktan sonra giriş ekranında açık gri bir şerit görünüyor.</span></p></div>
       <div class="issue reveal"><h3><span lang="en">Some speed held back</span><span lang="tr">Biraz hız geride tutuluyor</span></h3><p><span lang="en">Two faster options are opt-in until they have run longer unattended: direct submission (Geekbench Metal 97.2k, OpenCL 92.9k) and the GuC low-latency hint.</span><span lang="tr">İki hızlı seçenek uzun süre gözetimsiz çalışana kadar isteğe bağlı: doğrudan gönderim (Geekbench Metal 97,2k, OpenCL 92,9k) ve GuC düşük gecikme ipucu.</span></p></div>
       <div class="issue reveal"><h3><span lang="en">Tested on one machine</span><span lang="tr">Tek makinede test edildi</span></h3><p><span lang="en">One PC, one B580. The B570 and the Windows EFI tool on a PC that then boots are untested: reports are welcome.</span><span lang="tr">Tek PC, tek B580. B570 ve Windows EFI aracının hazırladığı EFI ile gerçek bir açılış test edilmedi: raporlarınızı bekliyoruz.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= if something goes wrong ================= -->
+<section id="help">
+  <div class="wrap">
+    <div class="section-head center reveal">
+      <span class="eyebrow"><span lang="en">If something goes wrong</span><span lang="tr">Bir şey ters giderse</span></span>
+      <h2><span lang="en">Problems are fixed <em>from logs.</em></span><span lang="tr">Sorunlar <em>loglardan</em> çözülüyor.</span></h2>
+    </div>
+    <div class="report">
+      <div class="card reveal">
+        <h3><span lang="en">Make a report, then open an issue</span><span lang="tr">Rapor oluşturun, sonra bir issue açın</span></h3>
+        <p><span lang="en">IntelXe Manager's Report page collects what a problem needs: the driver's logs, the GPU's state, a panic if there was one. It removes serial numbers, UUIDs, MAC addresses and user names first. Attach the report to an issue with the bug template; please do not post raw system reports.</span><span lang="tr">IntelXe Manager'ın Rapor sayfası bir sorunun gerektirdiklerini topluyor: sürücünün logları, GPU'nun durumu, varsa bir panik. Önce seri numaralarını, UUID'leri, MAC adreslerini ve kullanıcı adlarını çıkarıyor. Raporu hata şablonuyla açacağınız bir issue'ya ekleyin; lütfen ham sistem raporlarını paylaşmayın.</span></p>
+        <div class="actions">
+          <a class="btn btn-primary btn-small" href="https://github.com/yusufklncc/intel-gpu-macos-driver/issues/new/choose"><span lang="en">Open an issue</span><span lang="tr">Issue aç</span></a>
+          <a class="btn btn-ghost btn-small" href="https://github.com/yusufklncc/intel-gpu-macos-driver/issues"><span lang="en">Known problems</span><span lang="tr">Bilinen sorunlar listesi</span></a>
+        </div>
+      </div>
+      <div class="card reveal">
+        <h3><span lang="en">If the PC does not come up</span><span lang="tr">PC açılmazsa</span></h3>
+        <p><span lang="en">Boot from the USB stick with your working EFI, or select the OpenCore entry and hold Shift for safe mode. Then undo the driver (the app's Driver page, or <code>sudo ./install.sh --undo</code>) and the last EFI change (the EFI page). After two failed boots a boot guard starts macOS with safe settings by itself.</span><span lang="tr">Çalışan EFI'nizin olduğu USB bellekten açın ya da OpenCore girişini seçip güvenli mod için Shift'e basılı tutun. Sonra sürücüyü (uygulamanın Sürücü sayfası ya da <code>sudo ./install.sh --undo</code>) ve son EFI değişikliğini (EFI sayfası) geri alın. İki başarısız açılıştan sonra bir açılış koruması macOS'u kendiliğinden güvenli ayarlarla açıyor.</span></p>
+      </div>
     </div>
   </div>
 </section>

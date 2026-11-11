@@ -2,6 +2,7 @@
 (function () {
   "use strict";
   var root = document.documentElement;
+  root.classList.add("js");   // the scroll-in hides sections only when this script runs
 
   // ---- language: ?lang=, then the visitor's choice, then the browser's language ----
   function setLang(lang, remember) {
@@ -19,6 +20,11 @@
   setLang(asked === "tr" || asked === "en" ? asked : saved || browser, false);
   document.querySelectorAll(".lang button").forEach(function (b) {
     b.addEventListener("click", function () { setLang(b.dataset.lang, true); });
+  });
+
+  // ---- the small-screen menu closes after a choice ----
+  document.querySelectorAll(".menu nav a").forEach(function (a) {
+    a.addEventListener("click", function () { var d = a.closest("details"); if (d) d.open = false; });
   });
 
   // ---- the nav gets its background once the page scrolls ----

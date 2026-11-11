@@ -5,7 +5,7 @@
   --card: rgba(255, 255, 255, 0.025);
   --ink: #eef3fa;
   --muted: rgba(238, 243, 250, 0.64);
-  --faint: rgba(238, 243, 250, 0.40);
+  --faint: rgba(238, 243, 250, 0.50);
   --line: rgba(238, 243, 250, 0.09);
   --blue: #1f8bff;
   --cyan: #2fe2ff;
@@ -34,7 +34,7 @@ body {
   background-repeat: no-repeat;
 }
 a { color: inherit; }
-img { display: block; max-width: 100%; }
+img { display: block; max-width: 100%; height: auto; }
 ::selection { background: var(--blue); color: #fff; }
 code, kbd { font-family: var(--mono); font-size: 0.86em; background: rgba(255,255,255,0.06); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; }
 
@@ -197,5 +197,30 @@ pre { margin: 10px 0 0; padding: 14px 16px; border-radius: 12px; background: #03
 @media (max-width: 760px) { .footer .wrap { grid-template-columns: 1fr; } .footer .links { justify-content: flex-start; } }
 
 /* scroll-in */
-.reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
-.reveal.in { opacity: 1; transform: none; }
+.js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+.js .reveal.in { opacity: 1; transform: none; }
+
+/* ---- additions: hero pill and meta line, mobile menu, compact table, first start, report ---- */
+.pill { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 22px; padding: 6px 14px 6px 6px; border-radius: 999px; border: 1px solid rgba(47,226,255,0.25); background: rgba(47,226,255,0.06); font-size: 14px; color: var(--muted); text-decoration: none; transition: border-color .2s; }
+.pill:hover { border-color: rgba(47,226,255,0.5); color: var(--ink); }
+.pill b { font: 700 12px/1 var(--body); color: #04121c; background: linear-gradient(135deg, var(--cyan), var(--blue)); padding: 5px 9px; border-radius: 999px; }
+.meta { margin-top: 16px; font: 500 13px/1.6 var(--mono); color: var(--faint); letter-spacing: .02em; }
+.menu { display: none; position: relative; }
+.menu summary { list-style: none; cursor: pointer; width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--line); display: grid; place-items: center; background: rgba(255,255,255,0.03); }
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary svg { width: 18px; height: 18px; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
+.menu nav { position: absolute; right: 0; top: 46px; min-width: 210px; padding: 8px; border-radius: 16px; border: 1px solid var(--line); background: rgba(10,15,23,0.97); box-shadow: 0 20px 60px -20px #000; display: grid; }
+.menu nav a { padding: 10px 12px; border-radius: 10px; text-decoration: none; color: var(--muted); }
+.menu nav a:hover { background: rgba(255,255,255,0.05); color: var(--ink); }
+@media (max-width: 860px) { .menu { display: block; } }
+@media (max-width: 420px) { .brand small { display: none; } .nav-right .btn-small { display: none; } }
+@media (max-width: 640px) {
+  .table { font-size: 13.5px; }
+  .table th, .table td { padding: 12px 10px; }
+  .table td:first-child { width: auto; }
+}
+.report { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 18px; align-items: stretch; }
+.report .card { display: flex; flex-direction: column; gap: 10px; }
+.report .card p { margin: 0; }
+.report .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 8px; }
+@media (max-width: 860px) { .report { grid-template-columns: 1fr; } }
