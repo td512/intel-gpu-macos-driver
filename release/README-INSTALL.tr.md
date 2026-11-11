@@ -135,6 +135,8 @@ macOS'u yeniden başlatın. Ekran hâlâ UEFI çıktısında çalışır.
 
 ### 3.1 IntelXe Manager uygulamasıyla
 
+<p align="center"><img src="https://raw.githubusercontent.com/yusufklncc/intel-gpu-macos-driver/main/docs/images/manager-overview.png" width="70%" alt="IntelXe Manager'ın sürücünün çalıştığını gösteren Genel bakış sayfası"></p>
+
 Uygulama 3. ve 4. aşamaları bilgisayarda düğmelerle yapar ve her adımın neyi değiştireceğini parolanızı sormadan önce
 gösterir. İşi paketteki `install.sh` ve `efi.sh` yapıyor; yani 3.2'deki Terminal adımlarıyla aynı şey.
 

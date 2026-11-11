@@ -100,6 +100,18 @@ Her şeyi kendiniz derlemek isterseniz: [Kaynaktan derleme](#kaynaktan-derleme).
   sıcaklık, güç, kareler ve CPU'nun erişebildiği 1 GB'lık pencerenin doluluğu) ve tanı raporları. İndirdiği bir sürümü
   yalnızca sürümün imzası doğrulanınca kuruyor.
 
+<p align="center">
+  <img src="docs/images/manager-overview.png" width="32%" alt="IntelXe Manager: sürücünün çalıştığını gösteren Genel bakış sayfası">
+  <img src="docs/images/manager-monitor.png" width="32%" alt="IntelXe Manager: saat, sıcaklık, güç, video belleği ve CPU'nun erişebildiği pencereyle İzleme sayfası">
+  <img src="docs/images/manager-zink.png" width="32%" alt="IntelXe Manager: bütün OpenGL uygulamaları anahtarı ve listesiyle Zink sayfası">
+</p>
+<p align="center">
+  <img src="docs/images/safari-webgpu.jpg" width="80%" alt="Arc B580'de Safari'nin WebGPU'su: webgpu-samples Deferred Rendering örneği">
+</p>
+
+*IntelXe Manager'ın Genel bakış, İzleme ve Zink sayfaları; B580'de Safari'nin WebGPU'su Deferred Rendering örneğini
+çiziyor. (Uygulama görüntüleri İngilizce; uygulama Türkçe macOS'ta Türkçe açılıyor.)*
+
 ### Bilinen sorunlar
 
 - Kartın 12 GB belleğinin yalnızca 1 GB'ını işlemci görebiliyor (macOS daha büyük bir BAR'ı eşleyemiyor). Sürücü bu

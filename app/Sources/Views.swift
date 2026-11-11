@@ -891,8 +891,8 @@ struct DriverView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    Caption("Downloads are checked against the release's published hashes.",
-                            detail: "The download is compared with the hashes published with the release. That finds a damaged file; it does not prove who made the release.")
+                    Caption("A download is installed only when the release's signature and hashes check out.",
+                            detail: "The release's list of hashes must be signed with the project's key, which is built into this app, and the download must match it. A damaged file, or a release that only came from the same GitHub page, is refused.")
                     Spacer(minLength: 12)
                     if let error = manager.releaseError, manager.release == nil {
                         Text(error).foregroundStyle(.secondary).lineLimit(1)

@@ -36,7 +36,9 @@ Already running an earlier build of this driver? Go to [Upgrading](#upgrading-fr
   | `intel-gpu-macos-driver-@VER@-zink-gl.zip` | optional: OpenGL through zink for LWJGL games | macOS on the PC, after stage 4 |
 
   Unpack the macOS files on macOS only: Windows and most Linux unzip tools drop the executable bits and the code
-  signatures that the installer checks. The `.sha256` file on the release page lists their checksums.
+  signatures that the installer checks. The `.sha256` file on the release page lists their checksums, and
+  `.sha256.sig` is its signature with the project's key (IntelXe Manager checks it; by hand:
+  `swift release/signing.swift verify <the key in app/Sources/Signing.swift> <.sha256> <.sha256.sig>`).
 - [Dortania's OpenCore Install Guide](https://dortania.github.io/OpenCore-Install-Guide/), for everything that is not
   about the GPU: your board's EFI, ACPI tables, SMBIOS, USB mapping.
 - A config.plist editor for your system, for example [ProperTree](https://github.com/corpnewt/ProperTree) (Windows,
@@ -125,6 +127,8 @@ Reboot into macOS. The screen still runs on the firmware output.
 
 ### 3.1 With the IntelXe Manager app
 
+<p align="center"><img src="https://raw.githubusercontent.com/yusufklncc/intel-gpu-macos-driver/main/docs/images/manager-overview.png" width="70%" alt="IntelXe Manager's Overview page with the driver working"></p>
+
 The app does stages 3 and 4 on the PC with buttons and shows what each step will change before it asks for your
 password; `install.sh` and `efi.sh` from the package do the work, so it is the same as the Terminal steps in 3.2.
 
@@ -147,7 +151,8 @@ password; `install.sh` and `efi.sh` from the package do the work, so it is the s
    Zink, HiDPI, the menu bar item). Its first step can prepare Safari's setting in the same change (*Also prepare
    Safari on the GPU*). The steps by hand, on the app's pages:
 2. **Overview** shows what the driver needs (macOS, SIP, the AMFI boot-arg, the card) and what is installed.
-3. **Driver:** *Download v@VER@* fetches the package for your macOS and compares it with the release's checksum list.
+3. **Driver:** *Download v@VER@* fetches the package for your macOS, checks that the release's checksum list is signed
+   with the project's key and compares the package with it.
    The EFI page takes its files from this package too.
 4. Stage 2 not done yet? The install needs it (it refuses to run without relaxed SIP and the AMFI boot-arg): on
    **EFI (OpenCore)** press *Change these settings* under "Settings (stage 2)" (when OpenCore did not record the EFI it
@@ -322,7 +327,9 @@ sudo ./install.sh --global on    # every LWJGL 3 application started afterwards 
 zink, 214–218 on the same PC under Windows with Intel's driver; without a shader pack 1400–1500 fps with
 zink against 700–1000 on Windows. Experimental: a native macOS OpenGL application (CGL/NSOpenGL) can go through zink
 too, one application at a time: `./cglzink-app.sh add /Applications/X.app` makes `~/Applications/X (zink).app` (the
-zip's `README.md`, "Native OpenGL applications"). A launcher that macOS reopens by itself at login can start before the setting is in
+zip's `README.md`, "Native OpenGL applications"), or every such application at once with an experimental switch, off
+by default: `sudo ./install.sh --global-gl on`, or the IntelXe Manager Zink page, which also keeps the list of
+applications that use zink or stay on Apple's OpenGL. A launcher that macOS reopens by itself at login can start before the setting is in
 place and then runs on Apple's OpenGL: quit it and start it again (Java prints "Picked up JAVA_TOOL_OPTIONS" when zink
 is on).
 

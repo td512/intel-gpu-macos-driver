@@ -42,7 +42,9 @@ Bu sürücünün eski bir sürümünü kullanıyorsanız doğrudan [Yükseltme](
   | `intel-gpu-macos-driver-@VER@-zink-gl.zip` | isteğe bağlı: LWJGL oyunları için zink ile OpenGL | bilgisayardaki macOS'ta, 4. aşamadan sonra |
 
   macOS dosyalarını yalnızca macOS'ta açın. Windows ve çoğu Linux arşiv aracı, çalıştırma izinlerini ve kurulum betiğinin
-  kontrol ettiği kod imzalarını bozuyor. Sürüm sayfasındaki `.sha256` dosyası sağlama toplamlarını listeliyor.
+  kontrol ettiği kod imzalarını bozuyor. Sürüm sayfasındaki `.sha256` dosyası sağlama toplamlarını listeliyor,
+  `.sha256.sig` de projenin anahtarıyla imzası (IntelXe Manager denetliyor; elle:
+  `swift release/signing.swift verify <app/Sources/Signing.swift'teki anahtar> <.sha256> <.sha256.sig>`).
 - GPU dışındaki her şey için [Dortania'nın OpenCore rehberi](https://dortania.github.io/OpenCore-Install-Guide/): anakartınıza
   uygun EFI, ACPI tabloları, SMBIOS, USB haritası.
 - Sisteminize uygun bir `config.plist` düzenleyicisi, örneğin [ProperTree](https://github.com/corpnewt/ProperTree) (Windows,
@@ -133,6 +135,8 @@ macOS'u yeniden başlatın. Ekran hâlâ UEFI çıktısında çalışır.
 
 ### 3.1 IntelXe Manager uygulamasıyla
 
+<p align="center"><img src="https://raw.githubusercontent.com/yusufklncc/intel-gpu-macos-driver/main/docs/images/manager-overview.png" width="70%" alt="IntelXe Manager'ın sürücünün çalıştığını gösteren Genel bakış sayfası"></p>
+
 Uygulama 3. ve 4. aşamaları bilgisayarda düğmelerle yapar ve her adımın neyi değiştireceğini parolanızı sormadan önce
 gösterir. İşi paketteki `install.sh` ve `efi.sh` yapıyor; yani 3.2'deki Terminal adımlarıyla aynı şey.
 
@@ -155,7 +159,8 @@ gösterir. İşi paketteki `install.sh` ve `efi.sh` yapıyor; yani 3.2'deki Term
    menü çubuğu öğesi) biter. İlk adımı Safari'nin ayarını da aynı değişiklikte yapabilir (*Safari'yi de GPU için
    hazırla*). Adımlar elle, uygulamanın sayfalarında:
 2. **Genel bakış** sürücünün neye ihtiyaç duyduğunu (macOS, SIP, AMFI boot-arg'ı, kart) ve neyin kurulu olduğunu gösterir.
-3. **Sürücü:** *v@VER@ sürümünü indir* macOS'unuza uygun paketi indirir ve sürümün sağlama listesiyle karşılaştırır. EFI
+3. **Sürücü:** *v@VER@ sürümünü indir* macOS'unuza uygun paketi indirir, sürümün sağlama listesinin projenin
+   anahtarıyla imzalı olduğunu denetler ve paketi listeyle karşılaştırır. EFI
    sayfası da dosyalarını bu paketten alır.
 4. 2. aşamayı henüz yapmadınız mı? Kurulum ona ihtiyaç duyuyor (SIP gevşetilmeden ve AMFI boot-arg'ı olmadan çalışmayı
    reddediyor): **EFI (OpenCore)** sayfasında "Ayarlar (2. aşama)" altında *Bu ayarları değiştir*'e basın (OpenCore
@@ -328,7 +333,9 @@ Minecraft 1.21.1, Sodium ve Iris ile, pencereli, aynı nokta): BSL shader paketi
 Windows'ta Intel'in sürücüsüyle 214–218; shader paketi olmadan zink'te
 1400–1500 fps, Windows'ta 700–1000. Deneysel: CGL/NSOpenGL kullanan yerel bir macOS uygulaması da tek tek zink'e
 geçebilir: `./cglzink-app.sh add /Applications/X.app` `~/Applications/X (zink).app`'i oluşturur (zip'teki `README.md`,
-"Native OpenGL applications"). macOS'un girişte kendiliğinden
+"Native OpenGL applications") ya da varsayılan olarak kapalı deneysel bir anahtarla hepsi birden: `sudo ./install.sh
+--global-gl on` ya da IntelXe Manager'ın Zink sayfası; o sayfa zink kullanan ya da Apple'ın OpenGL'inde kalan
+uygulamaların listesini de tutuyor. macOS'un girişte kendiliğinden
 yeniden açtığı bir başlatıcı, ayar yerine oturmadan başlayıp Apple'ın OpenGL'inde kalabilir: kapatıp yeniden açın
 (zink açıkken Java "Picked up JAVA_TOOL_OPTIONS" yazar).
 

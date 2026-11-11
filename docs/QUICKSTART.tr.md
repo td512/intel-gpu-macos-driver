@@ -30,6 +30,8 @@ open ~/Applications/"IntelXe Manager.app"
 
 İkinci satır gerekli, çünkü uygulama bir Apple geliştirici kimliğiyle imzalı değil (tam kılavuz, 3.1).
 
+<p align="center"><img src="images/manager-overview.png" width="70%" alt="IntelXe Manager'ın sürücünün çalıştığını gösteren Genel bakış sayfası"></p>
+
 ## 2. Kurulum yardımcısı açılır
 
 Uygulama ilk açılışta kurulum yardımcısını gösterir. Aşağıdaki adımları sayfa sayfa yapar, parolanızı sormadan önce

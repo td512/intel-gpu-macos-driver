@@ -95,6 +95,18 @@ To build everything yourself, see [Building from source](#building-from-source).
   frames and how full the CPU-visible 1 GB window is) with a menu bar item, and diagnostics reports. It installs a
   release it downloads only when the release's signature checks out.
 
+<p align="center">
+  <img src="docs/images/manager-overview.png" width="32%" alt="IntelXe Manager: the Overview page with the driver working">
+  <img src="docs/images/manager-monitor.png" width="32%" alt="IntelXe Manager: the Monitor page with clock, temperature, power, video memory and the CPU-visible window">
+  <img src="docs/images/manager-zink.png" width="32%" alt="IntelXe Manager: the Zink page with the switch for every OpenGL application and its list">
+</p>
+<p align="center">
+  <img src="docs/images/safari-webgpu.jpg" width="80%" alt="Safari's WebGPU on the Arc B580: the webgpu-samples Deferred Rendering sample">
+</p>
+
+*IntelXe Manager's Overview, Monitor and Zink pages, and Safari's WebGPU drawing the Deferred Rendering sample on the
+B580.*
+
 ### Known issues
 
 - Only 1 GB of the card's 12 GB is CPU-visible (macOS cannot map a larger BAR). The driver keeps that window for what

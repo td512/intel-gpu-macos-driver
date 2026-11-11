@@ -127,6 +127,8 @@ Reboot into macOS. The screen still runs on the firmware output.
 
 ### 3.1 With the IntelXe Manager app
 
+<p align="center"><img src="https://raw.githubusercontent.com/yusufklncc/intel-gpu-macos-driver/main/docs/images/manager-overview.png" width="70%" alt="IntelXe Manager's Overview page with the driver working"></p>
+
 The app does stages 3 and 4 on the PC with buttons and shows what each step will change before it asks for your
 password; `install.sh` and `efi.sh` from the package do the work, so it is the same as the Terminal steps in 3.2.
 

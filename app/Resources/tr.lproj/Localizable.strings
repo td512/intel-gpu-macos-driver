@@ -15,7 +15,7 @@
 "Choose a package before you install or repair. Download the latest release, or use a folder you unpacked." = "Kurmadan ya da onarmadan önce bir paket seçin. Son sürümü indirin ya da açtığınız bir klasörü kullanın.";
 "Download %@" = "%@ sürümünü indir";
 "Use a folder…" = "Klasör seç…";
-"The download is compared with the hashes published with the release. That finds a damaged file; it does not prove who made the release." = "İndirilen dosya, sürümle yayımlanan özetlerle karşılaştırılır. Bu, bozuk dosyayı yakalar; sürümü kimin hazırladığını kanıtlamaz.";
+"The release's list of hashes must be signed with the project's key, which is built into this app, and the download must match it. A damaged file, or a release that only came from the same GitHub page, is refused." = "Sürümün özet listesinin bu uygulamaya gömülü proje anahtarıyla imzalı olması ve indirilen dosyanın listeyle eşleşmesi gerekir. Hasarlı bir dosya ya da yalnızca aynı GitHub sayfasından gelen bir sürüm reddedilir.";
 "Actions" = "İşlemler";
 "Cancel" = "Vazgeç";
 "Show in Finder" = "Finder'da göster";
@@ -559,7 +559,7 @@
 "Puts back installed files that differ from this package." = "Kurulu dosyalardan bu paketle uyuşmayanları yeniden kopyalar.";
 "Puts the last backup back." = "Son yedeği geri koyar.";
 "Removes the driver from /Library; backups stay." = "Sürücüyü /Library'den siler; yedekler kalır.";
-"Downloads are checked against the release's published hashes." = "İndirilen dosyalar, sürümle yayımlanan özetlerle karşılaştırılır.";
+"A download is installed only when the release's signature and hashes check out." = "İndirilen bir paket yalnızca sürümün imzası ve özetleri doğrulanınca kurulur.";
 "Optional: Minecraft and other LWJGL 3 Java games through Mesa's Zink, straight to Vulkan." = "İsteğe bağlı: Minecraft ve diğer LWJGL 3 Java oyunları Mesa'nın Zink'iyle doğrudan Vulkan üzerinden çizer.";
 "Safari on the GPU needs a second copy of the Metal driver on the system volume." = "Safari'nin GPU'yu kullanması için Metal sürücüsünün sistem diskinde ikinci bir kopyası gerekir.";
 "A macOS update replaces the system volume, and this copy with it." = "macOS güncellemesi sistem diskini, onunla birlikte bu kopyayı da değiştirir.";

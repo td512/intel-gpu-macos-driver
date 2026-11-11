@@ -31,6 +31,8 @@ open ~/Applications/"IntelXe Manager.app"
 
 The second line is needed because the app is not signed with an Apple developer ID (full guide, 3.1).
 
+<p align="center"><img src="images/manager-overview.png" width="70%" alt="IntelXe Manager's Overview page with the driver working"></p>
+
 ## 2. The setup assistant opens
 
 On its first start the app shows its setup assistant. It does the steps below one page at a time, shows what each
