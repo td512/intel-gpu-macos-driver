@@ -63,6 +63,14 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
   parametresi de benzer bir nedenle reddediliyordu). Metal'in GPU zaman damgaları (aşama sınırlarında
   sayaç örnekleme, nanosaniye) uygulamalar için yeni; Safari Intel GPU'larda WebGPU'nun `timestamp-query`'sini sunmuyor
   (WebKit'in tercihi, bkz. Bilinen sorunlar).
+- **nullmoth 2.9 birleştirildi.** Upstream'in 2.7.2 ile 2.9 arasında Metal sürücüsüne ve çevirmene dokunan 153
+  commit'inden 42'si alındı (28'i bütün, 14'ü kısmen); DLSS, NVENC, uygulama profilleri, hibrit dizüstüler ve
+  upstream'in isteğe bağlı özellikleri alınmadı (her birinin nedeni `nullmoth/CHANGES.md`'de). Bununla gelenler: her
+  doku şeklinde LOD sorguları ve pull-model enterpolasyon (ikisi de aygıta sorularak yanıtlanıyor), bütün olduğunu
+  kanıtlayan gölgelendirici önbelleği kayıtları (yarım kalmış dosya yeniden çevriliyor), büyük heap'lerin gerektikçe
+  doldurulması, Metal gibi BGRA'nın RGBA bir pipeline'a çizilmesi, boyutu uyumlu biçimler arasında kopyalar, iç içe
+  argument encoder'lar, GPU kalıcı olarak kaybolunca düzgün hata veren komut tamponları ve geliştiriciler için
+  `nvmtl-air-dis`. Metal 4 giriş noktaları `NVMTL_METAL4=1` verilmedikçe kapalı.
 - **Safari derlenmiş gölgelendiricilerini saklıyor.** WebKit'in GPU süreci `fsync` yapamadığı için Metal sürücüsünün
   gölgelendirici önbelleklerine her kayıt orada başarısız oluyordu ve Safari arayüz gölgelendiricilerini her açılışta
   yeniden derliyordu (her biri yaklaşık 2 sn). Önbellekler artık o sandbox'ın izin verdiği gibi yazıyor; ikinci açılış
@@ -85,15 +93,15 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
 - **Yerel OpenGL uygulamaları tek tek Zink üzerinden (deneysel).** Zink paketindeki `cglzink-app.sh`,
   CGL/NSOpenGL kullanan bir uygulamayı OpenGL'i Zink'te çalışacak biçimde başlatan `~/Applications/X (zink).app`'i
   oluşturuyor: GZDoom (MAP01, sınırsız) Apple'ın OpenGL'inde ~1600, cglzink ile ~1910 fps.
-  <!-- decision pending: ship the global switch in 0.1.4? -->
   - **Bütün yerel OpenGL uygulamaları birden (deneysel, varsayılan kapalı):** Zink paketinde
     `sudo ./install.sh --global-gl on`. Bir LaunchAgent küçük `libcglzink-boot.dylib`'i oturumun
     `DYLD_INSERT_LIBRARIES` değişkenine koyuyor (sürücünün kurulumu AMFI'yi kapattığı için macOS onu geçiriyor); kütüphane
     her süreçte cglzink'i yükleyip yüklemeyeceğine bir kez karar veriyor: yalnız uygulama paketleri; Apple'ınkiler
     (Satranç hariç), tarayıcılar, Electron/Chromium uygulamaları, video oynatıcılar ve IntelXe Manager değil.
     `/Library/IntelXe/GL/cglzink-global.txt` bir uygulamayı reddediyor (`-paket.kimliği`) ya da ekliyor
-    (`+paket.kimliği`). `sudo ./install.sh --global-gl off` kapatır, `--undo` önce onu kapatır. B580'de henüz test
-    edilmedi.
+    (`+paket.kimliği`). `sudo ./install.sh --global-gl off` kapatır, `--undo` önce onu kapatır. B580'de (11 Kasım):
+    Satranç zink üzerinden çizdi; TextEdit, Hesap Makinesi, Sistem Ayarları, Safari ve 1Password Apple'ın OpenGL'inde
+    kaldı; kapatınca Satranç Apple'ın OpenGL'ine döndü.
 - **SSDT-ARCOFF kendini kartınıza uyarlıyor.** Kartın ACPI yolu paketle gelen tablonunkinden farklıysa `efi.sh`,
   uygulama ve Windows EFI aracı yolunuzu tablonun bir kopyasına yazıyor (üçünden de aynı baytlar): düzenlenecek `.dsl`
   ya da `iasl` yok.
@@ -287,9 +295,11 @@ neden kapalı olduğu Bilinen sorunlar'da.
 - **PCIe ASPM (`debug.intelxe.aspm_l1`) henüz bir B580'de çalışmadı.** Test etmiyorsanız varsayılanında bırakın;
   rapor (`debug.intelxe.aspm`) yalnız okuyor.
 - **Safari WebGPU'nun `timestamp-query`'sini Intel GPU'larda sunmuyor:** WebKit x86_64'te aygıt adına bakıyor
-  (`HardwareCapabilities.mm`) ve Metal sürücüsüne hiç sormuyor. Zaman damgası izleyen three.js r187 sayfaları özellik
-  yokken `createQuerySet` çağırıp çizmeyi bırakıyor (Backdrop Water gibi bazı threejs.org WebGPU örnekleri); WebKit aynı
-  tercihi Apple'ın kendi sürücüleri dahil her Intel GPU için yapıyor.
+  (`HardwareCapabilities.mm`) ve Metal sürücüsüne hiç sormuyor. WebKit aynı tercihi Apple'ın kendi sürücüleri dahil
+  her Intel GPU için yapıyor. three.js r187'nin Inspector'ı (threejs.org WebGPU örneklerinin çoğunda sağ üstteki FPS
+  paneli) renderer özelliğe baktıktan sonra zaman damgası izlemeyi açıyor; bu sayfalar özellik yokken `createQuerySet`
+  çağırıp Intel GPU'lu Safari'de hiçbir şey çizmiyor; Inspector'sız örnekler çiziyor (11 Kasım, B580: Inspector'lı 7
+  örneğin 7'si siyah, Inspector'sız 3'ün 3'ü ve WebGPU örneklerinin 8'i 8'i doğru).
 - **GPU'da kodlanan indeksli çizimler** CPU'nun o slota kodladığı indeks tamponunun içini ve onun ilkel türünü
   göstermeli (çekirdek Vulkan ikisini de GPU belleğinden alamıyor) ve CPU'nun indeksli çizim kodladığı bir slot
   gölgelendiriciden yalnızca indeksli çizim alıyor; diğerleri atlanıp log'a yazılıyor. WebKit'in doğrulama
@@ -298,9 +308,9 @@ neden kapalı olduğu Bilinen sorunlar'da.
   kodlanan komut tamponları yavaş.
 - **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel: IOSurface'e çizim (tarayıcılar) ve CGL
   pbuffer'ları henüz desteklenmiyor.
-<!-- decision pending: ship the global switch in 0.1.4? -->
-- **Bütün OpenGL uygulamaları için anahtar** (`install.sh --global-gl on`) deneysel, varsayılan olarak kapalı ve B580'de
-  henüz test edilmedi. Oturumun başlattığı her uygulamaya bir kütüphane ekliyor: `/Library/IntelXe/GL`'yi elle
+- **Bütün OpenGL uygulamaları için anahtar** (`install.sh --global-gl on`) deneysel ve varsayılan olarak kapalı; B580'de
+  yalnız birkaç uygulamayla çalıştı. Açınca macOS "sh arka planda çalışabilir" bildirimi gösteriyor (LaunchAgent
+  değişkeni koymadan önce iki kütüphanenin de yerinde olduğuna bakıyor). Oturumun başlattığı her uygulamaya bir kütüphane ekliyor: `/Library/IntelXe/GL`'yi elle
   silmeden önce kapatın (`sudo ./install.sh --global-gl off`), çünkü eklenen kütüphane eksikse hiçbir uygulama
   açılmaz.
 - Giriş ekranında ve kilit ekranında macOS parola alanının imlecini ve cam malzemesini her karede yeniden çiziyor; 180

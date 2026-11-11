@@ -56,6 +56,13 @@ fresh macOS install to a verified driver.
   word (and a Metal `threadgroup` struct parameter zeroed whole, `s = S{}`, was refused for a related reason). Metal's GPU timestamps (counter sampling at stage
   boundaries, in nanoseconds) are new for applications; Safari does not offer WebGPU's `timestamp-query` on Intel GPUs
   (WebKit's choice, see Known issues).
+- **nullmoth 2.9 merged.** Of upstream's 153 commits between 2.7.2 and 2.9 that touch the Metal driver and the
+  translator, 42 are in (28 whole, 14 in part); DLSS, NVENC, application profiles, hybrid laptops and upstream's opt-in
+  features are left out (`nullmoth/CHANGES.md` says why for each). New with it: LOD queries on every texture shape and
+  pull-model interpolation (both answered from the device), shader-cache entries that prove they are whole (a torn
+  file is translated again), lazily filled large heaps, drawing BGRA into an RGBA pipeline as Metal does, copies
+  between size-compatible formats, nested argument encoders, command buffers that fail cleanly after the GPU is lost
+  for good, and `nvmtl-air-dis` for developers. Metal 4 entry points stay off unless `NVMTL_METAL4=1`.
 - **Safari keeps its compiled shaders.** WebKit's GPU process may not `fsync`, so every store of the Metal driver's
   shader caches failed there and Safari compiled its interface shaders again at every start (about 2 s each). The caches
   now write as that sandbox allows; the second start takes them from the cache.
@@ -77,14 +84,14 @@ fresh macOS install to a verified driver.
 - **Native OpenGL apps through Zink, one at a time (experimental).** `cglzink-app.sh` in the Zink package makes
   `~/Applications/X (zink).app`, which starts a CGL/NSOpenGL application with its OpenGL on Zink: GZDoom (MAP01,
   uncapped) ~1910 fps against ~1600 on Apple's OpenGL.
-  <!-- decision pending: ship the global switch in 0.1.4? -->
   - **Every native OpenGL application at once (experimental, off by default):** `sudo ./install.sh --global-gl on`
     in the Zink package. A LaunchAgent puts the small `libcglzink-boot.dylib` into `DYLD_INSERT_LIBRARIES` of the login
     session (macOS passes it on because the driver's setup turns AMFI off), and in each process it decides once whether
     to load cglzink: application bundles only, not Apple's (Chess excepted), browsers, Electron/Chromium apps, video
     players or IntelXe Manager. `/Library/IntelXe/GL/cglzink-global.txt` refuses (`-bundle.id`) or allows
-    (`+bundle.id`) one application. `sudo ./install.sh --global-gl off` turns it off, `--undo` turns it off first. Not
-    yet tested on the B580.
+    (`+bundle.id`) one application. `sudo ./install.sh --global-gl off` turns it off, `--undo` turns it off first. On the
+    B580 (11 Nov): Chess drew through zink; TextEdit, Calculator, System Settings, Safari and 1Password stayed on
+    Apple's OpenGL; off restored Chess to Apple's OpenGL.
 - **SSDT-ARCOFF adapts itself to your board.** When the card's ACPI path is not the shipped table's, `efi.sh`, the
   app and the Windows EFI tool write your path into a copy of the table (the same bytes from all three): no `.dsl` to
   edit, no `iasl`.
@@ -276,9 +283,11 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
 - **PCIe ASPM (`debug.intelxe.aspm_l1`) has not run on a B580 yet.** Leave it at its default unless you are testing
   it; the report (`debug.intelxe.aspm`) only reads.
 - **WebGPU `timestamp-query` is not offered in Safari** on Intel GPUs: WebKit checks the device name on x86_64
-  (`HardwareCapabilities.mm`) and never asks the Metal driver. three.js r187 pages that track timestamps call
-  `createQuerySet` without the feature and stop drawing (several threejs.org WebGPU examples, such as Backdrop Water);
-  WebKit makes the same choice for every Intel GPU, Apple's own drivers included.
+  (`HardwareCapabilities.mm`) and never asks the Metal driver. WebKit makes the same choice for every Intel GPU,
+  Apple's own drivers included. three.js r187's Inspector (the FPS panel at the top right of most threejs.org WebGPU
+  examples) turns timestamp tracking on after the renderer has checked for the feature, so those pages call
+  `createQuerySet` without it and draw nothing in Safari on Intel GPUs; examples without the Inspector draw (11 Nov on
+  the B580: 7 of 7 with it black, 3 of 3 without it and 8 of 8 WebGPU samples correct).
 - **GPU-encoded indexed draws** must point into the index buffer the CPU encoded for that slot, with its primitive type
   (core Vulkan takes neither from GPU memory), and a slot the CPU encoded as an indexed draw takes only indexed draws
   from a shader; others are skipped and logged. WebKit's validation shader always meets these. Each slot of an indirect
@@ -286,9 +295,9 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   register load), so large GPU-encoded command buffers are slow.
 - **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental: no IOSurface drawing (browsers) or CGL
   pbuffers yet.
-<!-- decision pending: ship the global switch in 0.1.4? -->
-- **The switch for every OpenGL application** (`install.sh --global-gl on`) is experimental, off by default and not yet
-  tested on the B580. It inserts a library into every application the session starts: turn it off
+- **The switch for every OpenGL application** (`install.sh --global-gl on`) is experimental and off by default; it ran on
+  the B580 with a few applications only. Turning it on makes macOS report that "sh" can run in the background (the
+  LaunchAgent checks that both libraries are there before it sets the variable). It inserts a library into every application the session starts: turn it off
   (`sudo ./install.sh --global-gl off`) before you delete `/Library/IntelXe/GL` by hand, because a missing inserted
   library stops every application from starting.
 - At the login window and the lock screen macOS redraws the password field's cursor and its glass material for every
