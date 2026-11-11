@@ -152,8 +152,11 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   the webgpu-samples deferredRendering sample failed with "Fragment function failed creation" and its G-buffer reads
   were zero; all 88 WebGPU libraries Safari compiled on the B580 now translate (one failed). Textures merged by a phi or
   select read the chosen heap slot (no captured shader has the pattern; untested on the device).
-- **Next:** re-run the WebGPU samples in Safari on the B580 with the new plugin; samplers merged by a phi (argument-buffer
-  samplers are off by default).
+- **Done (11 Nov):** the WebGPU samples in Safari on the B580: 8 of 8 draw (helloTriangle, computeBoids, particles,
+  shadowMapping, deferredRendering, bitonicSort, gameOfLife, renderBundles). Argument-buffer samplers merged by a phi or
+  a select (their field addresses) read the chosen field's sampler-heap slot: the phi already did through the raw
+  pointer merge; the select was refused ("unknown SSA value": the call's argument check wanted a value the raw select
+  does not make). Tests `tests/sampler_phi.rs`; no captured shader has the pattern.
 - Open: the system-volume install breaks the sealed snapshot (as OpenCore Legacy Patcher's root patches do); a macOS update removes it (`ssv-install.sh --check`).
 
 ### Hybrid Intel CPUs (HybridPM)

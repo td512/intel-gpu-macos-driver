@@ -465,11 +465,26 @@ impl Emitter {
                 }
             }
         } else {
+            let texture_op = super::super::functions::is_air_texture_operation(&call.callee);
             for arg in &call.args {
+                // a sampler operand that is only a raw address (two argument-buffer samplers merged by a select: the
+                // select is a word index, the pointer has no value) is read from the sampler heap by
+                // argument_buffer_sampler_arg_id, which needs no value for it
+                if texture_op && self.argument_buffer_sampler_operand(arg) {
+                    continue;
+                }
                 let _ = self.value_id_in(&arg.value, &arg.ty, instructions)?;
             }
         }
         Ok(())
+    }
+
+    /// Whether argument_buffer_sampler_arg_id reads this operand from the sampler heap (and needs no value for it).
+    fn argument_buffer_sampler_operand(&self, arg: &TypedValue) -> bool {
+        let (LlValue::Local(name), LlType::Ptr(2)) = (&arg.value, &arg.ty) else {
+            return false;
+        };
+        crate::reflect::bindless_fixed_fields_on() && argbuf_samplers_on() && self.raw_offsets.contains_key(name)
     }
 
     /// A sampler operand that is the address of a sampler inside a bound buffer (a Metal argument buffer holding samplers,
