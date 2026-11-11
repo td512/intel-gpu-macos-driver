@@ -9,6 +9,11 @@ let dataDirectory = FileManager.default.homeDirectoryForCurrentUser
 let installerDirectory = "/Library/Application Support/intel-gpu-macos-driver"
 let zinkLibrary = "/Library/IntelXe/GL/libEGL.1.dylib"
 let zinkAgent = "/Library/LaunchAgents/io.github.yusufklncc.intelxe.zink-gl.plist"
+/// the experimental switch for every native OpenGL application (zink-gl install.sh --global-gl): its LaunchAgent, the
+/// library it inserts, and the per-application rules it reads ("+bundle.id" use Zink, "-bundle.id" keep Apple's OpenGL)
+let cglzinkGlobalAgent = "/Library/LaunchAgents/io.github.yusufklncc.intelxe.cglzink-global.plist"
+let cglzinkBootLibrary = "/Library/IntelXe/GL/libcglzink-boot.dylib"
+let cglzinkRulesFile = "/Library/IntelXe/GL/cglzink-global.txt"
 
 /// A command's standard output; nil when it could not run, a time limit keeps a hung tool from holding the app.
 func commandOutput(_ path: String, _ arguments: [String], seconds: TimeInterval = 15) -> String? {
@@ -66,6 +71,8 @@ struct SystemFacts {
     var hasBackup = false
     var zinkInstalled = false
     var zinkGlobal = false
+    var cglzinkAvailable = false   // the installed Zink has the boot library of the switch below
+    var cglzinkGlobal = false      // every native OpenGL application through Zink (experimental)
 
     static func probe() -> SystemFacts {
         var facts = SystemFacts()
@@ -105,6 +112,8 @@ struct SystemFacts {
         }
         facts.zinkInstalled = manager.fileExists(atPath: zinkLibrary)
         facts.zinkGlobal = manager.fileExists(atPath: zinkAgent)
+        facts.cglzinkAvailable = manager.fileExists(atPath: cglzinkBootLibrary)
+        facts.cglzinkGlobal = manager.fileExists(atPath: cglzinkGlobalAgent)
         return facts
     }
 
@@ -266,4 +275,33 @@ func download(_ release: Release, suffix: String, progress: @escaping @Sendable 
     }
     guard existing.isValid else { throw ManagerError.message("The zip does not hold a package.") }
     return existing
+}
+
+/// One line of cglzink-global.txt: an application by bundle ID, through Zink (+) or kept on Apple's OpenGL (-).
+struct CGLZinkRule: Identifiable, Hashable {
+    var bundleID: String
+    var useZink: Bool
+    var id: String { bundleID }
+}
+
+/// The rules file as the boot library reads it (zink-gl/cgl/boot.c config_says: "+id" / "-id", the last line for an ID
+/// wins, # comments). Comments and blank lines are not kept when the app writes the file again.
+func readCGLZinkRules(_ path: String = cglzinkRulesFile) -> [CGLZinkRule] {
+    guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+    var rules: [CGLZinkRule] = []
+    for raw in text.split(whereSeparator: \.isNewline) {
+        let line = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        guard let sign = line.first, sign == "+" || sign == "-", line.count > 1 else { continue }
+        let id = String(line.dropFirst())
+        guard !id.contains(where: { $0 == " " || $0 == "\t" }) else { continue }
+        rules.removeAll { $0.bundleID == id }
+        rules.append(CGLZinkRule(bundleID: id, useZink: sign == "+"))
+    }
+    return rules
+}
+
+func cglzinkRulesText(_ rules: [CGLZinkRule]) -> String {
+    "# IntelXe Manager: applications for the switch for every OpenGL application (+ use Zink, - keep Apple's OpenGL)\n"
+        + rules.map { ($0.useZink ? "+" : "-") + $0.bundleID }.joined(separator: "\n") + "\n"
 }

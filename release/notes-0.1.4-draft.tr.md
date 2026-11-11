@@ -84,7 +84,9 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
   ve Zink'i son sayfasından kuruyor; GPU testleri (Metal özellikleri, OpenGL, OpenCL, bit bit video çözme, kodlama
   kalitesi, hesaplama hızı, bant genişliği, akıcılık) ve uzun bir test; GPU saati, sıcaklık ve kareler için beş
   dakikalık grafikleriyle bir İzleme sayfası ve isteğe bağlı bir menü çubuğu öğesi; bir Güç ve uygulama sayfası;
-  çözümleriyle açılış uyarıları; adımlarını gösteren bir kurulum; bir Hakkında penceresi.
+  çözümleriyle açılış uyarıları; adımlarını gösteren bir kurulum; bir Hakkında penceresi. İzleme sayfası kartın CPU'nun
+  erişebildiği 1 GB'lık penceresinin doluluğunu gösteriyor ve dolmadan uyarıyor; Zink sayfası bütün OpenGL uygulamaları
+  anahtarını açıp kapatıyor ve uygulama listesini (Zink ya da Apple'ın OpenGL'i) metin düzenleyicisiz tutuyor.
 - **İmzalı sürümler.** 0.1.4'ten itibaren bir sürümün hash listesi (`.sha256`) projenin Ed25519 anahtarıyla
   imzalanıyor (`.sha256.sig`, `release/signing.swift`). IntelXe Manager indirdiği bir paketi yalnızca bu imza içine
   gömülü anahtarla doğrulanıyorsa ve zip'in hash'i listedeyse kuruyor; yalnızca aynı GitHub sayfasından gelen bir sürüm

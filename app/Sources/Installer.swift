@@ -61,7 +61,7 @@ enum DriverAction: String, CaseIterable, Identifiable {
 }
 
 enum ZinkAction: String, Identifiable {
-    case install, undo, globalOn, globalOff, test
+    case install, undo, globalOn, globalOff, glOn, glOff, test
     var id: String { rawValue }
     var arguments: String {
         switch self {
@@ -69,10 +69,20 @@ enum ZinkAction: String, Identifiable {
         case .undo: return "--undo"
         case .globalOn: return "--global on"
         case .globalOff: return "--global off"
+        case .glOn: return "--global-gl on"
+        case .glOff: return "--global-gl off"
         case .test: return "--test"
         }
     }
     var needsRoot: Bool { self != .test }
+}
+
+/// zink-gl/install.sh --global-gl off without the package: the LaunchAgent goes, and the logged-in user's session stops
+/// inserting the boot library into applications started from now on.
+func cglzinkGlobalOffCommand() -> String {
+    "rm -f \(shellQuoted(cglzinkGlobalAgent)); u=$(stat -f %Su /dev/console); if [ -n \"$u\" ] && [ \"$u\" != root ]; then "
+        + "case \"$(launchctl asuser \"$(id -u \"$u\")\" launchctl getenv DYLD_INSERT_LIBRARIES)\" in *libcglzink-boot*) "
+        + "launchctl asuser \"$(id -u \"$u\")\" launchctl unsetenv DYLD_INSERT_LIBRARIES ;; esac; fi; echo off"
 }
 
 /// zink-gl/install.sh --global on|off without the package (it is only needed to install): the same LaunchAgent, which

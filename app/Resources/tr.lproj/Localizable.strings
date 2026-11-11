@@ -665,3 +665,27 @@
 "Step %lld of %lld: %@" = "Adım %lld / %lld: %@";
 "%lld s" = "%lld sn";
 "Not available on macOS 26: it no longer gives the tables to apps. Dump them from Windows or Linux (SSDTTime)." = "macOS 26'da yok: tabloları artık uygulamalara vermiyor. Windows ya da Linux'tan (SSDTTime) alın.";
+
+/* Monitor: the CPU-visible window (1 GB BAR) */
+"CPU-visible video memory" = "CPU'nun eriştiği video belleği";
+"macOS can map only a 1 GB window of the card's 12 GB (ResizeAppleGpuBars = 10). Buffers the CPU writes go there; the rest of the memory is only for the GPU. The driver keeps the window for programs that need it and puts background programs' buffers in system memory, but many open GPU-heavy programs can still fill it: then new buffers are refused or moved to system memory, and programs slow down or fail to start. Quitting a few helps." = "macOS kartın 12 GB belleğinin yalnızca 1 GB'lık bir penceresini eşleyebiliyor (ResizeAppleGpuBars = 10). CPU'nun yazdığı tamponlar oraya gidiyor; belleğin geri kalanı yalnız GPU için. Sürücü pencereyi gerçekten ihtiyacı olan programlara ayırıyor, arka plandaki programların tamponlarını sistem belleğine koyuyor; yine de GPU'yu yoğun kullanan çok sayıda açık program pencereyi doldurabilir: o zaman yeni tamponlar reddediliyor ya da sistem belleğine taşınıyor, programlar yavaşlıyor ya da açılmıyor. Birkaçını kapatmak yardımcı olur.";
+"The window ran out since the last restart: %lld buffers refused, %lld moved to system memory." = "Pencere son yeniden başlatmadan beri doldu: %lld tampon reddedildi, %lld tampon sistem belleğine taşındı.";
+"Nearly full: quitting GPU-heavy programs frees it." = "Neredeyse dolu: GPU'yu yoğun kullanan programları kapatmak yer açar.";
+
+/* Zink page: the switch for every native OpenGL application and its list */
+"Every OpenGL application (experimental)" = "Bütün OpenGL uygulamaları (deneysel)";
+"On: native OpenGL applications draw through Zink, as the list below allows." = "Açık: yerel OpenGL uygulamaları, aşağıdaki listenin izin verdiği ölçüde Zink üzerinden çiziyor.";
+"Off: native OpenGL applications use Apple's OpenGL." = "Kapalı: yerel OpenGL uygulamaları Apple'ın OpenGL'ini kullanıyor.";
+"Applications started afterwards follow it. Apple's applications (Chess excepted), browsers, Electron applications and video players stay on Apple's OpenGL unless you list them." = "Bundan sonra açılan uygulamalar buna uyar. Apple'ın uygulamaları (Satranç hariç), tarayıcılar, Electron uygulamaları ve video oynatıcılar listeye eklemediğiniz sürece Apple'ın OpenGL'inde kalır.";
+"Experimental. A small library in every application you start decides whether it takes part: application bundles only, not Apple's (Chess excepted), not browsers, Electron or Chromium applications, video players or this app. The list below adds an application or keeps one out. Turn it off before you delete /Library/IntelXe/GL by hand." = "Deneysel. Açtığınız her uygulamadaki küçük bir kütüphane uygulamanın katılıp katılmayacağına karar veriyor: yalnız uygulama paketleri; Apple'ınkiler (Satranç hariç), tarayıcılar, Electron ya da Chromium uygulamaları, video oynatıcılar ve bu uygulama değil. Aşağıdaki liste bir uygulamayı ekliyor ya da dışarıda tutuyor. /Library/IntelXe/GL'yi elle silmeden önce kapatın.";
+"Turn on for every OpenGL application" = "Bütün OpenGL uygulamaları için aç";
+"The installed Zink is older than this switch: install the Zink package of 0.1.4 or later." = "Kurulu Zink bu anahtardan eski: 0.1.4 ya da sonrasının Zink paketini kurun.";
+"Remove from the list" = "Listeden çıkar";
+"Add an application…" = "Uygulama ekle…";
+"Save the list" = "Listeyi kaydet";
+"Choose applications for the list. They are added as \"Zink\"; switch one to Apple's OpenGL to keep it out." = "Listeye uygulama seçin. \"Zink\" olarak eklenirler; birini dışarıda tutmak için Apple'ın OpenGL'ine çevirin.";
+"Save the application list" = "Uygulama listesini kaydet";
+"Saved. Applications started from now on follow the list." = "Kaydedildi. Bundan sonra açılan uygulamalar listeye uyuyor.";
+"Apple's OpenGL" = "Apple'ın OpenGL'i";
+"Turn off" = "Kapat";
+"Turning it on needs the Zink package: download it or choose its folder under Install below." = "Açmak için Zink paketi gerekiyor: aşağıdaki Kurulum bölümünden indirin ya da klasörünü seçin.";

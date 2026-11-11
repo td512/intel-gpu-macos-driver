@@ -75,7 +75,9 @@ fresh macOS install to a verified driver.
   on the GPU and Zink from its last page; GPU tests (Metal features, OpenGL, OpenCL, video decoding bit for bit, encoding
   quality, compute rate, bandwidth, smoothness) and a long test; a Monitor page with five-minute charts of the GPU clock,
   temperature and frames, and an optional menu bar item; a Power and app page; start-up warnings with fixes; an
-  install that shows its steps; an About window.
+  install that shows its steps; an About window. The Monitor page shows how full the card's CPU-visible 1 GB window is
+  and warns before it runs out; the Zink page turns the switch for every OpenGL application on and off and keeps its
+  list of applications (Zink or Apple's OpenGL) without a text editor.
 - **Signed releases.** From 0.1.4 on, a release's list of hashes (`.sha256`) is signed with the project's Ed25519 key
   (`.sha256.sig`, `release/signing.swift`). IntelXe Manager installs a package it downloaded only when that signature
   verifies with the key built into it and the zip's hash is in the list; a release that only came from the same

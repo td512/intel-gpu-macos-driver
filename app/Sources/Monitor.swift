@@ -59,6 +59,9 @@ struct MonitorSample {
     var actMHz: Int?, reqMHz: Int?, maxMHz: Int?
     var packageC: Int?, vramC: Int?
     var vramUsedMB: Int?
+    /// the CPU-visible part of VRAM (the 1 GB BAR window macOS can map, ResizeAppleGpuBars = 10): its size, what is in it,
+    /// and how often the kernel had to say no (refusals) or put a buffer in system memory instead (spills) since boot
+    var windowMB: Int?, windowUsedMB: Int?, windowRefusals: Int?, windowSpills: Int?
     /// average power over the last reading's window (debug.intelxe.sensors from the PMT kext of 0.1.4)
     var cardW: Double?, packageW: Double?
     /// the card's sustained (PL1) or burst (PL2) limit, whichever is on, PL1 first
@@ -113,7 +116,13 @@ final class MonitorModel: ObservableObject {
             if let m = s.maxMHz, m > 0 { lastMaxMHz = m }
             sensorsMissing = false
         } else { sensorsMissing = sysctlString("debug.intelxe.state") != nil }
-        if let v = sysctlString("debug.intelxe.vram"), let a = firstInt(v, after: "): used"), let b = firstInt(v, after: "the window: used") { s.vramUsedMB = a + b }
+        if let v = sysctlString("debug.intelxe.vram") {
+            if let a = firstInt(v, after: "): used"), let b = firstInt(v, after: "the window: used") { s.vramUsedMB = a + b }
+            if v.hasPrefix("window ") {
+                s.windowMB = firstInt(v, after: "window "); s.windowUsedMB = firstInt(v, after: "): used")
+                s.windowRefusals = firstInt(v, after: "window refusals"); s.windowSpills = firstInt(v, after: "spilled to system memory:")
+            }
+        }
         let id = CGMainDisplayID()
         if let m = CGDisplayCopyDisplayMode(id) {
             let hz = m.refreshRate
@@ -222,6 +231,7 @@ struct MonitorView: View {
                     }
                 }
                 LabeledContent("Video memory in use") { Text(s.vramUsedMB.map { String(format: "%.1f GB", Double($0) / 1024) } ?? "–") }
+                if let total = s.windowMB, let used = s.windowUsedMB, total > 0 { WindowGauge(total: total, used: used, sample: s) }
             }
             Section2(title: "Display", symbol: "display") {
                 MetricRow(title: "Frames presented", symbol: "film.stack",
@@ -238,6 +248,34 @@ struct MonitorView: View {
         .formStyle(.grouped)
         .onAppear { model.start() }
         .onDisappear { model.stop() }
+    }
+}
+
+/// The CPU-visible window of the card's memory: how full it is, and a warning when it is nearly full or the kernel has
+/// already had to refuse a buffer or put one in system memory (programs then run slower or fail to start).
+struct WindowGauge: View {
+    let total: Int, used: Int
+    let sample: MonitorSample
+    var body: some View {
+        let fill = min(1, Double(used) / Double(total))
+        let pressed = (sample.windowRefusals ?? 0) > 0 || (sample.windowSpills ?? 0) > 0
+        let level: Color = fill >= 0.9 || pressed ? .orange : fill >= 0.75 ? .yellow : .accentColor
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Label("CPU-visible video memory", systemImage: "rectangle.split.3x1").foregroundStyle(.secondary)
+                InfoButton("macOS can map only a 1 GB window of the card's 12 GB (ResizeAppleGpuBars = 10). Buffers the CPU writes go there; the rest of the memory is only for the GPU. The driver keeps the window for programs that need it and puts background programs' buffers in system memory, but many open GPU-heavy programs can still fill it: then new buffers are refused or moved to system memory, and programs slow down or fail to start. Quitting a few helps.")
+                Spacer()
+                Text("\(used) / \(total) MB").monospacedDigit().foregroundStyle(level == .accentColor ? Color.primary : level)
+            }
+            ProgressView(value: fill).tint(level).accessibilityLabel(Text("CPU-visible video memory"))
+            if pressed {
+                Text("The window ran out since the last restart: \(sample.windowRefusals ?? 0) buffers refused, \(sample.windowSpills ?? 0) moved to system memory.")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if fill >= 0.9 {
+                Text("Nearly full: quitting GPU-heavy programs frees it.").font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

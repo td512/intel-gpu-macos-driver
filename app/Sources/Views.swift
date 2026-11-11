@@ -307,10 +307,24 @@ final class Manager: ObservableObject {
             command = shellQuoted(zinkPackage.directory.appendingPathComponent("install.sh").path) + " " + action.arguments
         } else if action == .globalOn || action == .globalOff {
             command = zinkGlobalCommand(on: action == .globalOn)
+        } else if action == .glOff {
+            command = cglzinkGlobalOffCommand()
         } else { return }
         perform(title: action.title, command: command, needsRoot: action.needsRoot, then: { result in
             self.lastResult = result.cancelled ? String(localized: "Cancelled. Nothing changed.")
                 : result.succeeded ? String(localized: "Finished.") : String(localized: "It did not finish. See the log.")
+        })
+    }
+
+    /// Writes cglzink-global.txt (root owns /Library/IntelXe/GL): the next application started reads it.
+    func saveCGLZinkRules(_ rules: [CGLZinkRule]) {
+        let text = cglzinkRulesText(rules)
+        let file = shellQuoted(cglzinkRulesFile)
+        let command = "set -e; [ -d /Library/IntelXe/GL ] || { echo 'Zink is not installed'; exit 1; }; "
+            + "printf '%s' \(shellQuoted(text)) > \(file).new; chown root:wheel \(file).new; chmod 644 \(file).new; mv \(file).new \(file); echo saved"
+        perform(title: String(localized: "Save the application list"), command: command, needsRoot: true, then: { result in
+            self.lastResult = result.cancelled ? String(localized: "Cancelled. Nothing changed.")
+                : result.succeeded ? String(localized: "Saved. Applications started from now on follow the list.") : String(localized: "It did not finish. See the log.")
         })
     }
 
@@ -371,6 +385,8 @@ extension ZinkAction {
         case .undo: return String(localized: "Remove Zink")
         case .globalOn: return String(localized: "Use Zink for every LWJGL application")
         case .globalOff: return String(localized: "Back to Apple's OpenGL")
+        case .glOn: return String(localized: "Turn on for every OpenGL application")
+        case .glOff: return String(localized: "Turn off")
         case .test: return String(localized: "Run the self-test")
         }
     }
@@ -971,8 +987,16 @@ struct ActionRow: View {
     }
 }
 
+/// The Zink page's application list: what is shown and what the file holds.
+final class CGLZinkRulesState: ObservableObject {
+    @Published var rules: [CGLZinkRule] = []
+    @Published var saved: [CGLZinkRule] = []
+    func reload() { rules = readCGLZinkRules(); saved = rules }
+}
+
 struct ZinkView: View {
     @EnvironmentObject var manager: Manager
+    @StateObject private var list = CGLZinkRulesState()
     var body: some View {
         let f = manager.facts, ready = manager.zinkPackage != nil
         Form {
@@ -1002,6 +1026,7 @@ struct ZinkView: View {
                     }
                 }
             }
+            if f.zinkInstalled { everyOpenGLApplication }
             Section2(title: "Install", symbol: "arrow.down.circle") {
                 if let package = manager.zinkPackage {
                     PathRow(title: "Package", path: package.directory.path)
@@ -1038,6 +1063,83 @@ struct ZinkView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { list.reload() }
+        .onChange(of: manager.busy) { _, busy in if busy == nil { list.reload() } }
+    }
+
+    /// The experimental switch for every native OpenGL application (cglzink) and its per-application list.
+    @ViewBuilder var everyOpenGLApplication: some View {
+        let f = manager.facts
+        Section2(title: "Every OpenGL application (experimental)", symbol: "macwindow.on.rectangle") {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(f.cglzinkGlobal ? "On: native OpenGL applications draw through Zink, as the list below allows." : "Off: native OpenGL applications use Apple's OpenGL.")
+                    Caption("Applications started afterwards follow it. Apple's applications (Chess excepted), browsers, Electron applications and video players stay on Apple's OpenGL unless you list them.",
+                            detail: "Experimental. A small library in every application you start decides whether it takes part: application bundles only, not Apple's (Chess excepted), not browsers, Electron or Chromium applications, video players or this app. The list below adds an application or keeps one out. Turn it off before you delete /Library/IntelXe/GL by hand.")
+                }
+                Spacer()
+                if f.cglzinkGlobal {
+                    Button(ZinkAction.glOff.title) { manager.performZink(.glOff) }.fixedSize()
+                } else {
+                    Button(ZinkAction.glOn.title) { manager.performZink(.glOn) }.fixedSize()
+                        .disabled(!f.cglzinkAvailable || manager.zinkPackage == nil)
+                }
+            }
+            if !f.cglzinkAvailable {
+                Text("The installed Zink is older than this switch: install the Zink package of 0.1.4 or later.").font(.callout).foregroundStyle(.secondary)
+            } else if !f.cglzinkGlobal && manager.zinkPackage == nil {
+                Text("Turning it on needs the Zink package: download it or choose its folder under Install below.").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach($list.rules) { $rule in
+                HStack(spacing: 10) {
+                    appIcon(rule.bundleID)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(appName(rule.bundleID))
+                        Text(rule.bundleID).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    Spacer()
+                    Picker("", selection: $rule.useZink) {
+                        Text("Zink").tag(true)
+                        Text("Apple's OpenGL").tag(false)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    Button { list.rules.removeAll { $0.bundleID == rule.bundleID } } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless).help(Text("Remove from the list"))
+                }
+            }
+            HStack(spacing: 10) {
+                Button("Add an application…") { addApplication() }
+                Spacer()
+                if list.rules != list.saved {
+                    Button("Revert") { list.rules = list.saved }
+                    Button("Save the list") { manager.saveCGLZinkRules(list.rules) }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+    }
+
+    private func appURL(_ id: String) -> URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) }
+    private func appName(_ id: String) -> String {
+        appURL(id).map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") } ?? id
+    }
+    @ViewBuilder private func appIcon(_ id: String) -> some View {
+        if let url = appURL(id) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 22, height: 22)
+        } else {
+            Image(systemName: "app.dashed").frame(width: 22, height: 22).foregroundStyle(.secondary)
+        }
+    }
+    private func addApplication() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.message = String(localized: "Choose applications for the list. They are added as \"Zink\"; switch one to Apple's OpenGL to keep it out.")
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            guard let id = Bundle(url: url)?.bundleIdentifier, !list.rules.contains(where: { $0.bundleID == id }) else { continue }
+            list.rules.append(CGLZinkRule(bundleID: id, useZink: true))
+        }
     }
 }
 
