@@ -197,7 +197,10 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - Video was behind a debug gate; it is now on by default with the media GT up. The ffmpeg vkshim is gone: `user/tests/inv/videotest.sh` uses the Khronos loader with an ICD manifest of its own.
 - Remove the AMFI boot-args: sign the plugin properly and use entitlements.
 - System sleep: works on the released kernel (rb7u + IntelXeFB v10m, macOS 26.7.1). Open: in the tests of 2026-10-30 the machine woke by itself about 7 s after going to sleep (USB wake source, USBW); not re-checked on the released kernel.
-- Display hot-plug: interrupt-driven, instead of polling.
+- Display hot-plug: interrupt-driven since IntelXeFB v10f (SDE hotplug interrupt, long/short pulses, storm masking; polling
+  only without the display interrupt or for a storm-masked pin). Checked on the B580 on 11 Nov 2026: the DisplayPort
+  cable pulled and put back gave two long-pulse interrupts (`debug.intelxefb_hpdinfo`: "long: panel port live, link
+  ok") and the picture came back at 2560x1440, 179 Hz.
 - Second display pipe (pipe B, DBUF/MBUS split, watermarks). The test setup has only one monitor.
 
 ### OpenGL through Zink
