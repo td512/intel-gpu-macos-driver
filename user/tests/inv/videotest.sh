@@ -4,12 +4,16 @@
 busy() { pgrep -x java >/dev/null || pgrep -f geekbench >/dev/null || pgrep -f Geekbench >/dev/null; }
 if busy; then echo "BUSY - aborted"; exit 1; fi
 ANV=${1:?anv lib}
-FF=~/b580/video/ffmpeg; SHIM=~/b580/vkshim; mkdir -p $SHIM; cp -f ~/b580/video/libvulkan.dylib $SHIM/;  # only the shim: DYLD_LIBRARY_PATH would also replace INTELXE_ANV by a libvulkan_intel.dylib beside it
- CAPS=~/b580/venc/vk_videocaps
-echo "ffmpeg $FF | vkshim $SHIM | videocaps $CAPS | debug.intelxe.video=$(sysctl -n debug.intelxe.video)"
+# ffmpeg dlopens libvulkan.dylib: the Khronos loader the zink-gl package installs in /usr/local/lib (dyld no longer looks
+# there by itself: DYLD_FALLBACK_LIBRARY_PATH), pointed at this ANV by an ICD manifest of its own (VK_DRIVER_FILES)
+FF=~/b580/video/ffmpeg; CAPS=~/b580/venc/vk_videocaps
+[ -e /usr/local/lib/libvulkan.1.dylib ] || { echo "no Vulkan loader in /usr/local/lib: install the zink-gl package"; exit 2; }
+ICD=$(mktemp -t videotest-icd).json
+printf '{"file_format_version":"1.0.1","ICD":{"library_path":"%s","api_version":"1.4.0"}}\n' "$ANV" > "$ICD"
+echo "ffmpeg $FF | loader /usr/local/lib/libvulkan.1.dylib, ICD $ICD | videocaps $CAPS | debug.intelxe.video=$(sysctl -n debug.intelxe.video)"
 [ "$(sysctl -n debug.intelxe.video)" = 1 ] || { echo "media GT off (debug.intelxe.video=0) - not switched on here"; exit 2; }
 echo "== capabilities"; "$CAPS" "$ANV" 2>&1 | head -60
-run() { INTELXE_ANV=$ANV DYLD_LIBRARY_PATH=$SHIM "$FF" -hide_banner -loglevel error "$@"; }
+run() { DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib VK_DRIVER_FILES=$ICD "$FF" -hide_banner -loglevel error "$@"; }
 echo "== decode (framemd5 against software)"
 for f in ~/b580/video/*.mp4; do
   if busy; then echo "BUSY - aborted"; exit 1; fi

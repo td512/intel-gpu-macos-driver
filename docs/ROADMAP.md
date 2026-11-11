@@ -189,7 +189,7 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 
 ### Remaining items from the workaround audit (2026-10-29)
 - Boot guard: checked over power cuts and failing boots on 5–6 November 2026 (0.1.2: safe settings after two failures, held after four, the clear written by a LaunchDaemon). Open: a held boot on macOS 26 stays at the Apple logo because WindowServer has no display without the accelerator; the way out is OpenCore's Reset NVRAM.
-- Video was behind a debug gate; it is now on by default with the media GT up. Remove the ffmpeg vkshim.
+- Video was behind a debug gate; it is now on by default with the media GT up. The ffmpeg vkshim is gone: `user/tests/inv/videotest.sh` uses the Khronos loader with an ICD manifest of its own.
 - Remove the AMFI boot-args: sign the plugin properly and use entitlements.
 - System sleep: works on the released kernel (rb7u + IntelXeFB v10m, macOS 26.7.1). Open: in the tests of 2026-10-30 the machine woke by itself about 7 s after going to sleep (USB wake source, USBW); not re-checked on the released kernel.
 - Display hot-plug: interrupt-driven, instead of polling.

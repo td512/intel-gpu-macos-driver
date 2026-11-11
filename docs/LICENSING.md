@@ -12,7 +12,7 @@
 | `kernel/IntelXeFB/IntelXeLink.cpp`, `IntelXeLink.h` | MIT | `IntelXeLink.cpp` contains i915 display material (intel_cx0_phy.c, intel_ddi_buf_trans.c; MIT, © Intel, full notice in the file) |
 | `kernel/IntelXeFB/scripts/` | MIT | |
 | `kernel/HybridPM/` | MIT | our code (the Lilu plugin and `hpmstat`). `LICENSE.Lilu` is Lilu's BSD-3-Clause notice: Lilu's `plugin_start.cpp` is compiled into the kext |
-| `user/` | MIT | xemac, vkshim, tests, tools, the Vulkan loader notes (`user/vulkan-loader/`: our notes, script and check program; the loader itself is not here) |
+| `user/` | MIT | xemac, tests, tools, the Vulkan loader notes (`user/vulkan-loader/`: our notes, script and check program; the loader itself is not here) |
 | `nullmoth/` (except `translator/`, `build/`) | **PolyForm Noncommercial 1.0.0** | `nullmoth/LICENSE`, `nullmoth/NOTICE`; modifications listed in `nullmoth/CHANGES.md` |
 | `nullmoth/translator/` | **LGPL-3.0-or-later** | metal2vulkan-based; `translator/LICENSE` (LGPL-3.0) and `translator/COPYING` (GPL-3.0) |
 | `nullmoth/build/build-intelxe.sh` | MIT | our build script |
