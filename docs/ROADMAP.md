@@ -9,7 +9,13 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
 - **Done (2026-10-30):** H.264 and HEVC decoders; encoder quality work after media-driver (Mesa `0040`–`0045`); FFmpeg 9.0.2 with the patches in `videotoolbox/ffmpeg/`.
 - **Done (2026-10-30):** AV1 encode with one B frame, the HuC BRC GOP model and two PAK passes (Mesa `0046`/`0047`, codecs-vqa5). 1080p60 VBR 3/6/12 Mbit/s, BD-rate against SVT-AV1 on Netflix Aerial: PSNR-Y +161.8% → +135.7%, VMAF +89.8% → +68.6%. Known limitation: the rate overshoots by 16–18% at the lowest rate (3 Mbit/s).
 - **Next:** AV1 is still behind SVT-AV1 (hierarchical GOPs, CDEF under rate control, the overshoot).
-- **Next:** GPU copies into the session's IOSurfaces instead of CPU staging copies; QuickTime/Safari playback checks; drive Vulkan Video directly where libavcodec adds nothing.
+- GPU copies, decode side: done (intelxeav1: each picture is copied by the copy engine into the pixel buffer's IOSurface,
+  imported once per surface). Encode side, measured on 11 Nov 2026 (HEVC 1080p, 300 frames, 8 Mbit/s, vtenctest): letting
+  libavutil import each pixel buffer's IOSurface as host memory (`VK_EXT_external_memory_host`, `host_map_frame`) gave
+  the same bitstream at 245 fps against 352 fps with its staging copy: an import per frame costs more than the ~0.3 ms
+  CPU copy of a 1080p frame. Not kept. What is left there is an import cached per IOSurface (as the decoder does) and
+  our own buffer-to-image copy synchronised with libavutil's frame semaphores: at most ~10% at 1080p.
+- **Next:** QuickTime/Safari playback checks; drive Vulkan Video directly where libavcodec adds nothing.
 - **Upstream:** H.264 and AV1 encode for Xe2 in ANV (`mesa/patches/0010`, `0012`, `0015`).
 
 ### CPU-visible VRAM (BAR window)
