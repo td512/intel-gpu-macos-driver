@@ -1,21 +1,13 @@
-<!-- 0.1.4 TASLAĞI (9 Kasım 2026, 10 Kasım'da main'e göre güncellendi). Yayından önce: paket listesini package.sh'in
-çıktısıyla, yükseltme adımlarını release/README-INSTALL.tr.md'nin "Yükseltme" bölümüyle karşılaştırın; B570 satırları
-hâlâ "test edilmedi" demeli; paketteki IntelXe.kext 10 Kasım sonrası main'den derlenmiş (platform katmanı, kullanıcı
-çitleri) ve B580'de çalışmış olmalı; Windows EFI aracı Windows'ta çalıştıktan sonra HybridPM / SSDT-ARCOFF satırlarına
-bakın. Ayrıca (10 Kasım 03:00 sonrası birleştirmeler): paketteki kext ve eklenti bunları içermeli (release.sh, kaynakları
-son değiştiğinden önce derlenmiş paketleri reddediyor); debug.intelxe.sensors'un güç alanları paketteki kext'ten
-okunmalı; WebGPU deferredRendering örneği paketteki eklentiyle Safari'de yeniden çalıştırılmalı; ASPM satırları hâlâ
-"test edilmedi" demeli. (10 Kasım öğleden sonra birleştirmeleri): paketteki libintelxevenc AV1'i kaydetmeli (vtencq
---list), Safari maddeleri paketteki eklentiyle yeniden denetlenmeli (three.js sayfaları, gölgelendirici önbelleği "fc spec:
-HIT"), paketlenmiş yapıda tools/regress --full çalıştırılmalı. -->
 Hesaplamayı hızlandıran sürüm: Metal ve OpenCL işleri sürücüden komut arabelleği başına daha az kilitle geçiyor ve bir
 çevirici düzeltmesi bir matris çekirdeğinin hızını ikiye katlıyor. Ayrıca: katkıyla gelen bir aygıt kimliğiyle **Arc
 B570** (bizim tarafımızda test edilmedi), 12-14. nesil hibrit Intel işlemciler için **HybridPM** ve yeni macOS
 kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcısıyla yeniden tasarlanan **IntelXe Manager**.
+Safari'nin **WebGPU**'su artık workgroup belleği kullanan compute gölgelendiricilerini ve GPU'da doğrulanan render
+bundle'ları doğrudan çizim hızında çalıştırıyor; sürümler projenin anahtarıyla **imzalı**.
 
 > [!WARNING]
 > Deneysel. Tek bir makinede, tek bir kartla (Arc B580) test edildi; Arc B570 destekleniyor ama test edilmedi.
-> İmzasız; gevşetilmiş SIP/AMFI ve OpenCore gerekir. Kurmadan önce çalışan bir EFI'yi USB bellekte hazır tutun.
+> Apple imzası yok; gevşetilmiş SIP/AMFI ve OpenCore gerekir. Kurmadan önce çalışan bir EFI'yi USB bellekte hazır tutun.
 
 > [!NOTE]
 > Yapay zekâ desteğiyle geliştirildi: kodu, her derlemeyi gerçek donanımda test eden proje sahibinin yönetiminde
@@ -167,7 +159,7 @@ veriyordu); farklı günlerin sayılarını değil, bir tablonun sütunlarını 
 | `intel-gpu-macos-driver-0.1.4-efi.zip` | OpenCore parçaları: `IntelXe.kext` (yeni), `SSDT-ARCOFF`, `HybridPM.kext` (yeni, isteğe bağlı), Windows için `IntelXe-EFI.ps1` | her sistem |
 | `intel-gpu-macos-driver-0.1.4-zink-gl.zip` | isteğe bağlı: LWJGL 3 oyunları (Minecraft Java) için Mesa'nın Zink'i üzerinden OpenGL; yeni: yerel OpenGL uygulamaları için `cglzink-app.sh` (deneysel) | macOS |
 
-Sağlama toplamları: `intel-gpu-macos-driver-0.1.4.sha256`. Kurulum kılavuzu: her macOS paketinde `README-INSTALL.tr.md`
+Sağlama toplamları: `intel-gpu-macos-driver-0.1.4.sha256`, projenin anahtarıyla imzası `intel-gpu-macos-driver-0.1.4.sha256.sig`. Kurulum kılavuzu: her macOS paketinde `README-INSTALL.tr.md`
 ve [depoda](https://github.com/yusufklncc/intel-gpu-macos-driver/blob/v0.1.4/release/README-INSTALL.tr.md)
 (İngilizcesi: `README-INSTALL.md`).
 

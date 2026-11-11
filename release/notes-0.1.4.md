@@ -1,19 +1,11 @@
-<!-- DRAFT for 0.1.4 (9 Nov 2026, brought up to date with main on 10 Nov). Check before publishing: the package list
-against package.sh's output, the upgrade steps against release/README-INSTALL.md's "Upgrading" section, that the B570
-lines still say "untested", that the packaged IntelXe.kext is built from main after 10 Nov (platform layer, user
-fences) and ran on the B580, and the Windows EFI tool's HybridPM / SSDT-ARCOFF lines once it has run on Windows. Also
-(merges of 10 Nov after 03:00): that the packaged kext and plugin contain them (release.sh refuses packages older than
-the last commit to their sources), the power fields of debug.intelxe.sensors read from the packaged kext, the WebGPU
-deferredRendering sample re-run in Safari with the packaged plugin, and that the ASPM lines still say "untested".
-(Merges of 10 Nov afternoon): the packaged libintelxevenc registers AV1 (vtencq --list), the Safari items re-checked with
-the packaged plugin (three.js pages, shader cache "fc spec: HIT"), tools/regress --full on the packaged build. -->
 The faster-compute release: Metal and OpenCL work goes through the driver with less locking per command buffer, and a
 translator fix doubles a matrix kernel's speed. Also: the **Arc B570**, a contributed device ID (untested by us),
 **HybridPM** for 12th-14th gen hybrid Intel CPUs, and a redesigned **IntelXe Manager** with a setup assistant from a
-fresh macOS install to a verified driver.
+fresh macOS install to a verified driver. Safari's **WebGPU** now runs compute shaders with workgroup memory and
+GPU-validated render bundles at the speed of direct draws, and releases are **signed** with the project's key.
 
 > [!WARNING]
-> Experimental. Tested on one machine with one GPU (Arc B580); the Arc B570 is supported but untested. Unsigned; needs
+> Experimental. Tested on one machine with one GPU (Arc B580); the Arc B570 is supported but untested. Not signed by Apple; needs
 > relaxed SIP/AMFI and OpenCore. Keep a USB stick with a working EFI before installing.
 
 > [!NOTE]
@@ -155,7 +147,7 @@ November); compare the columns of one table, not numbers from different days.
 | `intel-gpu-macos-driver-0.1.4-efi.zip` | the OpenCore pieces: `IntelXe.kext` (new), `SSDT-ARCOFF`, `HybridPM.kext` (new, optional), `IntelXe-EFI.ps1` for Windows | any system |
 | `intel-gpu-macos-driver-0.1.4-zink-gl.zip` | optional: OpenGL through Mesa's Zink for LWJGL 3 games (Minecraft Java); new: `cglzink-app.sh` for native OpenGL apps (experimental) | macOS |
 
-Checksums: `intel-gpu-macos-driver-0.1.4.sha256`. Install guide: `README-INSTALL.md` in each macOS package and
+Checksums: `intel-gpu-macos-driver-0.1.4.sha256`, signed with the project's key in `intel-gpu-macos-driver-0.1.4.sha256.sig`. Install guide: `README-INSTALL.md` in each macOS package and
 [in the repository](https://github.com/yusufklncc/intel-gpu-macos-driver/blob/v0.1.4/release/README-INSTALL.md)
 (Turkish: `README-INSTALL.tr.md`).
 
