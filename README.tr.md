@@ -29,7 +29,9 @@ ancak bizim tarafımızda test edilmedi.
 > [!WARNING]
 > **Deneysel bir proje.** İki kart destekleniyor (B580, B570), yalnız B580 test edildi, tek bir makinede. Kurmak için sistem güvenliğinin
 > gevşetilmesi gerekiyor (SIP ve AMFI ayarları, imzasız kext'ler); hatalı bir derleme Mac'in açılmasını engelleyebilir.
-> Denemeden önce çalışan bir OpenCore EFI'sini USB bellekte hazır tutun. Sürüm paketleri imzasızdır ve destek verilmez.
+> Denemeden önce çalışan bir OpenCore EFI'sini USB bellekte hazır tutun. Sürümler Apple tarafından imzalı değildir ve
+> destek verilmez; 0.1.4'ten itibaren her sürümün checksum listesi projenin kendi anahtarıyla imzalanıyor ve IntelXe
+> Manager indirdiği bir sürümü kurmadan önce bu imzayı denetliyor.
 
 ## Benim Mac'imde çalışır mı?
 
@@ -78,18 +80,25 @@ Her şeyi kendiniz derlemek isterseniz: [Kaynaktan derleme](#kaynaktan-derleme).
 - **OpenGL ve OpenCL:** varsayılan olarak Apple'ın Metal üzerinde çalışan GL ve OpenCL'i ile. OpenGL, bağlamını
   GLFW/EGL ile açan uygulamalarda (Minecraft gibi LWJGL 3 oyunları) Mesa'nın Zink'iyle de çalışıyor: isteğe bağlı
   `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)). Deneysel: CGL/NSOpenGL kullanan yerel uygulamalar da tek tek Zink'e
-  geçebiliyor (`cglzink-app.sh`; GZDoom MAP01 sınırsız ~1910 fps, Apple'ın OpenGL'inde ~1600). Hepsini birden geçiren
-  bir anahtar (`zink-gl/install.sh --global-gl on`, varsayılan kapalı) depoda var, B580'de henüz test edilmedi.
+  geçebiliyor (`cglzink-app.sh`; GZDoom MAP01 sınırsız ~1910 fps, Apple'ın OpenGL'inde ~1600) ya da varsayılan
+  olarak kapalı bir anahtarla hepsi birden (`zink-gl/install.sh --global-gl on` ya da uygulama listesiyle birlikte
+  uygulamanın Zink sayfası; B580'de Satranç Zink üzerinden çizdi, Apple'ın kendi uygulamaları, Safari ve Electron
+  uygulamaları dışarıda kaldı).
 - **Safari** isteğe bağlı sistem diski kopyasıyla GPU'da çalışıyor (Safari'nin GPU süreci yalnızca oradan kod
-  yükleyebiliyor); masaüstü widget'ları ve Dock simgeleri de GPU'da.
+  yükleyebiliyor); masaüstü widget'ları ve Dock simgeleri de GPU'da. Safari'de **WebGPU**: webgpu-samples örnekleri
+  (compute, parçacıklar, gölgeler, deferred rendering, render bundle'lar, bitonic sort) ve three.js sayfaları çiziyor;
+  41 WebGPU özelliğini deneyen regresyon taraması 40'ını geçiyor (41.'si `timestamp-query`, WebKit onu Intel
+  GPU'larda sunmuyor).
 - **Video:** VideoToolbox üzerinden H.264, HEVC, AV1 ve VP9 çözücüler; H.264, HEVC ve AV1 kodlayıcılar. Hepsi GPU'da;
   QuickTime, OBS, HandBrake ve ffmpeg'in `videotoolbox` kodlayıcıları bunları kullanıyor.
 - **Hatadan toparlanma:** Takılan bir iş yalnızca kendi motorunu sıfırlatıyor; masaüstü çalışmaya devam ediyor.
 - **Hibrit Intel işlemciler (12.-14. nesil):** isteğe bağlı `HybridPM.kext` (bir Lilu eklentisi,
   [`kernel/HybridPM/`](kernel/HybridPM/README.md)) macOS'un P çekirdeklerini tam hızında çalıştırmasını sağlıyor;
   sürücünün komut arabelleği başına yaptığı işlemci işi, dolayısıyla GPU da hızlanıyor.
-- **IntelXe Manager:** kurulum yardımcısı, kurma ve geri alma, EFI değişiklikleri, GPU'da Safari, Zink, HiDPI, GPU
-  testleri, menü çubuğu öğesiyle bir İzleme sayfası ve tanı raporları.
+- **IntelXe Manager:** kurulum yardımcısı, kurma ve geri alma, EFI değişiklikleri, GPU'da Safari, Zink (bütün OpenGL
+  uygulamaları anahtarının uygulama listesiyle), HiDPI, GPU testleri, menü çubuğu öğesiyle bir İzleme sayfası (saat,
+  sıcaklık, güç, kareler ve CPU'nun erişebildiği 1 GB'lık pencerenin doluluğu) ve tanı raporları. İndirdiği bir sürümü
+  yalnızca sürümün imzası doğrulanınca kuruyor.
 
 ### Bilinen sorunlar
 

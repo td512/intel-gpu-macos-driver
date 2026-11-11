@@ -48,7 +48,7 @@ EFI'yi bunun yerine Windows'tan hazırlamak için: `-efi.zip` içindeki `IntelXe
 
 ## 4. Sürücüyü kurun (3. aşama)
 
-Yardımcı macOS sürümünüze uygun paketi indirir, sürümün sağlama toplamlarıyla karşılaştırır ve kurar. Değiştirdiklerini
+Yardımcı macOS sürümünüze uygun paketi indirir, sürümün imzasını ve paketin sağlama toplamını denetler ve kurar. Değiştirdiklerini
 yedekler ve kurulumu geri alabilir.
 
 **Henüz yeniden başlatmayın.**

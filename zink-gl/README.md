@@ -61,7 +61,7 @@ for hardened applications. Not covered yet: drawing into IOSurfaces (browsers), 
 only application bundles take part, not Apple's (Chess excepted), browsers, Electron/Chromium apps, video players or
 IntelXe Manager; `/Library/IntelXe/GL/cglzink-global.txt` refuses (`-bundle.id`) or allows (`+bundle.id`) one. A taking
 part application loads `libcglzink.dylib`, the others go straight to Apple's OpenGL. `sudo ./install.sh --global-gl off`
-undoes it; do that before deleting `/Library/IntelXe/GL` by hand, as an inserted library that is missing stops every
+undoes it (IntelXe Manager's Zink page has both, and its list of applications); do that before deleting `/Library/IntelXe/GL` by hand, as an inserted library that is missing stops every
 application from starting (the LaunchAgent sets the variable only while both libraries are there, and `--undo` turns it
 off first).
 

@@ -28,7 +28,8 @@ OpenCore); the **Arc B570**, the same chip, is supported but untested by us.
 > [!WARNING]
 > **Experimental.** Two cards are supported (B580, B570), and only the B580 is tested, on one machine. Installing needs relaxed system security
 > (SIP and AMFI settings, unsigned kexts), and a bad build can stop the Mac at boot. Keep a USB stick with a working
-> OpenCore EFI before you try it. Releases are unsigned and come without support.
+> OpenCore EFI before you try it. Releases are not signed by Apple and come without support; from 0.1.4 each release's
+> list of checksums is signed with the project's own key, which IntelXe Manager checks before it installs a download.
 
 ## Will it run on my Mac?
 
@@ -76,17 +77,23 @@ To build everything yourself, see [Building from source](#building-from-source).
 - **OpenGL and OpenCL** through Apple's GL-over-Metal and OpenCL-over-Metal (the default). OpenGL also runs through
   Mesa's Zink for applications that open their context with GLFW/EGL (LWJGL 3 games such as Minecraft): the optional
   `-zink-gl.zip` ([`zink-gl/`](zink-gl/README.md)). Experimental: native CGL/NSOpenGL apps through Zink, one app at a
-  time (`cglzink-app.sh`; GZDoom MAP01 uncapped ~1910 fps against ~1600 on Apple's OpenGL). A switch for all of them
-  at once (`zink-gl/install.sh --global-gl on`, off by default) is in the repository, not yet tested on the B580.
+  time (`cglzink-app.sh`; GZDoom MAP01 uncapped ~1910 fps against ~1600 on Apple's OpenGL), or all of them at once
+  with a switch that is off by default (`zink-gl/install.sh --global-gl on`, or the app's Zink page with its list of
+  applications; on the B580 Chess drew through Zink while Apple's own apps, Safari and Electron apps stayed out).
 - **Safari** on the GPU with the optional copy of the driver on the system volume (Safari's GPU
-  process may only load code from there); desktop widgets and the Dock's icons on the GPU.
+  process may only load code from there); desktop widgets and the Dock's icons on the GPU. **WebGPU** in Safari: the
+  webgpu-samples (compute, particles, shadows, deferred rendering, render bundles, bitonic sort) and three.js pages
+  draw, and the regression sweep of 41 WebGPU features passes 40 (the 41st, `timestamp-query`, WebKit does not offer
+  on Intel GPUs).
 - **Video:** VideoToolbox decoders for H.264, HEVC, AV1 and VP9, and encoders for H.264, HEVC and AV1, all on the GPU,
   for QuickTime, OBS, HandBrake and ffmpeg's `videotoolbox` encoders.
 - **GPU recovery:** a hung job resets only its engine; the desktop keeps running.
 - **Hybrid Intel CPUs (12th-14th gen):** the optional `HybridPM.kext` (a Lilu plugin, [`kernel/HybridPM/`](kernel/HybridPM/README.md))
   lets macOS run their P-cores at full clock; the driver's CPU work per command buffer, and so the GPU, gets faster.
-- **IntelXe Manager:** a setup assistant, install and undo, the EFI changes, Safari on the GPU, Zink, HiDPI, GPU tests,
-  a Monitor page with a menu bar item, and diagnostics reports.
+- **IntelXe Manager:** a setup assistant, install and undo, the EFI changes, Safari on the GPU, Zink (with the list of
+  applications for the every-OpenGL-application switch), HiDPI, GPU tests, a Monitor page (clock, temperature, power,
+  frames and how full the CPU-visible 1 GB window is) with a menu bar item, and diagnostics reports. It installs a
+  release it downloads only when the release's signature checks out.
 
 ### Known issues
 

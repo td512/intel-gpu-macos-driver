@@ -50,7 +50,8 @@ Preparing the EFI from Windows instead: `IntelXe-EFI.ps1` in the `-efi.zip` (ful
 
 ## 4. Install the driver (stage 3)
 
-The assistant downloads the package for your macOS, checks it against the release's checksums and installs it. It
+The assistant downloads the package for your macOS, checks the release's signature and the package's checksum, and
+installs it. It
 backs up what it replaces and can undo it.
 
 **Do not restart yet.**

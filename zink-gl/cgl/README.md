@@ -66,10 +66,12 @@ When EGL does not open, or a context cannot be made, that context stays on Apple
 - A context two threads use without locking: the second thread's calls are dropped after 100 ms (said once).
 - Injection needs `DYLD_INSERT_LIBRARIES` to reach the process: true on this driver's setup (AMFI off) also for hardened
   and Apple applications. With AMFI off `launchctl setenv` passes `DYLD_*` too; the experimental switch for every
-  application uses that (`../README.md`). It is off by default and has not yet run on the B580.
+  application uses that (`../README.md`, or IntelXe Manager's Zink page with its list of applications). It is off by
+  default; on the B580 (11 Nov 2026) Chess drew through it and TextEdit, Calculator, System Settings, Safari and
+  1Password stayed on Apple's OpenGL.
 
 Tested on the build Mac (macOS 27, arm64 and x86_64 under Rosetta) through the stand-in only: every hash equal to Apple's
 GL, with and without zink's missing names. On the B580 the prototype ran Chess.app (5 Nov); this version ran GZDoom 4.14
 (MAP01, uncapped: ~1910 fps, against ~1600 on Apple's GL; 9-10 Nov). The boot library (10 Nov), through the stand-in:
 with `CGLZINK_GLOBAL_ANY=1` the layer adopts the contexts and the hashes equal Apple's; without it `layertest` stays
-out. Not yet run on the B580.
+out. On the B580 (11 Nov 2026) with `install.sh --global-gl on`: as above.
