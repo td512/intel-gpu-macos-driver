@@ -7,7 +7,8 @@
 #
 # Checks (all must pass, also for --publish):
 #   - VERSION in the repository, the branch (main), a clean work tree (untracked files only warn);
-#   - the tag vVERSION exists neither here nor on origin or gitlab; origin/main is an ancestor of HEAD (a fast-forward);
+#   - the tag vVERSION exists neither here nor on origin or gitlab; origin/main and gitlab/public are ancestors of HEAD
+#     (fast-forwards);
 #   - every copy of the supported-device list matches data/platforms.json (tools/parity/devices.py);
 #   - OUT_DIR holds the package zips of package.sh and the app, built after the last commit to what goes into them
 #     (code, scripts, templates, packager; not documentation), and its .sha256 matches them;
@@ -17,7 +18,8 @@
 #     "draft" or "TODO" left; release/install.sh and README-INSTALL*.md (package.sh's filled copies) are of VERSION;
 #   - the machine-identity scan (tools/commit-plan-scan.py of the private repo, when present) finds nothing in the
 #     notes and the filled guides.
-# Publishing: git tag -a vVERSION; git push origin main vVERSION; the same to gitlab (the local GitLab mirror);
+# Publishing: git tag -a vVERSION; git push origin main vVERSION; to gitlab (the local GitLab mirror) main goes to its
+# branch public (gitlab's main is a separate, private history: never pushed to);
 # gh release create vVERSION <zips> --notes-file release/notes-VERSION.md. Each step stops the rest on failure.
 set -uo pipefail
 [ $# -ge 2 ] || { sed -n '3,21p' "$0"; exit 2; }
@@ -53,6 +55,9 @@ done
 if out=$(python3 tools/parity/devices.py 2>&1); then ok "supported-device lists match data/platforms.json ($(tail -1 <<< "$out" | sed 's/^devices: //'))"
 else bad "supported-device lists differ from data/platforms.json: $(grep -c '^FAIL' <<< "$out") (python3 tools/parity/devices.py)"; fi
 git fetch -q origin main 2>/dev/null && { git merge-base --is-ancestor origin/main HEAD && ok "origin/main is an ancestor of HEAD ($(git rev-list --count origin/main..HEAD) commits to push)" || bad "origin/main is not an ancestor of HEAD: not a fast-forward"; } || warn "origin not fetched"
+if git remote get-url gitlab >/dev/null 2>&1; then
+	git fetch -q gitlab public 2>/dev/null && { git merge-base --is-ancestor gitlab/public HEAD && ok "gitlab/public is an ancestor of HEAD" || bad "gitlab/public is not an ancestor of HEAD: not a fast-forward"; } || warn "gitlab not fetched"
+fi
 
 # --- packages
 for f in "$N-tahoe.zip" "$N-sequoia.zip" "$N-efi.zip" "$N.sha256" "IntelXe-Manager-$VER.zip"; do
@@ -109,7 +114,7 @@ echo "== $fails failure(s)"
 CMDS=(
 	"git tag -a v$VER -m 'intel-gpu-macos-driver $VER'"
 	"git push origin main v$VER"
-	"git push gitlab main v$VER"
+	"git push gitlab main:public v$VER"
 	"gh release create v$VER $(cd "$OUT" 2>/dev/null && ls | grep -E "^($N|IntelXe-Manager-$VER)" | sed "s#^#'$OUT/#; s#\$#'#" | tr '\n' ' ')--title 'intel-gpu-macos-driver $VER' --notes-file $NOTES"
 )
 echo "== the publishing steps:"
