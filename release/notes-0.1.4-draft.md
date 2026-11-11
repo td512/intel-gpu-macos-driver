@@ -76,6 +76,11 @@ fresh macOS install to a verified driver.
   quality, compute rate, bandwidth, smoothness) and a long test; a Monitor page with five-minute charts of the GPU clock,
   temperature and frames, and an optional menu bar item; a Power and app page; start-up warnings with fixes; an
   install that shows its steps; an About window.
+- **Signed releases.** From 0.1.4 on, a release's list of hashes (`.sha256`) is signed with the project's Ed25519 key
+  (`.sha256.sig`, `release/signing.swift`). IntelXe Manager installs a package it downloaded only when that signature
+  verifies with the key built into it and the zip's hash is in the list; a release that only came from the same
+  GitHub page is refused. To check by hand: `swift release/signing.swift verify <key from app/Sources/Signing.swift>
+  intel-gpu-macos-driver-0.1.4.sha256 intel-gpu-macos-driver-0.1.4.sha256.sig`.
 - **Safari on the GPU from the app.** The Driver page's *Safari and WebKit* section installs, checks and removes the
   system-volume copy of the Metal driver and tells when a macOS update removed it; the EFI page sets OpenCore's
   `SecureBootModel` to `Disabled`, which that copy needs (backed up, undoable).

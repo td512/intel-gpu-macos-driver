@@ -228,11 +228,15 @@ func packageSuffix(macOSMajor: Int) -> String? {
     }
 }
 
-/// Downloads a release's zip, compares it with the release's list of hashes, and unpacks it.
-/// The list comes from the same place as the zip: this finds a damaged download, it does not prove who made the release.
+/// Downloads a release's zip, checks that the release's list of hashes is signed with the project's key (Signing.swift)
+/// and that the zip's hash is in it, and unpacks it. The signature proves who made the release; the hash finds a damaged
+/// or replaced download.
 func download(_ release: Release, suffix: String, progress: @escaping @Sendable (String) -> Void) async throws -> Package {
     guard let asset = release.asset(suffix) else { throw ManagerError.message("This release has no \(suffix) package.") }
     guard let sums = release.asset(".sha256") else { throw ManagerError.message("This release has no list of hashes.") }
+    guard let signature = release.asset(".sha256.sig") else {
+        throw ManagerError.message("This release's list of hashes is not signed, so the app cannot tell that the project made it. Download the package from the release page and choose its folder on the Driver page if you trust it.")
+    }
     let target = dataDirectory.appendingPathComponent("packages/\(release.tag_name)")
     try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
     let folder = target.appendingPathComponent(String(asset.name.dropLast(4)))
@@ -242,7 +246,14 @@ func download(_ release: Release, suffix: String, progress: @escaping @Sendable 
     progress("Downloading \(asset.name)")
     var request = URLRequest(url: sums.browser_download_url)
     request.setValue("IntelXe-Manager", forHTTPHeaderField: "User-Agent")
-    let list = String(data: try await URLSession.shared.data(for: request).0, encoding: .utf8) ?? ""
+    let listData = try await URLSession.shared.data(for: request).0
+    var sigRequest = URLRequest(url: signature.browser_download_url)
+    sigRequest.setValue("IntelXe-Manager", forHTTPHeaderField: "User-Agent")
+    let sigText = String(data: try await URLSession.shared.data(for: sigRequest).0, encoding: .utf8) ?? ""
+    guard releaseSignatureValid(list: listData, signature: sigText) else {
+        throw ManagerError.message("This release's signature does not match the project's key: the package was not made by the project, or was changed. Nothing was installed.")
+    }
+    let list = String(data: listData, encoding: .utf8) ?? ""
     guard let expected = listedHash(list, name: asset.name) else { throw ManagerError.message("\(asset.name) is not in the list of hashes.") }
     let (file, _) = try await URLSession.shared.download(from: asset.browser_download_url)
     defer { try? FileManager.default.removeItem(at: file) }

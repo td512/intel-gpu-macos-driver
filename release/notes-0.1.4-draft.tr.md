@@ -85,6 +85,11 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
   kalitesi, hesaplama hızı, bant genişliği, akıcılık) ve uzun bir test; GPU saati, sıcaklık ve kareler için beş
   dakikalık grafikleriyle bir İzleme sayfası ve isteğe bağlı bir menü çubuğu öğesi; bir Güç ve uygulama sayfası;
   çözümleriyle açılış uyarıları; adımlarını gösteren bir kurulum; bir Hakkında penceresi.
+- **İmzalı sürümler.** 0.1.4'ten itibaren bir sürümün hash listesi (`.sha256`) projenin Ed25519 anahtarıyla
+  imzalanıyor (`.sha256.sig`, `release/signing.swift`). IntelXe Manager indirdiği bir paketi yalnızca bu imza içine
+  gömülü anahtarla doğrulanıyorsa ve zip'in hash'i listedeyse kuruyor; yalnızca aynı GitHub sayfasından gelen bir sürüm
+  reddediliyor. Elle denetlemek için: `swift release/signing.swift verify <app/Sources/Signing.swift'teki anahtar>
+  intel-gpu-macos-driver-0.1.4.sha256 intel-gpu-macos-driver-0.1.4.sha256.sig`.
 - **Safari uygulamadan GPU'da.** Sürücü sayfasının *Safari ve WebKit* bölümü Metal sürücüsünün sistem birimi kopyasını
   kuruyor, denetliyor ve kaldırıyor, bir macOS güncellemesi onu sildiğinde bunu söylüyor; EFI sayfası o kopyanın
   gerektirdiği OpenCore `SecureBootModel = Disabled` ayarını yapıyor (yedekli, geri alınabilir).

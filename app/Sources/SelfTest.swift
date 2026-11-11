@@ -282,6 +282,14 @@ func selfTest() {
     let decoded = try? JSONDecoder().decode(Release.self, from: Data(sample.utf8))
     expect(decoded?.version == Version("0.1.2") && decoded?.asset("-tahoe.zip") != nil && decoded?.asset(".sha256") != nil && decoded?.asset("-zink-gl.zip") == nil, "a release as GitHub's API sends it")
 
+    // release signatures (Signing.swift): a list signed with the project's key verifies, a changed list or signature does not
+    let signedList = Data("intel-gpu-macos-driver selftest list\n".utf8)
+    let goodSignature = "sG8t9iThA+B3qjfc6FM68/zDaUgkU52zyozwZ4xBTq5Nw2avuL5YtbEQD1wIDhAXDVedCT9g7qvxI0VfhND6BQ=="
+    expect(releaseSignatureValid(list: signedList, signature: goodSignature + "\n"), "a list signed with the project's key verifies")
+    expect(!releaseSignatureValid(list: Data("intel-gpu-macos-driver selftest lisT\n".utf8), signature: goodSignature), "a changed list does not verify")
+    expect(!releaseSignatureValid(list: signedList, signature: "A" + goodSignature.dropFirst()), "a changed signature does not verify")
+    expect(!releaseSignatureValid(list: signedList, signature: "not base64"), "a signature that is not base64 does not verify")
+
     let facts = SystemFacts.probe()
     print("facts macOS \(facts.macOS), \(facts.architecture), card \(facts.hasCard), kext \(facts.kextLoaded), metal '\(facts.metalDevice)', sip '\(facts.sipText)', installed \(facts.installedVersion ?? "-"), zink \(facts.zinkInstalled)/\(facts.zinkGlobal)")
     for check in facts.checks { print("check \(check.id): \(check.state) \(check.value)") }

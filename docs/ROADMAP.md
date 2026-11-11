@@ -243,7 +243,10 @@ translations deep. ANV is already on the machine (Zink uses it directly). The id
   bug report (Report page); GPU tests; a check at login.
 - The EFI page reads the EFI again when its files change outside the app (a fingerprint of config.plist, ACPI, Kexts and
   Drivers: when the page shows, when the app comes to the front, every 5 s while it is open).
-- Next: release signatures that are independent of GitHub.
+- Release signatures independent of GitHub (11 Nov): `release/signing.swift` (Ed25519, CryptoKit) signs the `.sha256`
+  list when `package.sh` runs with `SIGN_KEY`; `release.sh` refuses a release without a signature its app accepts; the
+  app (`Signing.swift`) refuses a download whose list is not signed. Next: the key's successor procedure (a new key
+  added to the app in a release signed with the old one).
 
 ## Other Xe2 (Battlemage) cards
 

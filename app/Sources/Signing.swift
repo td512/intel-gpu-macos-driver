@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: MIT
+// Release signatures: a release's list of hashes (VERSION.sha256) is signed with the project's Ed25519 key
+// (release/signing.swift, VERSION.sha256.sig beside it). The app installs a downloaded package only when that list is
+// signed by a key below and the zip's hash is in it, so a release that only came from the same GitHub page (an account
+// taken over, an asset replaced) is refused.
+import CryptoKit
+import Foundation
+
+/// Ed25519 public keys whose signatures the app accepts (base64 of the raw 32 bytes). A new key goes here in an app
+/// release signed with an old one before the old one is retired.
+let releaseSigningKeys = ["PZGslAxn39LtMGgkWHbn9MzK8nc+IeM2TrvJpbifZXA="]
+
+/// Whether `signature` (the .sig file's text: base64, one line) is a signature of `list` by one of releaseSigningKeys.
+func releaseSignatureValid(list: Data, signature: String) -> Bool {
+    guard let sig = Data(base64Encoded: signature.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+    return releaseSigningKeys.contains { key in
+        guard let raw = Data(base64Encoded: key), let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: raw) else { return false }
+        return publicKey.isValidSignature(sig, for: list)
+    }
+}

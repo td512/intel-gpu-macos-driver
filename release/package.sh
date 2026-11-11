@@ -15,6 +15,8 @@
 #   intel-gpu-macos-driver-VERSION-efi.zip                    (the OpenCore pieces, the same in both; any system;
 #                                                              with windows/IntelXe-EFI.ps1 and its README)
 #   intel-gpu-macos-driver-VERSION.sha256
+#   intel-gpu-macos-driver-VERSION.sha256.sig  with SIGN_KEY=<Ed25519 private key file> (release/signing.swift): the
+#                                              list's signature, which IntelXe Manager checks before it installs a download
 # With ZINK_DIR set in the environment also intel-gpu-macos-driver-VERSION-zink-gl.zip (see below), and with APP_DIR
 # (the folder app/build.sh wrote) IntelXe-Manager-VERSION.zip, the app.
 set -euo pipefail
@@ -138,4 +140,9 @@ if [ -n "${APP_DIR:-}" ]; then
     ZIPS+=("IntelXe-Manager-$VER.zip")
 fi
 (cd "$OUT" && shasum -a 256 "${ZIPS[@]}" > "$N.sha256")
+rm -f "$OUT/$N.sha256.sig"
+if [ -n "${SIGN_KEY:-}" ]; then
+    swift "$R/signing.swift" sign "$SIGN_KEY" "$OUT/$N.sha256" || { echo "signing failed"; exit 1; }
+    echo "signed: $N.sha256.sig"
+fi
 cat "$OUT/$N.sha256"

@@ -11,7 +11,8 @@
 #     (fast-forwards);
 #   - every copy of the supported-device list matches data/platforms.json (tools/parity/devices.py);
 #   - OUT_DIR holds the package zips of package.sh and the app, built after the last commit to what goes into them
-#     (code, scripts, templates, packager; not documentation), and its .sha256 matches them;
+#     (code, scripts, templates, packager; not documentation), and its .sha256 matches them and is signed
+#     (.sha256.sig) with a key IntelXe Manager accepts (app/Sources/Signing.swift);
 #   - the versions inside: IntelXe.kext and HybridPM.kext in the -efi.zip, IntelXe Manager in its zip, install.sh in the
 #     Tahoe and Sequoia zips;
 #   - the release notes release/notes-VERSION.md (the final file, not the -draft) exist, say VERSION and have no
@@ -76,6 +77,14 @@ for f in "$N-tahoe.zip" "$N-sequoia.zip" "$N-efi.zip" "$N-zink-gl.zip" "IntelXe-
 done
 if [ -f "$OUT/$N.sha256" ]; then
 	(cd "$OUT" && shasum -a 256 -c "$N.sha256" >/dev/null 2>&1) && ok "$N.sha256 matches" || bad "$N.sha256 does not match the files"
+	# the app refuses a download whose list is not signed with one of its keys
+	if [ -f "$OUT/$N.sha256.sig" ]; then
+		signed=no
+		for key in $(sed -n 's/^let releaseSigningKeys = \[\(.*\)\]/\1/p' app/Sources/Signing.swift | tr -d '",'); do
+			swift release/signing.swift verify "$key" "$OUT/$N.sha256" "$OUT/$N.sha256.sig" >/dev/null 2>&1 && signed=yes
+		done
+		[ $signed = yes ] && ok "$N.sha256.sig is a signature IntelXe Manager accepts" || bad "$N.sha256.sig does not verify with app/Sources/Signing.swift's keys"
+	else bad "no $N.sha256.sig: IntelXe Manager refuses unsigned releases (package with SIGN_KEY=<key file>)"; fi
 fi
 if [ -f "$OUT/$N-efi.zip" ]; then
 	v=$(zipver "$OUT/$N-efi.zip" "$N-efi/EFI/OC/Kexts/IntelXe.kext/Contents/Info.plist"); [ "$v" = "$VER" ] && ok "IntelXe.kext $v" || bad "IntelXe.kext in the -efi.zip is ${v:-unreadable}"
