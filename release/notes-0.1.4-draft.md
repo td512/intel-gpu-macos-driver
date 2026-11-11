@@ -49,8 +49,8 @@ fresh macOS install to a verified driver.
   environment maps, instancing, compute, shadows); its output pass read a uniform through a pointer kept in an argument
   buffer, which the translator turned into zero. WebGPU render bundles that WebKit validates on the GPU now work: a
   shader that encodes draws into an indirect command buffer (`render_command`, WebKit's `vsICB`) is translated, and the
-  draws run from per-slot records with `vkCmdDraw*Indirect` (one indirect draw per slot, records in VRAM: an indexed
-  slot costs about 2.6 µs of GPU time, down from 11 µs). WGSL compute shaders with a `var<workgroup>` failed
+  draws run from per-slot records with `vkCmdDraw*Indirect` (records in VRAM; consecutive slots with the same state
+  are one multi-draw: about 0.03 µs of GPU time per slot, as direct draws, down from 11 µs). WGSL compute shaders with a `var<workgroup>` failed
   `createComputePipeline` in Safari: WebKit zeroes workgroup memory one byte at a time through a byte pointer into
   each 32-bit word, which Vulkan cannot express; the translator now writes each byte as a read-modify-write of its
   word (and a Metal `threadgroup` struct parameter zeroed whole, `s = S{}`, was refused for a related reason). Metal's GPU timestamps (counter sampling at stage
@@ -290,9 +290,10 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
   the B580: 7 of 7 with it black, 3 of 3 without it and 8 of 8 WebGPU samples correct).
 - **GPU-encoded indexed draws** must point into the index buffer the CPU encoded for that slot, with its primitive type
   (core Vulkan takes neither from GPU memory), and a slot the CPU encoded as an indexed draw takes only indexed draws
-  from a shader; others are skipped and logged. WebKit's validation shader always meets these. Each slot of an indirect
-  command buffer a shader can write still costs about 2 µs of GPU time (ANV reads each indirect parameter with its own
-  register load), so large GPU-encoded command buffers are slow.
+  from a shader; others are skipped and logged. WebKit's validation shader always meets these. In an indirect command
+  buffer a shader can write, a slot whose state (pipeline, buffers, depth or raster state) differs from the slot
+  before it still costs about 2 µs of GPU time (ANV reads each indirect parameter of a single draw with its own register
+  load); runs of slots with the same state cost about 0.03 µs each.
 - **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental: no IOSurface drawing (browsers) or CGL
   pbuffers yet.
 - **The switch for every OpenGL application** (`install.sh --global-gl on`) is experimental and off by default; it ran on

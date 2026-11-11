@@ -231,6 +231,7 @@ static int g_tess;
 static int g_indep;
 static int g_a2one;
 static int g_depth_bounds;   /* the depthBounds feature: Metal's setDepthTestMinBound:maxBound: */
+static int g_multidraw;      /* multiDrawIndirect: runs of GPU-encodable ICB slots as one indirect draw (drawCount > 1) */
 static int g_dual;
 static int g_wide;
 static PFN_vkCmdSetLineWidth pvkCmdSetLineWidth;
@@ -1225,6 +1226,8 @@ static int nvmtl_vk_initialize(void)
     nvlog("vk: depthBounds %s", g_depth_bounds ? "AVAILABLE" : "ABSENT - setDepthTestMinBound:maxBound: is refused");
     enabled.dualSrcBlend = supported.dualSrcBlend; g_dual = supported.dualSrcBlend == VK_TRUE;
     enabled.wideLines = supported.wideLines; g_wide = supported.wideLines == VK_TRUE;
+    enabled.multiDrawIndirect = supported.multiDrawIndirect; g_multidraw = supported.multiDrawIndirect == VK_TRUE;
+    enabled.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;   // an ICB record's base instance (Metal allows any)
     nvlog("vk: sel1 wideLines %s (range %g..%g)", g_wide ? "AVAILABLE" : "ABSENT", (double)g_lim.lineWidthRange[0], (double)g_lim.lineWidthRange[1]);
     nvlog("vk: par2 dualSrcBlend %s", g_dual ? "AVAILABLE" : "ABSENT");
     if (pnvk_sparse && pnvk_sparse() == 1 && supported.sparseBinding) { enabled.sparseBinding = VK_TRUE; g_sparse = 1; }
@@ -9581,6 +9584,13 @@ int nvmtl_vk_copy_image_to_buffer_layer(nvk_queue *q, nvk_image *img, uint32_t x
 
 void nvmtl_vk_cmd_draw_indirect(nvk_cmdbuf *c, nvk_buffer *b, size_t off)
 { if (c->nobind) return; NVMTL_SEMU_DRAW(c, pvkCmdDrawIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0)); }
+/* n indirect draws whose arguments are stride bytes apart (GPU-encodable ICB runs); 1 at a time without multiDrawIndirect */
+void nvmtl_vk_cmd_draw_indirect_n(nvk_cmdbuf *c, nvk_buffer *b, size_t off, uint32_t n, uint32_t stride)
+{
+    if (c->nobind || !n) return;
+    if (g_multidraw) { NVMTL_SEMU_DRAW(c, pvkCmdDrawIndirect(c->cb, (VkBuffer)b->buf, off, n, stride)); return; }
+    for (uint32_t i = 0; i < n; i++) NVMTL_SEMU_DRAW(c, pvkCmdDrawIndirect(c->cb, (VkBuffer)b->buf, off + (size_t)i * stride, 1, 0));
+}
 int nvmtl_vk_cmd_draw_patches(nvk_cmdbuf *c, const nvk_pipeline *p, uint64_t fac, uint32_t istride, float scale, uint64_t cpx, uint64_t pix,
                               uint32_t start, uint32_t count, uint32_t instances, uint32_t baseInstance, nvk_buffer *ind, size_t indoff)
 {
@@ -9612,6 +9622,15 @@ void nvmtl_vk_cmd_draw_indexed_indirect(nvk_cmdbuf *c, nvk_buffer *idx, size_t i
     nvmtl_bind_index(c, idx, idxOff, is32);
     if (c->nobind) return;
     NVMTL_SEMU_DRAW(c, pvkCmdDrawIndexedIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0));
+}
+void nvmtl_vk_cmd_draw_indexed_indirect_n(nvk_cmdbuf *c, nvk_buffer *idx, size_t idxOff, int is32, nvk_buffer *b, size_t off,
+                                          uint32_t n, uint32_t stride)
+{
+    if (!n || !nvmtl_index_range_ok(idx, idxOff)) return;
+    nvmtl_bind_index(c, idx, idxOff, is32);
+    if (c->nobind) return;
+    if (g_multidraw) { NVMTL_SEMU_DRAW(c, pvkCmdDrawIndexedIndirect(c->cb, (VkBuffer)b->buf, off, n, stride)); return; }
+    for (uint32_t i = 0; i < n; i++) NVMTL_SEMU_DRAW(c, pvkCmdDrawIndexedIndirect(c->cb, (VkBuffer)b->buf, off + (size_t)i * stride, 1, 0));
 }
 void nvmtl_vk_cmd_dispatch_indirect(nvk_cmdbuf *c, nvk_pipeline *p, nvk_buffer *b, size_t off)
 {

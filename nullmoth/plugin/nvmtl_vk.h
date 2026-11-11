@@ -478,6 +478,10 @@ int  nvmtl_vk_copy_image_to_buffer(nvk_queue *q, nvk_image *img, uint32_t x, uin
                                    nvk_buffer *b, size_t off, uint32_t row_bytes);
 void nvmtl_vk_cmd_draw_indirect(nvk_cmdbuf *c, nvk_buffer *b, size_t off);
 void nvmtl_vk_cmd_draw_indexed_indirect(nvk_cmdbuf *c, nvk_buffer *idx, size_t idxOff, int is32, nvk_buffer *b, size_t off);
+/* n draws whose arguments are stride bytes apart, as one vkCmdDraw*Indirect when multiDrawIndirect is on */
+void nvmtl_vk_cmd_draw_indirect_n(nvk_cmdbuf *c, nvk_buffer *b, size_t off, uint32_t n, uint32_t stride);
+void nvmtl_vk_cmd_draw_indexed_indirect_n(nvk_cmdbuf *c, nvk_buffer *idx, size_t idxOff, int is32, nvk_buffer *b, size_t off,
+                                          uint32_t n, uint32_t stride);
 void nvmtl_vk_cmd_dispatch_indirect(nvk_cmdbuf *c, nvk_pipeline *p, nvk_buffer *b, size_t off);
 void nvmtl_vk_cmd_barrier(nvk_cmdbuf *c);
 void nvmtl_vk_buffer_destroy(nvk_buffer *b);

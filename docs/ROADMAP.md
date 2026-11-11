@@ -97,7 +97,12 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
     system RAM (a PCIe read each); an indexed slot also issued a second, zero-count draw. Now the records are in VRAM
     through the BAR (`nvmtl_vk_buffer_create` host_visible 3, whatever the Shared policy; the CPU keeps its own copy and
     never reads them back) and each slot issues one draw: 2.6 us per indexed slot, 2.2 us per plain slot (4.3x and
-    2.3x). Still ~60x a direct draw: a large GPU-encoded ICB is slow.
+    2.3x). Then runs (11 Nov evening): consecutive slots that replay the same state (the same pipeline, depth and
+    raster state and buffer bindings, the same draw form, index buffer and primitive type) are one
+    `vkCmdDraw*Indirect` with `drawCount` > 1 over their records (stride 64; `multiDrawIndirect` is now enabled), which
+    ANV executes without a register load per argument: 0.030 us per indexed slot and 0.020 us per plain slot, encode
+    0.033 us per slot (88x and 110x; the same as direct draws). Slots whose state differs from the previous slot's
+    still cost ~2 us each.
 - **Limits (core Vulkan takes neither an index buffer address nor a topology from GPU memory).** A GPU-written indexed
   draw must point into the index buffer the CPU encoded in that slot (same index type, inside the buffer, aligned):
   the first index is computed from the pointer. A GPU-written draw must use the topology the execute chose (the
@@ -107,9 +112,6 @@ The order is roughly the intended one. Every item should follow the Linux xe/i91
   same buffer). The newer WebKit `vsICBIndirect*` helpers (WebKit main, not yet in Safari 26.7) encode indexed draws
   into slots the CPU never filled: those are refused until the next step.
 - **Next:**
-  - Fewer indirect loads: runs of slots with the same CPU state, form and index buffer as one multi-draw
-    (`drawCount` > 1, stride 64), which ANV executes with its generated-draws shader or `EXECUTE_INDIRECT_DRAW`
-    instead of a register load per parameter.
   - Index buffer by address: `VK_EXT_device_generated_commands` (ANV exposes it for verx10 >= 125, so on Xe2) has
     an index-buffer token that takes a device address from GPU memory. A slot record laid out as a DGC sequence
     (index-buffer token + draw-indexed token) executed with `vkCmdExecuteGeneratedCommandsEXT` would remove the

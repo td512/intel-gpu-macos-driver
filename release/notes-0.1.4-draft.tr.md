@@ -55,8 +55,8 @@ kurulumundan doğrulanmış sürücüye kadar götüren bir kurulum yardımcıs�
   malzemeler, ortam haritaları, instancing, compute, gölgeler); çıktı pass'i argument buffer'da tutulan bir işaretçiden
   uniform okuyordu ve çevirici bunu sıfıra çeviriyordu. WebKit'in GPU'da doğruladığı WebGPU render bundle'ları artık
   çalışıyor: indirect command buffer'a çizim kodlayan gölgelendirici (`render_command`, WebKit'in `vsICB`'si) çevriliyor
-  ve çizimler slot kayıtlarından `vkCmdDraw*Indirect` ile yapılıyor (slot başına tek dolaylı çizim, kayıtlar VRAM'de:
-  indeksli bir slot 11 µs yerine yaklaşık 2,6 µs GPU zamanı tutuyor). `var<workgroup>` kullanan WGSL compute
+  ve çizimler slot kayıtlarından `vkCmdDraw*Indirect` ile yapılıyor (kayıtlar VRAM'de; aynı durumdaki ardışık slotlar tek
+  bir çoklu çizim: slot başına 11 µs yerine yaklaşık 0,03 µs GPU zamanı, doğrudan çizimler kadar). `var<workgroup>` kullanan WGSL compute
   gölgelendiricileri Safari'de `createComputePipeline`'da başarısız oluyordu: WebKit workgroup belleğini her 32 bitlik
   sözcüğe bayt işaretçisiyle bayt bayt yazarak sıfırlıyor ve Vulkan bunu ifade edemiyor; çevirici artık her baytı
   sözcüğünün oku-değiştir-yaz işlemi olarak yazıyor (bütünüyle sıfırlanan, `s = S{}`, bir Metal `threadgroup` struct
@@ -303,9 +303,10 @@ neden kapalı olduğu Bilinen sorunlar'da.
 - **GPU'da kodlanan indeksli çizimler** CPU'nun o slota kodladığı indeks tamponunun içini ve onun ilkel türünü
   göstermeli (çekirdek Vulkan ikisini de GPU belleğinden alamıyor) ve CPU'nun indeksli çizim kodladığı bir slot
   gölgelendiriciden yalnızca indeksli çizim alıyor; diğerleri atlanıp log'a yazılıyor. WebKit'in doğrulama
-  gölgelendiricisi bunlara her zaman uyuyor. Gölgelendiricinin yazabildiği bir indirect command buffer'ın her slotu hâlâ
-  yaklaşık 2 µs GPU zamanı tutuyor (ANV her dolaylı parametreyi ayrı bir yazmaç yüklemesiyle okuyor); büyük, GPU'da
-  kodlanan komut tamponları yavaş.
+  gölgelendiricisi bunlara her zaman uyuyor. Gölgelendiricinin yazabildiği bir indirect command buffer'da durumu
+  (pipeline, tamponlar, derinlik ya da raster durumu) önceki slottan farklı olan bir slot hâlâ yaklaşık 2 µs GPU zamanı
+  tutuyor (ANV tek bir çizimin her dolaylı parametresini ayrı bir yazmaç yüklemesiyle okuyor); aynı durumdaki slot
+  dizileri slot başına yaklaşık 0,03 µs.
 - **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel: IOSurface'e çizim (tarayıcılar) ve CGL
   pbuffer'ları henüz desteklenmiyor.
 - **Bütün OpenGL uygulamaları için anahtar** (`install.sh --global-gl on`) deneysel ve varsayılan olarak kapalı; B580'de

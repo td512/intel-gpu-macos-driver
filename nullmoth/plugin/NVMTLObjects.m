@@ -4845,10 +4845,28 @@ static BOOL nvmtl_bytes_ring_at(__unsafe_unretained NVMTLCommandBuffer *cb, NSUI
 // The app orders the shader's writes before this with a barrier or an encoder boundary, as Metal requires
 // (memoryBarrierWithScope: and the pass boundary are ALL_COMMANDS MEMORY_WRITE -> MEMORY_READ, which covers the
 // indirect-argument read).
+// Slot b joins a run that slot a started when replaying b changes nothing a's replay set: the same state fields (the
+// same objects, the same buffer bindings), the same CPU draw form and primitive type, and for an indexed slot the same
+// index buffer, offset and index size. A run is one vkCmdDraw*Indirect with drawCount > 1 over consecutive records
+// (64 bytes apart), which ANV can execute without one register load per argument (nvmtl_icb_layout.h).
+static BOOL nvmtl_icb_same_slot(NVMTLIndirectCommand *a, NVMTLIndirectCommand *b) {
+    if (a->_isCompute || b->_isCompute || a->_ps != b->_ps || a->_ds != b->_ds) return NO;
+    if (a->_hasCull != b->_hasCull || (a->_hasCull && a->_cull != b->_cull)) return NO;
+    if (a->_hasWinding != b->_hasWinding || (a->_hasWinding && a->_winding != b->_winding)) return NO;
+    if (a->_hasFill != b->_hasFill || (a->_hasFill && a->_fill != b->_fill)) return NO;
+    if (a->_hasClip != b->_hasClip || (a->_hasClip && a->_clip != b->_clip)) return NO;
+    if (a->_hasBias != b->_hasBias || (a->_hasBias && (a->_bias != b->_bias || a->_slope != b->_slope || a->_clamp != b->_clamp))) return NO;
+    if (!(a->_vbufs.count == 0 && b->_vbufs.count == 0) && ![a->_vbufs isEqualToArray:b->_vbufs]) return NO;
+    if (!(a->_fbufs.count == 0 && b->_fbufs.count == 0) && ![a->_fbufs isEqualToArray:b->_fbufs]) return NO;
+    if (a->_armed != b->_armed || (a->_armed && (a->_type != b->_type || a->_indexed != b->_indexed))) return NO;
+    if (a->_armed && a->_indexed && (a->_ibuf != b->_ibuf || a->_ioff != b->_ioff || a->_itype != b->_itype)) return NO;
+    return YES;
+}
+
 - (void)nvmtlExecuteRecords:(NVMTLIndirectCommandBuffer *)b range:(NSRange)r {
     nvmtl_icb_record *rec = [b nvmtlRecords];
     nvmtl_retain_resource(_cb, b); nvmtl_retain_resource(_cb, b->_rec);
-    NSUInteger n = 0;
+    NSUInteger n = 0, runs = 0;
     const NSUInteger end = MIN(r.location + r.length, b->_cmds.count);
     for (NSUInteger i = r.location; i < end; i++) {
         NVMTLIndirectCommand *c = b->_cmds[i];
@@ -4874,17 +4892,25 @@ static BOOL nvmtl_bytes_ring_at(__unsafe_unretained NVMTLCommandBuffer *cb, NSUI
         if ([self nvmtlVertexInputs]) continue;
         const size_t at = i * (size_t)NVMTL_ICB_RECORD_BYTES;
         NVMTLBuffer *ib = c->_armed && c->_indexed && [(id)c->_ibuf isKindOfClass:[NVMTLBuffer class]] ? (NVMTLBuffer *)c->_ibuf : nil;
-        // one indirect draw per slot: the indexed form when the slot has an index buffer (the translator refuses a plain
-        // draw a shader writes there), else the plain form
-        if (ib && rec[i].ibShift) {
+        // the slots after this one that replay the same state (nvmtl_icb_same_slot) and have the same draw form go with it
+        const uint32_t form = ib ? rec[i].ibShift : 0;
+        NSUInteger j = i + 1;
+        while (j < end && nvmtl_icb_same_slot(c, b->_cmds[j]) && (ib ? rec[j].ibShift : 0) == form) {
+            if (rec[j].execPrim != prim) [b nvmtlSetExecPrim:j prim:prim];
+            j++;
+        }
+        const uint32_t run = (uint32_t)(j - i);
+        // the indexed form when the slot has an index buffer (the translator refuses a plain draw a shader writes there),
+        // else the plain form
+        if (ib && form) {
             nvmtl_retain_resource(_cb, ib);
-            const uint32_t sh = rec[i].ibShift;
-            nvmtl_vk_cmd_draw_indexed_indirect(&_cb->_c, &ib->_b, c->_ioff & ((1u << sh) - 1u), sh == 2,
-                                               &b->_rec->_b, at + NVMTL_ICB_W_IDX * 4);
-        } else nvmtl_vk_cmd_draw_indirect(&_cb->_c, &b->_rec->_b, at + NVMTL_ICB_W_DRAW * 4);
-        n++;
+            nvmtl_vk_cmd_draw_indexed_indirect_n(&_cb->_c, &ib->_b, c->_ioff & ((1u << form) - 1u), form == 2,
+                                                 &b->_rec->_b, at + NVMTL_ICB_W_IDX * 4, run, NVMTL_ICB_RECORD_BYTES);
+        } else nvmtl_vk_cmd_draw_indirect_n(&_cb->_c, &b->_rec->_b, at + NVMTL_ICB_W_DRAW * 4, run, NVMTL_ICB_RECORD_BYTES);
+        n += run; runs++;
+        i = j - 1;
     }
-    { static int said; if (said++ < 8) nvlog("executeCommandsInBuffer: %lu of %lu slot(s) drawn from their records (GPU-encodable ICB)", (unsigned long)n, (unsigned long)r.length); }
+    { static int said; if (said++ < 8) nvlog("executeCommandsInBuffer: %lu of %lu slot(s) drawn from their records in %lu indirect draw(s) (GPU-encodable ICB)", (unsigned long)n, (unsigned long)r.length, (unsigned long)runs); }
     // diagnostic: a GPU-written draw the execute could not express (nvmtl_icb_layout.h, kind REFUSED), said up to 8 times per
     // ICB and looked for in its first 32 executes only (the records may be in VRAM: each read crosses the BAR)
     if (b->_refusedSaid < 8 && b->_refusedChecks < 32 && end > r.location) {

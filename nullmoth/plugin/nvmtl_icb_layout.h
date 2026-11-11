@@ -20,8 +20,10 @@
      12,13  device address bound as the slot's index buffer (0: none)                                CPU
      14     bytes from that address to the end of the index buffer                                   CPU
      15     log2 of the index size (1 uint16, 2 uint32, 0 none)                                      CPU
-   A write zeroes the counts of the form it does not use. The execute issues one draw per slot: the indexed form when
-   word 15 is non-zero, else the plain form (both, until 11 Nov 2026: Xe2 ANV loads each indirect parameter with its
+   A write zeroes the counts of the form it does not use. The execute draws a run of consecutive slots that replay the
+   same state as one vkCmdDraw*Indirect with drawCount = the run's length and stride 64 (multiDrawIndirect; ~0.03 us per
+   slot, as direct draws) and every other slot alone (~2 us): the indexed form when word 15 is non-zero, else the plain
+   form (both, until 11 Nov 2026: Xe2 ANV loads each indirect parameter with its
    own MI_LOAD_REGISTER_MEM, ~2.2 us per indirect draw from VRAM and ~5 us from system RAM, user/tests/metal/
    mtl_icb_cost.m). Topology and index buffer are bound by the CPU (core Vulkan takes neither from GPU memory), so a GPU
    draw with another primitive type than word 11, another index type than word 15, an index pointer outside
