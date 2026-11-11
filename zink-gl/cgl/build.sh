@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# build.sh ARCH OUTDIR: libcglzink.dylib, and for the tests the stand-in EGL and layertest (test/run.sh runs them).
+# build.sh ARCH OUTDIR: libcglzink.dylib, libcglzink-boot.dylib, IntelXeGL (the LaunchAgents' helper), and for the tests the stand-in EGL and layertest (test/run.sh runs them).
 # ARCH x86_64 for the B580 machine; arm64 for tests on an Apple silicon Mac. Builds on the build Mac (needs the SDK:
 # gen/gen.py reads gliDispatch.h), not on the B580 machine.
 set -euo pipefail
@@ -14,8 +14,10 @@ clang "${F[@]}" -dynamiclib "$D/cglzink.m" -framework OpenGL -framework AppKit -
 # the "every OpenGL application" switch's boot library: C, CoreFoundation and OpenGL only (it is in every process)
 clang "${F[@]}" -dynamiclib "$D/boot.c" -framework CoreFoundation -framework OpenGL \
     -install_name /Library/IntelXe/GL/libcglzink-boot.dylib -o "$O/libcglzink-boot.dylib"
+# what the LaunchAgents run (macOS names it in its "can run in the background" notice)
+clang "${F[@]}" "$D/intelxegl.c" -o "$O/IntelXeGL"
 clang "${F[@]}" -w -dynamiclib "$D/test/fakeegl.c" -framework OpenGL -o "$O/libfakeegl.dylib"
 clang "${F[@]}" -w "$D/test/layertest.m" -framework OpenGL -framework AppKit -framework QuartzCore -framework IOSurface -o "$O/layertest"
 # ad-hoc signatures: the x86_64 linker does not sign by itself, and install.sh refuses unsigned libraries
-for f in "$O/libcglzink.dylib" "$O/libcglzink-boot.dylib" "$O/libfakeegl.dylib" "$O/layertest"; do codesign -s - -f "$f" 2>/dev/null; done
+for f in "$O/libcglzink.dylib" "$O/libcglzink-boot.dylib" "$O/IntelXeGL" "$O/libfakeegl.dylib" "$O/layertest"; do codesign -s - -f "$f" 2>/dev/null; done
 for f in "$O/libcglzink.dylib" "$O/libcglzink-boot.dylib"; do lipo -archs "$f"; done

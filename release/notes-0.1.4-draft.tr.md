@@ -309,8 +309,8 @@ neden kapalı olduğu Bilinen sorunlar'da.
 - **Zink üzerinden yerel OpenGL uygulamaları** (`cglzink-app.sh`) deneysel: IOSurface'e çizim (tarayıcılar) ve CGL
   pbuffer'ları henüz desteklenmiyor.
 - **Bütün OpenGL uygulamaları için anahtar** (`install.sh --global-gl on`) deneysel ve varsayılan olarak kapalı; B580'de
-  yalnız birkaç uygulamayla çalıştı. Açınca macOS "sh arka planda çalışabilir" bildirimi gösteriyor (LaunchAgent
-  değişkeni koymadan önce iki kütüphanenin de yerinde olduğuna bakıyor). Oturumun başlattığı her uygulamaya bir kütüphane ekliyor: `/Library/IntelXe/GL`'yi elle
+  yalnız birkaç uygulamayla çalıştı. macOS, LaunchAgent'ını Giriş Öğeleri'nde "IntelXeGL" olarak gösteriyor (değişkeni
+  yalnız iki kütüphane de yerindeyken koyan küçük bir yardımcı). Oturumun başlattığı her uygulamaya bir kütüphane ekliyor: `/Library/IntelXe/GL`'yi elle
   silmeden önce kapatın (`sudo ./install.sh --global-gl off`), çünkü eklenen kütüphane eksikse hiçbir uygulama
   açılmaz.
 - Giriş ekranında ve kilit ekranında macOS parola alanının imlecini ve cam malzemesini her karede yeniden çiziyor; 180

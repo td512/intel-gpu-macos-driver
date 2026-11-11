@@ -37,7 +37,8 @@ VL=/usr/local/lib VLIB=libvulkan.1.4.363.dylib
 ICDD=/usr/local/share/vulkan/icd.d ICD=intel_icd.x86_64.json
 LA=/Library/LaunchAgents/io.github.yusufklncc.intelxe.zink-gl.plist
 LIBS="libEGL.1.dylib libgallium-27.0.0-devel.dylib libGLzink.dylib libglfw.3.dylib"
-OPTLIBS="libcglzink.dylib libcglzink-boot.dylib"   # installed when the package has them
+OPTLIBS="libcglzink.dylib libcglzink-boot.dylib IntelXeGL"   # installed when the package has them
+HELPER=$GL/IntelXeGL   # what the LaunchAgents run, so macOS names it (not "sh" or "launchctl") in its notices
 LAGL=/Library/LaunchAgents/io.github.yusufklncc.intelxe.cglzink-global.plist
 BOOT=$GL/libcglzink-boot.dylib
 JOPTS="-Dorg.lwjgl.glfw.libname=$GL/libglfw.3.dylib -Dorg.lwjgl.opengl.libname=$GL/libGLzink.dylib"
@@ -76,7 +77,7 @@ global() {
 <dict>
 	<key>Label</key><string>io.github.yusufklncc.intelxe.zink-gl</string>
 	<key>ProgramArguments</key>
-	<array><string>/bin/launchctl</string><string>setenv</string><string>JAVA_TOOL_OPTIONS</string><string>$JOPTS</string></array>
+	<array>$(if [ -x $HELPER ]; then echo "<string>$HELPER</string>"; else echo "<string>/bin/launchctl</string>"; fi)<string>setenv</string><string>JAVA_TOOL_OPTIONS</string><string>$JOPTS</string></array>
 	<key>RunAtLoad</key><true/>
 </dict>
 </plist>
@@ -111,7 +112,8 @@ global_gl() {
 <dict>
 	<key>Label</key><string>io.github.yusufklncc.intelxe.cglzink-global</string>
 	<key>ProgramArguments</key>
-	<array><string>/bin/sh</string><string>-c</string><string>[ -f $BOOT ] &amp;&amp; [ -f $GL/libcglzink.dylib ] &amp;&amp; exec /bin/launchctl setenv DYLD_INSERT_LIBRARIES $BOOT</string></array>
+$(if [ -x $HELPER ]; then echo "	<array><string>$HELPER</string><string>setenv</string><string>DYLD_INSERT_LIBRARIES</string><string>$BOOT</string><string>$BOOT</string><string>$GL/libcglzink.dylib</string></array>"
+  else echo "	<array><string>/bin/sh</string><string>-c</string><string>[ -f $BOOT ] &amp;&amp; [ -f $GL/libcglzink.dylib ] &amp;&amp; exec /bin/launchctl setenv DYLD_INSERT_LIBRARIES $BOOT</string></array>"; fi)
 	<key>RunAtLoad</key><true/>
 </dict>
 </plist>
@@ -166,6 +168,11 @@ install_all() {
     install -o root -g wheel -m 755 "$H/vulkan/$VLIB" $VL/$VLIB
     ln -sf $VLIB $VL/libvulkan.1.dylib; ln -sf libvulkan.1.dylib $VL/libvulkan.dylib
     install -o root -g wheel -m 644 "$H/vulkan/icd.d/$ICD" $ICDD/$ICD
+    # switches turned on by an older package: their LaunchAgents run the helper from now on
+    if [ -x $HELPER ]; then
+        [ -e $LA ] && ! grep -q "$HELPER" $LA && global on >/dev/null || true
+        [ -e $LAGL ] && ! grep -q "$HELPER" $LAGL && global_gl on >/dev/null || true
+    fi
     status
     echo "installed. Try: $0 --test; then sudo $0 --global on (all LWJGL 3 apps) or ./zink-gl-version.sh (one game)."
 }

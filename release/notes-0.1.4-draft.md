@@ -296,8 +296,8 @@ From 0.1.2 or earlier, follow the guide's upgrade section first.
 - **Native OpenGL apps through Zink** (`cglzink-app.sh`) are experimental: no IOSurface drawing (browsers) or CGL
   pbuffers yet.
 - **The switch for every OpenGL application** (`install.sh --global-gl on`) is experimental and off by default; it ran on
-  the B580 with a few applications only. Turning it on makes macOS report that "sh" can run in the background (the
-  LaunchAgent checks that both libraries are there before it sets the variable). It inserts a library into every application the session starts: turn it off
+  the B580 with a few applications only. macOS names its LaunchAgent "IntelXeGL" in Login Items (a small helper that sets
+  the variable only while both libraries are there). It inserts a library into every application the session starts: turn it off
   (`sudo ./install.sh --global-gl off`) before you delete `/Library/IntelXe/GL` by hand, because a missing inserted
   library stops every application from starting.
 - At the login window and the lock screen macOS redraws the password field's cursor and its glass material for every

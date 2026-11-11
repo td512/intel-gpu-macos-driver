@@ -78,6 +78,7 @@ off first).
 | `bin/zink-gl-selftest` | the `--test` program | `src/egltri.c` |
 | `lib/libcglzink.dylib` | CGL/NSOpenGL contexts through zink (optional) | `cgl/` (`cgl/build.sh x86_64 OUT`) |
 | `lib/libcglzink-boot.dylib` | the experimental switch for every application (`--global-gl`): loads `libcglzink.dylib` where it may (optional) | `cgl/boot.c` (same build) |
+| `lib/IntelXeGL` | what the LaunchAgents of `--global` and `--global-gl` run (`launchctl setenv`, only while the files it is given exist), so macOS names it in Login Items instead of `sh` or `launchctl` (optional) | `cgl/intelxegl.c` (same build) |
 
 `src/mesa-zink.diff` is the difference of the built tree from upstream in everything this build compiles: all of it
 outside `src/intel/`, which a build without Intel drivers (`-Dvulkan-drivers= -Dgallium-drivers=zink -Dtools=`) does not
