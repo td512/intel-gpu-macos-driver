@@ -2464,13 +2464,38 @@ static uint32_t pipeControl(uint32_t *dw, uint32_t n, uint32_t f0, uint32_t f1, 
 // the interrupt is handled and when a syncobj waiter wakes. A job is measured at the queue's next submit when it has
 // completed by then (one job at a time, as mtl_lat split runs them). The CPU reads need the GT awake: run with
 // debug.intelxe.fw_hold=1 (RC6 changes nothing measurable here, 2026-11-09). Writing jobtime restarts the statistics.
+// v2 (per job, 2026-11-13): up to kJtDepth jobs in flight per queue are timed (each has its own 16-byte slot, indexed by
+// seqno), the exec ioctl's timestamp is kept per job (it was one global, overwritten by any client's exec), and the
+// interrupt and waiter stages take the first interrupt / syncobj wake after the job's end flush from small rings of
+// recent timestamps (they were the latest ones at collection time, from any job). Each stage also has a histogram, and
+// jobs that went to the worker instead of straight to the ring are counted by reason.
 int gJobTime = 0;
+static constexpr uint32_t kJtDepth = 8, kJtRing = 128, kJtBuckets = 13, kJtStages = 8;
 static IOBufferMemoryDescriptor *gJtMem;
 static uint32_t gJtG;
-struct JtSlot { uint32_t seq, gen, execTs, subTs; bool armed; };
-static JtSlot *gJtSlots;
-static volatile uint32_t gJtEngBase, gJtExecTs, gJtIrqTs, gJtWakeTs;
-static uint64_t gJtN, gJtSkipped, gJtSum[7], gJtMax[7];
+struct JtSlot { uint32_t seq, gen, execTs, subTs; uint8_t via, proc, cls; bool armed; };
+// v3 (2026-11-14): per process and engine class (who owns the long batches), and overlap of batches on the same engine
+// class from different queues (time-slicing: a batch's wall time then includes other contexts' turns).
+static constexpr uint32_t kJtProcs = 24, kJtIv = 64;
+struct JtProc { int pid; uint16_t cls; char name[16]; uint64_t jobs, worker, batchSum, batchMax, startSum, long8, ovJobs, ovTicks; };
+static JtProc gJtProc[kJtProcs];
+static uint32_t gJtNProc, gJtProcFull;
+struct JtIv { uint32_t b, c, slot; uint16_t cls; bool used; };   // finished jobs' batch intervals (engine clock)
+static JtIv gJtIv[kJtIv];
+static uint32_t gJtIvPos;
+static uint64_t gJtOvJobs, gJtOvTicks;
+struct JtPend { uint32_t seq, execTs; uint8_t via; };   // noted in queueExec, taken at submit
+static JtSlot *gJtSlots;      // kSlots * kJtDepth
+static JtPend *gJtPend;       // kSlots * kJtDepth
+static volatile uint32_t gJtEngBase;
+static volatile uint32_t gJtIrqRing[kJtRing], gJtWakeRing[kJtRing], gJtIrqPos, gJtWakePos;
+// stages: 0 exec->guc (direct), 1 exec->guc (worker), 2 guc->ring start, 3 invalidate, 4 batch, 5 end flush,
+// 6 end flush->first interrupt, 7 interrupt->first syncobj wake
+static uint64_t gJtN, gJtSkipped, gJtOverrun, gJtNoIrq, gJtSum[kJtStages], gJtMax[kJtStages], gJtCnt[kJtStages];
+static uint32_t gJtHist[kJtStages][kJtBuckets];
+// worker reasons: 0 direct, 1 in-fences of another queue, 2 jobs already waiting in this queue, 3 TDR/reset/suspend,
+// 4 the ring had no room (queueEmit refused)
+static uint64_t gJtVia[5];
 static uint32_t jtNow(uint32_t base) { return gDev->mmio(base + 0x358); }   // RING_TIMESTAMP (low dword)
 static uint32_t jtTicksToNs(uint32_t t) { return gRefClock ? (uint32_t)((uint64_t)t * 1000000000ull / gRefClock) : 0; }   // gRefClock: Hz
 static void jtSrm(uint32_t *dw, uint32_t &n, uint32_t addr) {
@@ -2479,60 +2504,162 @@ static void jtSrm(uint32_t *dw, uint32_t &n, uint32_t addr) {
 	dw[n++] = addr;
 	dw[n++] = 0;
 }
-// at the queue's next submit (gSchedLock): the previous job's timestamps, if it has completed
-static void jtCollect(XeQueue *q) {
-	JtSlot &s = gJtSlots[q->slot];
-	if (!s.armed) return;
+static void jtAdd(uint32_t st, uint32_t ticks) {
+	const uint32_t us = jtTicksToNs(ticks) / 1000;
+	uint32_t b = 0;   // <8 us, then one bucket per doubling up to 16 ms, then >= 16 ms
+	for (uint32_t v = us >> 3; v && b < kJtBuckets - 1; v >>= 1) b++;
+	gJtHist[st][b]++; gJtSum[st] += ticks; gJtCnt[st]++;
+	if (ticks > gJtMax[st]) gJtMax[st] = ticks;
+}
+// The first timestamp in ring at or after ts (the smallest forward distance), as that distance.
+static bool jtFirstAfter(const volatile uint32_t *ring, uint32_t ts, uint32_t *dist) {
+	bool found = false;
+	uint32_t best = 0;
+	for (uint32_t i = 0; i < kJtRing; i++) {
+		const uint32_t r = ring[i];
+		if (!r) continue;
+		const uint32_t d = r - ts;
+		if (d > 0x7fffffff) continue;   // before ts
+		if (!found || d < best) { best = d; found = true; }
+	}
+	*dist = best;
+	return found;
+}
+static void jtRingPut(volatile uint32_t *ring, volatile uint32_t *pos) {
+	const uint32_t p = (uint32_t)OSIncrementAtomic(reinterpret_cast<volatile SInt32 *>(pos)) % kJtRing;
+	ring[p] = jtNow(gJtEngBase);
+}
+// gSchedLock: entry i of slot's timed jobs, if its job has completed (false while it still runs)
+static bool jtCollectEntry(uint32_t slot, uint32_t i) {
+	JtSlot &s = gJtSlots[slot * kJtDepth + i];
+	if (!s.armed) return true;
+	if (s.gen != gSlotGen[slot]) { s.armed = false; gJtSkipped++; return true; }   // the slot was reused
+	if ((int32_t)(seqnoOf(slot) - s.seq) < 0) return false;
 	s.armed = false;
-	if (s.gen != gSlotGen[q->slot] || (int32_t)(seqnoOf(q->slot) - s.seq) < 0) { gJtSkipped++; return; }
-	auto *t = static_cast<volatile uint32_t *>(gJtMem->getBytesNoCopy()) + q->slot * 4;
+	auto *t = static_cast<volatile uint32_t *>(gJtMem->getBytesNoCopy()) + (slot * kJtDepth + i) * 4;
 	flushRange(const_cast<uint32_t *>(t), 16);
-	const uint32_t a = t[0], b = t[1], c = t[2], d = t[3], irq = gJtIrqTs, wake = gJtWakeTs;
-	// exec ioctl -> GuC told, -> ring start, invalidation, batch, end flush, -> interrupt handled, -> waiter awake
-	const uint32_t v[7] = { s.subTs - s.execTs, a - s.subTs, b - a, c - b, d - c, irq - d, wake - irq };
-	for (uint32_t i = 0; i < 7; i++) if (v[i] > 0x7fffffff) { gJtSkipped++; return; }   // out of order: not this job's
+	const uint32_t a = t[0], b = t[1], c = t[2], d = t[3];
+	// GuC told -> ring start, invalidation, batch, end flush (all in the engine's clock, per job)
+	const uint32_t v[4] = { a - s.subTs, b - a, c - b, d - c };
+	for (uint32_t k = 0; k < 4; k++) if (v[k] > 0x7fffffff) { gJtSkipped++; return true; }   // out of order: not this job's
 	gJtN++;
-	for (uint32_t i = 0; i < 7; i++) { gJtSum[i] += v[i]; if (v[i] > gJtMax[i]) gJtMax[i] = v[i]; }
+	if (s.execTs && s.subTs - s.execTs <= 0x7fffffff) jtAdd(s.via ? 1 : 0, s.subTs - s.execTs);
+	for (uint32_t k = 0; k < 4; k++) jtAdd(2 + k, v[k]);
+	// v3: overlap with recent batches on the same engine class from other queues, then per-process totals
+	uint64_t ov = 0;
+	for (uint32_t k = 0; k < kJtIv; k++) {
+		const JtIv &o = gJtIv[k];
+		if (!o.used || o.slot == slot || o.cls != s.cls) continue;
+		const uint32_t lo = (int32_t)(o.b - b) > 0 ? o.b : b, hi = (int32_t)(o.c - c) < 0 ? o.c : c;
+		if ((int32_t)(hi - lo) > 0) ov += hi - lo;
+	}
+	if (ov > v[2]) ov = v[2];   // several overlapping neighbours: at most the batch itself
+	if (ov) { gJtOvJobs++; gJtOvTicks += ov; }
+	gJtIv[gJtIvPos++ % kJtIv] = { b, c, slot, s.cls, true };
+	if (s.proc < kJtProcs) {
+		JtProc &pr = gJtProc[s.proc];
+		pr.jobs++; if (s.via) pr.worker++;
+		pr.batchSum += v[2]; if (v[2] > pr.batchMax) pr.batchMax = v[2];
+		pr.startSum += v[0];
+		if (jtTicksToNs(v[2]) >= 8000000) pr.long8++;
+		if (ov) { pr.ovJobs++; pr.ovTicks += ov; }
+	}
+	uint32_t irq, wake;
+	if (jtFirstAfter(gJtIrqRing, d, &irq)) {
+		jtAdd(6, irq);
+		if (jtFirstAfter(gJtWakeRing, d + irq, &wake)) jtAdd(7, wake);
+	} else {
+		gJtNoIrq++;
+	}
+	return true;
+}
+// queueExec (gSchedLock): job seq of q came from an exec ioctl at execTs; via as gJtVia (counted when count)
+static void jtNote(const XeQueue *q, uint32_t seq, uint32_t execTs, uint8_t via, bool count) {
+	if (!gJobTime || !gJtPend || q->eng->gt) return;
+	JtPend &p = gJtPend[q->slot * kJtDepth + seq % kJtDepth];
+	p.seq = seq; p.execTs = execTs; p.via = via;
+	if (count) gJtVia[via]++;
 }
 int xeJobTimeSet(int on) {
 	if (!gDev || !gDev->up) return ENXIO;
 	if (on && !gJtMem) {
-		IOBufferMemoryDescriptor *m = gDev->allocSys(kSlots * 16, false);
+		const uint32_t bytes = kSlots * kJtDepth * 16;
+		IOBufferMemoryDescriptor *m = gDev->allocSys(bytes, false);
 		uint32_t g = 0;
 		IOLockLock(gResLock);
-		int err = m ? ggttRangeAlloc(kSlots * 16, 0x1000, false, &g) : ENOMEM;
+		int err = m ? ggttRangeAlloc(bytes, 0x1000, false, &g) : ENOMEM;
 		IOLockUnlock(gResLock);
 		if (!err) err = gDev->ggttMapMem(m, g);
-		JtSlot *sl = err ? nullptr : static_cast<JtSlot *>(IOMalloc(kSlots * sizeof(JtSlot)));
-		if (sl) bzero(sl, kSlots * sizeof(JtSlot));
-		if (err || !sl) { OSSafeReleaseNULL(m); return err ? err : ENOMEM; }
-		gJtSlots = sl; gJtG = g;
+		JtSlot *sl = err ? nullptr : static_cast<JtSlot *>(IOMalloc(kSlots * kJtDepth * sizeof(JtSlot)));
+		JtPend *pe = sl ? static_cast<JtPend *>(IOMalloc(kSlots * kJtDepth * sizeof(JtPend))) : nullptr;
+		if (err || !sl || !pe) {
+			if (sl) IOFree(sl, kSlots * kJtDepth * sizeof(JtSlot));
+			OSSafeReleaseNULL(m);   // (a failed GGTT map leaves the range allocated, as v1 did)
+			return err ? err : ENOMEM;
+		}
+		bzero(sl, kSlots * kJtDepth * sizeof(JtSlot)); bzero(pe, kSlots * kJtDepth * sizeof(JtPend));
+		gJtSlots = sl; gJtPend = pe; gJtG = g;
 		__asm__ volatile("" : : : "memory");
 		gJtMem = m;
 	}
 	IOLockLock(gSchedLock);
 	gJobTime = on ? 1 : 0;
-	gJtN = gJtSkipped = 0;
-	bzero(gJtSum, sizeof gJtSum); bzero(gJtMax, sizeof gJtMax);
-	if (gJtSlots) for (uint32_t i = 0; i < kSlots; i++) gJtSlots[i].armed = false;
+	gJtN = gJtSkipped = gJtOverrun = gJtNoIrq = 0;
+	bzero(gJtSum, sizeof gJtSum); bzero(gJtMax, sizeof gJtMax); bzero(gJtCnt, sizeof gJtCnt); bzero(gJtHist, sizeof gJtHist);
+	bzero(gJtVia, sizeof gJtVia);
+	bzero(gJtProc, sizeof gJtProc); gJtNProc = gJtProcFull = 0; bzero(gJtIv, sizeof gJtIv); gJtIvPos = 0; gJtOvJobs = gJtOvTicks = 0;
+	for (uint32_t i = 0; i < kJtRing; i++) gJtIrqRing[i] = gJtWakeRing[i] = 0;
+	if (gJtSlots) for (uint32_t i = 0; i < kSlots * kJtDepth; i++) gJtSlots[i].armed = false;
+	if (gJtPend) bzero(gJtPend, kSlots * kJtDepth * sizeof(JtPend));
 	IOLockUnlock(gSchedLock);
 	return 0;
 }
 int xeJobTimeString(char *b, size_t len, int fwHold) {
-	static const char *const nm[7] = { "exec->guc", "guc->ring start", "invalidate", "batch", "end flush", "->irq handled", "irq->waiter" };
+	static const char *const nm[kJtStages] = { "exec->guc (direct)", "exec->guc (worker)", "guc->ring start", "invalidate",
+		"batch", "end flush", "end->first irq", "irq->first wake" };
+	static const char *const via[5] = { "direct", "in-fences", "queue backlog", "tdr/reset/suspend", "ring full" };
 	IOLockLock(gSchedLock);
-	int k = snprintf(b, len, "jobtime %d, refclk %u Hz, jobs %llu, skipped %llu%s; average (max) us:", gJobTime, gRefClock,
-		gJtN, gJtSkipped, fwHold ? "" : " (fw_hold is 0: CPU-side reads may be wrong)");
-	for (uint32_t i = 0; i < 7 && k > 0 && (size_t)k < len; i++) {
-		const uint64_t avg = gJtN ? jtTicksToNs((uint32_t)(gJtSum[i] / gJtN)) : 0, mx = jtTicksToNs((uint32_t)gJtMax[i]);
-		k += snprintf(b + k, len - (size_t)k, " %s %llu.%llu (%llu.%llu)", nm[i], avg / 1000, avg % 1000 / 100, mx / 1000, mx % 1000 / 100);
+	if (gJtSlots && gJtMem)   // jobs that completed since their queue last submitted
+		for (uint32_t s = 0; s < kSlots; s++)
+			for (uint32_t i = 0; i < kJtDepth; i++) (void)jtCollectEntry(s, i);
+	int k = snprintf(b, len, "jobtime %d (v3), refclk %u Hz, jobs %llu, skipped %llu, overrun %llu, no irq found %llu%s\n",
+		gJobTime, gRefClock, gJtN, gJtSkipped, gJtOverrun, gJtNoIrq, fwHold ? "" : " (fw_hold is 0: CPU-side reads may be wrong)");
+	if (k > 0 && (size_t)k < len) k += snprintf(b + k, len - (size_t)k, "submitted:");
+	for (uint32_t i = 0; i < 5 && k > 0 && (size_t)k < len; i++) k += snprintf(b + k, len - (size_t)k, " %s %llu", via[i], gJtVia[i]);
+	if (k > 0 && (size_t)k < len)
+		k += snprintf(b + k, len - (size_t)k, "\nstage: n avg max us | histogram <8 <16 <32 <64 <128 <256 <512 <1k <2k <4k <8k <16k >=16k us\n");
+	for (uint32_t i = 0; i < kJtStages && k > 0 && (size_t)k < len; i++) {
+		const uint64_t avg = gJtCnt[i] ? jtTicksToNs((uint32_t)(gJtSum[i] / gJtCnt[i])) : 0, mx = jtTicksToNs((uint32_t)gJtMax[i]);
+		k += snprintf(b + k, len - (size_t)k, "%s: %llu %llu.%llu %llu.%llu |", nm[i], gJtCnt[i], avg / 1000, avg % 1000 / 100,
+			mx / 1000, mx % 1000 / 100);
+		for (uint32_t h = 0; h < kJtBuckets && k > 0 && (size_t)k < len; h++) k += snprintf(b + k, len - (size_t)k, " %u", gJtHist[i][h]);
+		if (k > 0 && (size_t)k < len) k += snprintf(b + k, len - (size_t)k, "\n");
+	}
+	if (k > 0 && (size_t)k < len)
+		k += snprintf(b + k, len - (size_t)k, "overlap on the same engine class: %llu jobs, %llu us in all\n"
+			"by process (class: 0 render, 1 copy, 2 video, 3 video enhance, 4 compute), by batch time; %u not tracked (table full):\n"
+			"pid name class: jobs worker | batch avg max total us, >=8ms | guc->start avg us | overlapped jobs, us\n",
+			gJtOvJobs, (unsigned long long)jtTicksToNs((uint32_t)(gJtOvTicks > 0xffffffffull ? 0xffffffffull : gJtOvTicks)) / 1000, gJtProcFull);
+	bool done[kJtProcs] = {};
+	for (uint32_t r = 0; r < gJtNProc && k > 0 && (size_t)k < len; r++) {
+		int best = -1;
+		for (uint32_t i = 0; i < gJtNProc; i++) if (!done[i] && gJtProc[i].jobs && (best < 0 || gJtProc[i].batchSum > gJtProc[best].batchSum)) best = (int)i;
+		if (best < 0) break;
+		done[best] = true;
+		const JtProc &pr = gJtProc[best];
+		auto us = [](uint64_t t) -> unsigned long long { return (unsigned long long)(t * 1000000ull / (gRefClock ? gRefClock : 1)); };
+		k += snprintf(b + k, len - (size_t)k, "%d %s %u: %llu %llu | %llu %llu %llu, %llu | %llu | %llu, %llu\n", pr.pid, pr.name, pr.cls,
+			pr.jobs, pr.worker, us(pr.batchSum / pr.jobs), us(pr.batchMax), us(pr.batchSum), pr.long8, us(pr.startSum / pr.jobs),
+			pr.ovJobs, us(pr.ovTicks));
 	}
 	IOLockUnlock(gSchedLock);
 	return k;
 }
 
-// The job-timing slot of q, 0 if the job is not timed (job timing: render GT only).
-static uint32_t jobTimeAddr(const XeQueue *q) { return gJobTime && gJtMem && !q->eng->gt ? gJtG + q->slot * 16 : 0; }
+// The job-timing slot of job seq of q, 0 if the job is not timed (job timing: render GT only).
+static uint32_t jobTimeAddr(const XeQueue *q, uint32_t seq) {
+	return gJobTime && gJtMem && !q->eng->gt ? gJtG + (q->slot * kJtDepth + seq % kJtDepth) * 16 : 0;
+}
 
 // A job's commands up to and including the jump to its batch (jobDwords; direct submission puts them in the stub).
 static uint32_t jobPre(const XeQueue *q, uint64_t batch, uint32_t seq, bool flush, uint32_t jt, uint32_t *dw, uint32_t n) {
@@ -2636,7 +2763,7 @@ static uint32_t jobPost(const XeQueue *q, const uint32_t *inl, uint32_t nInl, ui
 
 static uint32_t jobDwords(const XeQueue *q, uint64_t batch, const uint32_t *inl, uint32_t nInl, uint32_t seq, bool flush,
 	uint32_t *dw, const XeUfence *uf = nullptr) {
-	const uint32_t jt = jobTimeAddr(q);
+	const uint32_t jt = jobTimeAddr(q, seq);
 	uint32_t n = jobPre(q, batch, seq, flush, jt, dw, 0);
 	n = jobPost(q, inl, nInl, seq, jt, dw, n, uf);
 	if (n & 1) dw[n++] = MI_NOOP;
@@ -2663,13 +2790,30 @@ static void watchArm() {
 	thread_call_enter_delayed(gWatchCall, deadline);
 }
 
-// Job timing: job seq goes to the engine now (the previous job's timestamps are collected). gSchedLock.
+// Job timing: job seq goes to the engine now (this queue's completed timed jobs are collected first). gSchedLock.
 static void jtSubmit(XeQueue *q, uint32_t seq) {
 	if (gJobTime && gJtMem && !q->eng->gt) {
-		jtCollect(q);
-		JtSlot &s = gJtSlots[q->slot];
+		for (uint32_t i = 0; i < kJtDepth; i++) (void)jtCollectEntry(q->slot, i);
+		const uint32_t i = seq % kJtDepth;
+		JtSlot &s = gJtSlots[q->slot * kJtDepth + i];
+		if (s.armed) { s.armed = false; gJtOverrun++; }   // the job kJtDepth back still runs: its slot is reused
+		const JtPend &p = gJtPend[q->slot * kJtDepth + i];
+		const bool noted = p.seq == seq;
 		gJtEngBase = q->eng->base;
-		s.seq = seq; s.gen = gSlotGen[q->slot]; s.execTs = gJtExecTs; s.subTs = jtNow(q->eng->base); s.armed = true;
+		s.seq = seq; s.gen = gSlotGen[q->slot]; s.execTs = noted ? p.execTs : 0; s.via = noted ? p.via : 0;
+		s.cls = (uint8_t)q->cls; s.proc = 0xff;
+		for (uint32_t k = 0; k < gJtNProc; k++) if (gJtProc[k].pid == q->pid && gJtProc[k].cls == q->cls) { s.proc = (uint8_t)k; break; }
+		if (s.proc == 0xff) {
+			if (gJtNProc < kJtProcs) {
+				JtProc &pr = gJtProc[gJtNProc];
+				bzero(&pr, sizeof pr); pr.pid = q->pid; pr.cls = q->cls;
+				strlcpy(pr.name, q->kernel ? "kernel" : q->name, sizeof pr.name);
+				s.proc = (uint8_t)gJtNProc++;
+			} else {
+				gJtProcFull++;
+			}
+		}
+		s.subTs = jtNow(q->eng->base); s.armed = true;
 	}
 }
 
@@ -2785,7 +2929,7 @@ static void dsMboxSet(const XeQueue *q, uint32_t v) {
 static void dsStubWrite(const XeQueue *q, uint32_t s, uint64_t batch, bool flush, bool noop) {
 	uint32_t *p = dsCpu(dsStubG(q, s));
 	uint32_t n = 0;
-	if (!noop) n = jobPre(q, batch, s, flush, jobTimeAddr(q), p, 0);
+	if (!noop) n = jobPre(q, batch, s, flush, jobTimeAddr(q, s), p, 0);
 	if (noop || !batch) p[n++] = MI_BATCH_BUFFER_END;
 	flushRange(p, n * 4);
 }
@@ -2806,7 +2950,7 @@ static uint32_t dsSlot(const XeQueue *q, uint32_t a, uint32_t *dw) {
 	dw[n++] = MI_INSTR(0x31) | 1;            // MI_BATCH_BUFFER_START, first level, GGTT (privileged, as the ring)
 	dw[n++] = dsStubG(q, a);
 	dw[n++] = 0;
-	n = jobPost(q, nullptr, 0, a, jobTimeAddr(q), dw, n);
+	n = jobPost(q, nullptr, 0, a, jobTimeAddr(q, a), dw, n);
 	if (n & 1) dw[n++] = MI_NOOP;
 	return n;
 }
@@ -3567,7 +3711,7 @@ void xeShutdown() {
 // Called by the interrupt handler after GT interrupts: runs the worker if jobs wait or frees wait for a TLB completion.
 void xeIrqEvent(bool gtEvent) {
 	if (!gtEvent) return;
-	if (gJobTime && gJtEngBase) gJtIrqTs = jtNow(gJtEngBase);
+	if (gJobTime && gJtEngBase) jtRingPut(gJtIrqRing, &gJtIrqPos);
 	wakeAll();
 	if (gSchedHead || gNDef) schedKick();
 }
@@ -3741,6 +3885,106 @@ static void dumpBatch(XeVm *vm, uint64_t va, uint16_t cls) {
 		}
 }
 #endif
+
+// ─── batch capture (release builds; 2026-11-14): debug.intelxe.cap_pid=<pid> records the next cap_n batches that
+// process execs, each followed through its MI_BATCH_BUFFER_STARTs (second-level and chained, up to kCapFollow buffers
+// per exec), up to cap_dw dwords per buffer. Read back with debug.intelxe.cap (root only: other processes' commands),
+// binary: per buffer { u32 'XCAP', u32 pid, u32 exec#, u32 level, u64 va, u32 ndw, u32 flags (1 unmapped, 2 cut, 4 lost sync) }
+// then ndw dwords. Writing cap_pid restarts the capture.
+int gCapPid = 0, gCapN = 4, gCapDw = 4096;
+static uint8_t *gCapBuf;
+static IOLock *gCapLock;   // execs from several threads of the captured process
+static uint32_t gCapLen, gCapExec;
+static constexpr uint32_t kCapBytes = 1u << 20, kCapFollow = 8;
+static const uint32_t *capVaToCpu(XeVm *vm, uint64_t va, uint32_t *avail) {
+	va &= 0xffffffffffffull;   // canonical -> 48 bits
+	for (uint32_t i = 0; i < vm->nBinds; i++) {
+		const XeBinding &b = vm->binds[i];
+		if (!b.bo || va < b.addr || va >= b.addr + b.range) continue;
+		const uint64_t off = b.off + (va - b.addr);
+		*avail = (uint32_t)(0x1000 - (off & 0xfff)) / 4;
+		if (b.bo->vram) return boVisible(b.bo) ? reinterpret_cast<const uint32_t *>(const_cast<uint64_t *>(vram64(boDpa(b.bo, off)))) : nullptr;
+		if (!b.bo->sys) return nullptr;
+		flushRange(static_cast<uint8_t *>(b.bo->sys->getBytesNoCopy()) + off, 0x1000 - (off & 0xfff));
+		return reinterpret_cast<const uint32_t *>(static_cast<uint8_t *>(b.bo->sys->getBytesNoCopy()) + off);
+	}
+	return nullptr;
+}
+// The length in dwords of the command at dw (Gen12+ rules: MI opcodes below 0x10 and 3D single-dword commands are one
+// dword, the rest carry length - 2 in bits 7:0), 0 for an unknown type.
+static uint32_t capCmdLen(uint32_t dw) {
+	const uint32_t type = dw >> 29;
+	if (type == 0) return ((dw >> 23) & 0x3f) < 0x10 ? 1 : (dw & 0xff) + 2;
+	if (type == 3) return ((dw >> 27) & 3) == 1 ? 1 : (dw & 0xff) + 2;
+	if (type == 2) return (dw & 0xff) + 2;
+	if (type == 5) return (dw & 0xff) + 2;   // Xe2: RESOURCE_BARRIER and the other type-5 commands
+	return 0;
+}
+static void capBuffer(XeVm *vm, uint64_t va, uint32_t level, uint64_t *follow, uint32_t *nFollow) {
+	const uint32_t maxDw = gCapDw < 64 ? 64 : gCapDw > 65536 ? 65536 : (uint32_t)gCapDw;
+	if (gCapLen + 32 + 64 * 4 > kCapBytes) return;
+	uint32_t *hdr = reinterpret_cast<uint32_t *>(gCapBuf + gCapLen);
+	uint32_t *out = hdr + 8, n = 0, flags = 0, pos = 0, next = 0;   // next: the dword index of the next command header
+	const uint32_t room = (kCapBytes - gCapLen - 32) / 4;
+	bool end = false, sync = true;   // sync: command boundaries still known (BB_START / BB_END are only seen while so)
+	while (n < maxDw && n < room && !end) {
+		uint32_t avail = 0;
+		const uint32_t *p = capVaToCpu(vm, va + (uint64_t)n * 4, &avail);
+		if (!p) { flags |= 1; break; }
+		for (uint32_t i = 0; i < avail && n < maxDw && n < room; i++, n++) {
+			const uint32_t dw = p[i];
+			out[n] = dw;
+			if (sync && n == next) {   // a command header
+				const uint32_t len = capCmdLen(dw);
+				if (!len) { sync = false; flags |= 4; continue; }   // unknown: keep the raw dwords, stop interpreting
+				if (dw >> 23 == 0x0a) { end = true; n++; break; }   // MI_BATCH_BUFFER_END
+				next = n + len;
+				pos = n;
+			}
+			if (sync && (out[pos] >> 23) == 0x31 && n == pos + 2 && *nFollow < kCapFollow) {   // MI_BATCH_BUFFER_START: address
+				follow[(*nFollow)++] = ((uint64_t)(out[pos + 2] & 0xffff) << 32 | (out[pos + 1] & ~3u)) | (uint64_t)(level + 1) << 56;
+				if (!(out[pos] & (1u << 22))) { end = true; n++; break; }   // chained (not second level): this buffer ends here
+			}
+		}
+	}
+	if (n >= maxDw && !end) flags |= 2;
+	hdr[0] = 0x50414358; hdr[1] = (uint32_t)gCapPid; hdr[2] = gCapExec; hdr[3] = level;
+	hdr[4] = (uint32_t)va; hdr[5] = (uint32_t)(va >> 32); hdr[6] = n; hdr[7] = flags;
+	gCapLen += 32 + n * 4;
+}
+// exec ioctl, the client's lock held: the batch at va of an exec by pid
+static void capExec(XeVm *vm, int pid, uint64_t va) {
+	if (!gCapPid || pid != gCapPid || !gCapBuf || !gCapLock || gCapN <= 0) return;
+	IOLockLock(gCapLock);
+	if (gCapN <= 0) { IOLockUnlock(gCapLock); return; }
+	uint64_t follow[kCapFollow]; uint32_t nFollow = 0;
+	capBuffer(vm, va, 0, follow, &nFollow);
+	for (uint32_t i = 0; i < nFollow; i++) {
+		const uint32_t lvl = (uint32_t)(follow[i] >> 56);
+		capBuffer(vm, follow[i] & 0x00ffffffffffffffull, lvl, follow, &nFollow);
+	}
+	gCapExec++;
+	gCapN--;
+	IOLockUnlock(gCapLock);
+}
+int xeCapSetPid(int pid) {
+	if (pid && !gCapLock && !(gCapLock = IOLockAlloc())) return ENOMEM;
+	if (pid && !gCapBuf) {
+		gCapBuf = static_cast<uint8_t *>(IOMalloc(kCapBytes));
+		if (!gCapBuf) return ENOMEM;
+	}
+	if (gCapLock) IOLockLock(gCapLock);
+	gCapLen = 0; gCapExec = 0; gCapPid = pid;
+	if (gCapLock) IOLockUnlock(gCapLock);
+	return 0;
+}
+int xeCapRead(void *req) {
+	if (!gCapBuf || !gCapLock) return SYSCTL_OUT(static_cast<struct sysctl_req *>(req), "", 0);
+	IOLockLock(gCapLock);
+	const int err = SYSCTL_OUT(static_cast<struct sysctl_req *>(req), gCapBuf, gCapLen);
+	IOLockUnlock(gCapLock);
+	return err;
+}
 
 // ─── the migrate VM (xe_migrate.c): a kernel VM on the copy engine whose page tables map all of VRAM once at bring-up,
 // identity-style with 1 GB pages at kIdentVa + DPA (xe_migrate_prepare_vm / xe_migrate_program_identity), so a clear
@@ -5110,7 +5354,8 @@ static constexpr uint32_t kMaxJobsPerQueue = 1000;   // XE_MAX_JOB_COUNT_PER_EXE
 
 // uf: the exec's user fence (xe_sched_job_init_user_fence), only with a batch: xe_exec_ioctl's path without batch signals
 // the syncs with the queue's last fence (xe_sync_entry_signal), which does nothing for an exec's user fence.
-static int queueExec(XeQueue *q, uint64_t batch, const DepList &deps, XeFence *out, const XeUfence &uf = XeUfence{}) {
+static int queueExec(XeQueue *q, uint64_t batch, const DepList &deps, XeFence *out, const XeUfence &uf = XeUfence{},
+	uint32_t execTs = 0) {
 	XeJob *j = nullptr;
 	if (batch || deps.n) {
 		const uint32_t cap = deps.n;
@@ -5130,6 +5375,7 @@ static int queueExec(XeQueue *q, uint64_t batch, const DepList &deps, XeFence *o
 	// FIFO stays empty: the armed slot's seqno is the next one handed out); so does one with a user fence, whose store
 	// the armed slot (jobPost written when it was armed) does not have
 	if (q->dsArmed && j && (deps.n || j->uf.used || q->tdr || gResetting || gSuspended)) dsExit(q, &gStats.dsOtherExits);
+	if (j) jtNote(q, q->seqno + 1, execTs, 0, false);   // job timing: before queueEmit, which submits a direct job at once
 	if (q->banned || q->closed || gWedged) {
 		err = ECANCELED;
 	} else if (j && q->jobCount >= kMaxJobsPerQueue) {
@@ -5139,8 +5385,12 @@ static int queueExec(XeQueue *q, uint64_t batch, const DepList &deps, XeFence *o
 	} else if (!q->jobHead && !deps.n && !q->tdr && !gResetting && !gSuspended && queueEmit(q, batch, q->seqno + 1, &j->uf)) {
 		*out = {0, q->slot, q->gen, ++q->seqno};
 		gStats.jobsDirect++;
+		jtNote(q, q->seqno, execTs, 0, true);
 	} else {
+		// job timing: why this job waits for the worker, in the order the direct path above checks
+		const uint8_t why = q->jobHead ? 2 : deps.n ? 1 : (q->tdr || gResetting || gSuspended) ? 3 : 4;
 		j->seqno = ++q->seqno;
+		jtNote(q, j->seqno, execTs, why, true);
 		q->jobCount++;
 		if (q->jobTail) q->jobTail->next = j;
 		else q->jobHead = j;
@@ -7412,7 +7662,7 @@ static int syncobjWait(XeClientState *c, uint64_t handles, uint64_t points, uint
 		*first = 0;
 		return all && ok == count;
 	});
-	if (!err && gJobTime && gJtEngBase) gJtWakeTs = jtNow(gJtEngBase);
+	if (!err && gJobTime && gJtEngBase) jtRingPut(gJtWakeRing, &gJtWakePos);
 	if (err != ETIME || gone || timeout == end) break;
 	clientQueueReport(c, round);
 	}
@@ -8345,7 +8595,7 @@ static int xeIoctlLocked(XeClientState *c, uint32_t request, uint8_t *buf) {
 			break;
 		}
 		case DRM_IOCTL_XE_EXEC: {
-			if (gJobTime && gJtEngBase) gJtExecTs = jtNow(gJtEngBase);
+			const uint32_t execTs = gJobTime && gJtEngBase ? jtNow(gJtEngBase) : 0;   // job timing: this exec's own stamp
 			auto *x = reinterpret_cast<drm_xe_exec *>(buf);
 			// xe_exec_ioctl: extensions, pad and reserved zero (WAS: not checked)
 			if (x->extensions || x->pad[0] || x->pad[1] || x->pad[2] || x->reserved[0] || x->reserved[1]) return EINVAL;
@@ -8381,13 +8631,14 @@ static int xeIoctlLocked(XeClientState *c, uint32_t request, uint8_t *buf) {
 #if INTELXE_DEBUG
 			if (x->num_batch_buffer && gDumpExec) dumpBatch(q->vm, x->address, q->eng->drmClass);
 #endif
+			if (x->num_batch_buffer && gCapPid) capExec(q->vm, c->pid, x->address);
 			XeFence f;
 			XeUfence uf = {};
 			if (sl.ufence >= 0) {   // xe_sched_job_init_user_fence: addr, and the value in timeline_value
 				uf = {sl.s[sl.ufence].addr, sl.s[sl.ufence].timeline_value, true};
 				if (x->num_batch_buffer) gUfSt.execs++;
 			}
-			if ((err = queueExec(q, x->num_batch_buffer ? x->address : 0, deps, &f, uf))) return err;
+			if ((err = queueExec(q, x->num_batch_buffer ? x->address : 0, deps, &f, uf, execTs))) return err;
 			err = signalSyncsOut(c, sl, f);
 			break;
 		}

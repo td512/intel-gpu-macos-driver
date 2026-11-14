@@ -303,6 +303,8 @@ extern int gVcsSingle;
 extern int gTlbEveryBatch;   // rb7k
 extern int gJobTime;         // debug.intelxe.jobtime (xe_core.cpp)
 int xeJobTimeSet(int on);
+int xeCapSetPid(int pid);
+int xeCapRead(void *req);
 int xeJobTimeString(char *b, size_t len, int fwHold);
 extern int gDirect, gDirectIdleUs;   // debug.intelxe.direct, direct_idle_us (xe_core.cpp, direct submission)
 int xeDirectSet(int on);

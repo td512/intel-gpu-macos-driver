@@ -226,6 +226,22 @@ SYSCTL_PROC(_debug_intelxe, OID_AUTO, vcs, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, vcs_busy, CTLTYPE_STRING | CTLFLAG_RD, nullptr, 1, vcsHandler, "A",
 	"rb7o: video engine busy sampling over 250 ms (root; wakes the media GT while it samples)");
 extern char gG2hLog[4096];
+// debug.intelxe.cap_pid / cap_n / cap_dw / cap: batch capture of one process (xe_core.cpp); root only, as the batches
+// hold another process's commands
+extern int gCapPid, gCapN, gCapDw;
+static int capPidHandler SYSCTL_HANDLER_ARGS {
+	int v = gCapPid, err = sysctl_handle_int(oidp, &v, 0, req);
+	if (err || !req->newptr) return err;
+	return xeCapSetPid(v);
+}
+static int capReadHandler SYSCTL_HANDLER_ARGS {
+	if (req->p && proc_suser(req->p)) return EPERM;
+	return xeCapRead(req);
+}
+SYSCTL_PROC(_debug_intelxe, OID_AUTO, cap_pid, CTLTYPE_INT | CTLFLAG_RW, nullptr, 0, capPidHandler, "I", "batch capture: pid (0 off; restarts)");
+SYSCTL_INT(_debug_intelxe, OID_AUTO, cap_n, CTLFLAG_RW, &gCapN, 0, "batch capture: execs left to record");
+SYSCTL_INT(_debug_intelxe, OID_AUTO, cap_dw, CTLFLAG_RW, &gCapDw, 0, "batch capture: dwords per buffer at most");
+SYSCTL_PROC(_debug_intelxe, OID_AUTO, cap, CTLTYPE_OPAQUE | CTLFLAG_RD, nullptr, 0, capReadHandler, "S", "batch capture (root; binary)");
 #if INTELXE_DEBUG
 // Batch dumps hold other processes' command dwords: debug builds only, and readable by root only (no CTLFLAG_ANYBODY).
 extern char gExecLog[16384];
@@ -539,9 +555,13 @@ static int jobTimeHandler SYSCTL_HANDLER_ARGS {
 }
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, jobtime, CTLTYPE_INT | CTLFLAG_RW, nullptr, 0, jobTimeHandler, "I", "1 = time each render-GT job in GPU timestamps (restarts the statistics)");
 static int jobTimeStatsHandler SYSCTL_HANDLER_ARGS {
-	char buf[640];
-	const int n = gDev ? xeJobTimeString(buf, sizeof buf, gFwHold) : snprintf(buf, sizeof buf, "no device");
-	return SYSCTL_OUT(req, buf, (size_t)(n > 0 && n < (int)sizeof buf - 1 ? n : (int)sizeof buf - 1) + 1);
+	constexpr size_t kLen = 8192;   // v2: per-stage histograms (heap, not the kernel stack)
+	char *buf = static_cast<char *>(IOMalloc(kLen));
+	if (!buf) return ENOMEM;
+	const int n = gDev ? xeJobTimeString(buf, kLen, gFwHold) : snprintf(buf, kLen, "no device");
+	const int err = SYSCTL_OUT(req, buf, (size_t)(n > 0 && n < (int)kLen - 1 ? n : (int)kLen - 1) + 1);
+	IOFree(buf, kLen);
+	return err;
 }
 SYSCTL_PROC(_debug_intelxe, OID_AUTO, jobtime_stats, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_ANYBODY, nullptr, 0, jobTimeStatsHandler, "A", "job timing averages");
 // debug.intelxe.direct / direct_idle_us: direct submission (xe_core.cpp): a low-latency compute queue keeps its context on
@@ -770,6 +790,8 @@ bool IntelXe::start(IOService *provider) {
 	sysctl_register_oid(&sysctl__debug_intelxe_sensors);
 	sysctl_register_oid(&sysctl__debug_intelxe_jobtime);
 	sysctl_register_oid(&sysctl__debug_intelxe_jobtime_stats);
+	sysctl_register_oid(&sysctl__debug_intelxe_cap_pid); sysctl_register_oid(&sysctl__debug_intelxe_cap_n);
+	sysctl_register_oid(&sysctl__debug_intelxe_cap_dw); sysctl_register_oid(&sysctl__debug_intelxe_cap);
 	sysctl_register_oid(&sysctl__debug_intelxe_direct);
 	sysctl_register_oid(&sysctl__debug_intelxe_direct_idle_us);
 	sysctl_register_oid(&sysctl__debug_intelxe_surfvram);
@@ -879,6 +901,8 @@ void IntelXe::stop(IOService *provider) {
 	sysctl_unregister_oid(&sysctl__debug_intelxe_vram);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_sensors);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_jobtime_stats);
+	sysctl_unregister_oid(&sysctl__debug_intelxe_cap_pid); sysctl_unregister_oid(&sysctl__debug_intelxe_cap_n);
+	sysctl_unregister_oid(&sysctl__debug_intelxe_cap_dw); sysctl_unregister_oid(&sysctl__debug_intelxe_cap);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_direct_idle_us);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_direct);
 	sysctl_unregister_oid(&sysctl__debug_intelxe_jobtime);
